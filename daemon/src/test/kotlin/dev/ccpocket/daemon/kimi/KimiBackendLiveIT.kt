@@ -49,9 +49,14 @@ class KimiBackendLiveIT {
     private fun bin(): String = System.getenv("CC_POCKET_KIMI_BIN")
         ?: File(System.getenv("HOME"), ".kimi-code/bin/kimi").path
 
-    private suspend fun launch(name: String, resumeId: String? = null): AcpLiveHarness {
+    private suspend fun launch(
+        name: String,
+        resumeId: String? = null,
+        model: String? = null,
+        mode: PermissionMode = PermissionMode.DEFAULT,
+    ): AcpLiveHarness {
         check(System.getenv("KIMI_CODE_HOME") != null) { "set KIMI_CODE_HOME to a throwaway kimi home" }
-        val spec = AgentSpec(workdir = workdir, resumeId = resumeId, mode = PermissionMode.DEFAULT)
+        val spec = AgentSpec(workdir = workdir, resumeId = resumeId, model = model, mode = mode)
         return AcpLiveHarness(KimiBackend(bin()), spec, "kimi-$name").also { open += it }.start()
     }
 
@@ -171,6 +176,73 @@ class KimiBackendLiveIT {
         val after = h.turn()
         h.dump("cancel"); report(h, "cancel")
         assertTrue(after.result?.isError == false && after.text.contains("pong", ignoreCase = true), "after cancel: ${after.text}")
+    }
+
+    /**
+     * The user's model and Plan reach kimi before the first turn (kimi ignores `modelId`/`modeId` on
+     * `session/new`; only `session/set_config_option` switches them), on a fresh session and again after
+     * `session/load` (kimi keeps a loaded session's model but not its mode).
+     *
+     * Needs a SECOND model alias in the throwaway config.toml, other than `default_model`:
+     * `CC_POCKET_KIMI_LIVE_MODEL=<alias>`. With the scripted model, also set `CC_POCKET_ACP_MOCK_LOG=<its --log>`
+     * and `CC_POCKET_KIMI_LIVE_UPSTREAM=<that alias's model = …>` to assert what the MODEL END received.
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = "CC_POCKET_KIMI_LIVE_MODEL", matches = ".+")
+    fun the_chosen_model_and_plan_reach_kimi_on_new_and_load() = runBlocking {
+        val alias = System.getenv("CC_POCKET_KIMI_LIVE_MODEL")
+        val startedAt = System.currentTimeMillis() / 1000.0
+        val h = launch("model-plan", model = alias, mode = PermissionMode.PLAN)
+        val init = h.opened()
+        assertEquals(alias, init.model, "the header names what kimi reports after the write")
+        val writes = h.msToResponses("session/set_config_option")
+        println("[kimi-live] model-plan: writes=${writes.map { it.first.text to it.second }}")
+        assertTrue(writes.any { "\"configId\":\"model\"" in it.first.text && "\"value\":\"$alias\"" in it.first.text }, "no model write")
+        assertTrue(writes.any { "\"configId\":\"mode\"" in it.first.text && "\"value\":\"plan\"" in it.first.text }, "no plan write")
+        assertTrue(writes.all { it.second != null }, "a write went unanswered")
+        assertTrue(h.lines.any { !it.outbound && "\"current_mode_update\"" in it.text && "\"plan\"" in it.text }, "kimi never said plan")
+        assertTrue(h.outbound("session/new").single().text.let { "modelId" !in it && "modeId" !in it })
+
+        h.backend.sendPrompt("Reply with exactly one word: PONG. Do not use any tool.", emptyList())
+        val turn = h.turn()
+        assertTrue(turn.result?.isError == false && turn.text.contains("pong", ignoreCase = true), "turn: ${turn.text}")
+        // the prompt went out only after every write was answered
+        val prompt = h.outbound("session/prompt").first()
+        val lastAnswer = writes.maxOf { w -> h.lines.first { !it.outbound && it.method == null && it.id == w.first.id }.nanos }
+        assertTrue(prompt.nanos >= lastAnswer, "the prompt overtook a config write")
+
+        // Plan is not read-only on kimi: a Bash call still asks, and runs once approved.
+        val asks = ArrayList<AgentEvent.ControlRequest>()
+        h.backend.sendPrompt("BASHME: run the shell command `echo approved-run` with the Bash tool, then say done.", emptyList())
+        val bash = h.turn { asks += it; h.backend.respondPermission(it.requestId, true, false, it.input, null, null) }
+        val ran = bash.events.filterIsInstance<AgentEvent.ToolResult>()
+        println("[kimi-live] plan bash: asks=${asks.map { it.toolName to it.input }} results=${ran.map { it.isError to it.content?.take(80) }}")
+        assertEquals(1, asks.size, "plan asked ${asks.size} times")
+        h.dump("model-plan"); report(h, "model-plan")
+        val sid = init.sessionId
+        h.close(); open.remove(h)
+
+        // the same writes after session/load
+        val l = launch("model-plan-load", resumeId = sid, model = alias, mode = PermissionMode.PLAN)
+        assertEquals(sid, l.opened().sessionId)
+        val loadWrites = l.outbound("session/set_config_option").map { it.text }
+        println("[kimi-live] after load: writes=$loadWrites")
+        assertTrue(loadWrites.any { "\"configId\":\"mode\"" in it && "\"value\":\"plan\"" in it }, "plan not rewritten after load")
+        l.backend.sendPrompt("Reply with exactly one word: PONG. Do not use any tool.", emptyList())
+        assertTrue(l.turn().result?.isError == false)
+        l.dump("model-plan-load")
+
+        // what the model end received
+        val mockLog = System.getenv("CC_POCKET_ACP_MOCK_LOG")
+        val upstream = System.getenv("CC_POCKET_KIMI_LIVE_UPSTREAM")
+        if (mockLog != null && upstream != null) {
+            val requests = File(mockLog).readLines().filter { "openai model=" in it }
+                .filter { it.substringBefore(' ').toDoubleOrNull()?.let { t -> t >= startedAt } == true }
+            val models = requests.map { it.substringAfter("model=").substringBefore(' ') }
+            println("[kimi-live] model end saw: $models")
+            assertTrue(models.isNotEmpty(), "the scripted model saw no request")
+            assertTrue(models.all { it == upstream }, "a request used another model: $models")
+        }
     }
 
     /** The case 547f7651 (drop `session/update`s stamped with another session's id) has to get right. */

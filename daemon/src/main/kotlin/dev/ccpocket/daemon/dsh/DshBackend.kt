@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.dsh
 
 import dev.ccpocket.daemon.acp.AcpClient
+import dev.ccpocket.daemon.acp.AcpConfigChain
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
@@ -16,7 +17,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -97,13 +97,13 @@ class DshBackend(
     private val dshBin: String?,
     private val catalog: DshCatalog = DshCatalog,
     private val sessionsRoot: () -> Path = DshPaths::sessionsRoot,
-    /** How long one `session/set_config_option` may go unanswered — see [watchConfig]. Injectable for tests. */
+    /** How long one `session/set_config_option` may go unanswered — see [AcpConfigChain]. Injectable for tests. */
     private val configTimeoutMs: Long = CONFIG_TIMEOUT_MS,
     private val handshakeTimeoutMs: Long = HANDSHAKE_TIMEOUT_MS,
 ) : AgentBackend {
     private val log = logger("DshBackend")
 
-    /** Owns the async config pushes; cancelled when the process ends. */
+    /** Owns the async user-driven config pushes; cancelled when the process ends. */
     private var scope: CoroutineScope? = null
 
     @Volatile private var resolvedExe: Path? = null
@@ -145,12 +145,37 @@ class DshBackend(
             override suspend fun onSessionOpened(sessionId: String, result: JsonObject?) = sessionOpened(sessionId, result)
             override fun onUpdate(update: JsonObject) = handleUpdate(update)
             override fun permissionCard(params: JsonObject?) = approvalCard(params)
-            override suspend fun onResponse(id: Long, result: JsonObject?) =
-                configIds.remove(id)?.let { onConfigApplied(it, result) }
-            override suspend fun onErrorResponse(id: Long?, why: String) =
-                configIds.remove(id ?: -1)?.let { onConfigFailed(it, why) }
-            override suspend fun onSyntheticFrame(type: String?, root: JsonObject) =
-                if (type == CONFIG_TIMEOUT_TYPE) onConfigTimedOut(root.long("id")) else null
+            override suspend fun onResponse(id: Long, result: JsonObject?): List<AgentEvent>? =
+                config.onResponse(id, result)
+            override suspend fun onErrorResponse(id: Long?, why: String): List<AgentEvent>? =
+                config.onErrorResponse(id, why)
+            override suspend fun onSyntheticFrame(type: String?, root: JsonObject): List<AgentEvent>? =
+                config.onSyntheticFrame(type, root)
+        },
+    )
+
+    /**
+     * The model/effort writes, on the chain shared with Kimi: sent in order after the session opens, the prompt
+     * gate opening on the last one's answer, each bounded by [configTimeoutMs] (a launch write that never answers
+     * fails the open with [STAGE_CONFIG]; a user switch that never answers is reported like a refusal).
+     */
+    private val config: AcpConfigChain = AcpConfigChain(
+        client, log,
+        tag = "dsh",
+        agentName = "the DeepSeek Harness",
+        stageConfig = STAGE_CONFIG,
+        timeoutMs = configTimeoutMs,
+        host = object : AcpConfigChain.Host {
+            override fun describe(configId: String) =
+                if (configId == DshConfigOptions.MODEL) "the model" else "the reasoning effort"
+
+            // dsh answers a config write with the COMPLETE resulting state — that read-back, never our
+            // request, is what the header is told.
+            override suspend fun onApplied(write: AcpConfigChain.Write, result: JsonObject?): List<AgentEvent> {
+                options = DshConfigOptions.parse(result?.arr("configOptions"), fallback = options)
+                catalog.publish(this@DshBackend, options)
+                return listOfNotNull(runtimeMeta(model = options.currentModel, effort = options.currentEffort))
+            }
         },
     )
 
@@ -159,26 +184,11 @@ class DshBackend(
      *  joins its opaque wire value out of it. */
     @Volatile private var options: DshConfigOptions = DshConfigOptions.EMPTY
 
-    /** outstanding set_config_option id → what it was trying to do, so its answer can be reported and the
-     *  chain continued. */
-    private val configIds = ConcurrentHashMap<Long, ConfigWrite>()
-
     /** toolCallId → what dsh said it was about, so a later permission request (which carries only the id)
      *  can render a card a human can decide on. */
     private val toolCalls = ConcurrentHashMap<String, ToolInfo>()
 
     private data class ToolInfo(val title: String?, val input: JsonObject?)
-
-    /** One pending `session/set_config_option`. [announce] marks a USER-driven switch, which is allowed to
-     *  say out loud that it failed; a launch-time application stays quiet (a message before the first turn
-     *  reads as output the agent never wrote). [flushAfter] carries the "open the prompt gate when this
-     *  settles" duty through the response. */
-    private data class ConfigWrite(
-        val configId: String,
-        val value: String,
-        val announce: Boolean,
-        val flushAfter: Boolean,
-    )
 
     override val kind: AgentKind = AgentKind.DSH
 
@@ -207,7 +217,7 @@ class DshBackend(
         // reset per-process state (runs on EVERY (re)launch)
         options = DshConfigOptions.EMPTY
         catalog.unpublish(this)
-        configIds.clear(); toolCalls.clear()
+        config.reset(); toolCalls.clear()
         scope?.let { runCatching { it.cancel() } }
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         client.attach(io, spec.workdir.toString(), spec.resumeId)
@@ -262,7 +272,7 @@ class DshBackend(
         )
         // Model/effort BEFORE the prompt gate opens: running the opening turn on the previous model and
         // correcting it afterwards would bill the user for a model they did not pick. Each write is a
-        // request, so the gate opens on its RESPONSE (see [onConfigApplied]) rather than on hope.
+        // request, so the gate opens on its RESPONSE (see [AcpConfigChain]) rather than on hope.
         if (startConfigChain(launchModel, launchEffort, announce = false)) return events
         return events + client.openPromptGate()
     }
@@ -360,8 +370,8 @@ class DshBackend(
      * an unnecessary round trip at launch delays the opening turn for nothing.
      */
     private suspend fun startConfigChain(model: String?, effort: String?, announce: Boolean): Boolean {
-        val sid = client.sessionId ?: return false
-        val writes = ArrayList<ConfigWrite>(2)
+        if (client.sessionId == null) return false
+        val writes = ArrayList<AcpConfigChain.Write>(2)
         model?.takeIf { it.isNotBlank() && it != options.currentModel }?.let { wanted ->
             val value = options.modelValue(wanted)
             if (value == null) {
@@ -369,100 +379,16 @@ class DshBackend(
                 log.warn("dsh has no model option for $wanted — leaving the session's own selection")
                 if (announce) client.injectNotice("⚠️ DeepSeek Harness has no model $wanted")
             } else {
-                writes += ConfigWrite(DshConfigOptions.MODEL, value, announce, flushAfter = false)
+                // the value is dsh's opaque pair, sent under `configId` (fact 3)
+                writes += AcpConfigChain.Write(DshConfigOptions.MODEL, value, announce)
             }
         }
         effort?.takeIf { it.isNotBlank() && it != options.currentEffort }?.let {
-            writes += ConfigWrite(DshConfigOptions.EFFORT, it, announce, flushAfter = false)
+            writes += AcpConfigChain.Write(DshConfigOptions.EFFORT, it, announce)
         }
-        if (writes.isEmpty()) return false
         // Only the LAST write opens the prompt gate; the model must land before the effort, because the
         // valid effort levels are a property of the selected model.
-        val chain = writes.mapIndexed { i, w -> w.copy(flushAfter = i == writes.lastIndex) }
-        pendingConfig.addAll(chain.drop(1))
-        sendConfig(sid, chain.first())
-        return true
-    }
-
-    /** The remaining writes of the current chain, in order. Written from the parse pump AND from
-     *  [applySettings]'s scope launch, so it is concurrent by construction. */
-    private val pendingConfig = java.util.concurrent.ConcurrentLinkedDeque<ConfigWrite>()
-
-    private suspend fun sendConfig(sid: String, write: ConfigWrite) {
-        val id = client.rpc.nextId()
-        configIds[id] = write
-        scope?.launch { watchConfig(id) }
-        client.rpc.send(id, "session/set_config_option", buildJsonObject {
-            put("sessionId", sid)
-            put("configId", write.configId) // NOT optionId (fact 3)
-            put("value", write.value)
-        })
-    }
-
-    /**
-     * A config write that never answers would hold the prompt gate shut forever — the launch chain opens it only
-     * on the LAST write's response — leaving the opening prompt parked with no error and no terminal state. The
-     * same bounded wait as the handshake watchdog, on the same per-process scope (a relaunch cancels it). The
-     * verdict is delivered through the pump ([CONFIG_TIMEOUT_TYPE] → [onConfigTimedOut]) so it is ordered with
-     * the real answer: whichever reaches the pump first claims the write.
-     */
-    private suspend fun watchConfig(id: Long) {
-        delay(configTimeoutMs)
-        if (!configIds.containsKey(id)) return // answered in time
-        client.io?.inject?.invoke(
-            buildJsonObject { put("type", CONFIG_TIMEOUT_TYPE); put("id", id) }.toString(),
-        )
-    }
-
-    /**
-     * On the pump: [id] got no answer in time. A USER-driven switch is reported like a refused one and the chain
-     * moves on (the session is already running on a model the user saw announced). A LAUNCH-time write fails the
-     * session open instead: carrying on would run the opening turn on dsh's default model while the user believes
-     * their pick is in effect — so the waiting prompts are settled with an error naming the stage, and later ones
-     * are refused with it until a relaunch.
-     */
-    private suspend fun onConfigTimedOut(id: Long?): List<AgentEvent> {
-        val write = id?.let { configIds.remove(it) } ?: return emptyList() // already answered, or a previous process
-        val what = if (write.configId == DshConfigOptions.MODEL) "the model" else "the reasoning effort"
-        val why = "the DeepSeek Harness did not answer the request to set $what (${write.value}) " +
-            "within ${configTimeoutMs / 1000} s"
-        log.warn("dsh set_config_option(${write.configId}=${write.value}) unanswered after ${configTimeoutMs}ms")
-        if (write.announce) return onConfigFailed(write, why)
-        pendingConfig.clear()
-        return client.failHostStartup(STAGE_CONFIG, why)
-    }
-
-    /** dsh answers a config write with the COMPLETE resulting state — that read-back, never our request,
-     *  is what the header is told. */
-    private suspend fun onConfigApplied(write: ConfigWrite, result: JsonObject?): List<AgentEvent> {
-        options = DshConfigOptions.parse(result?.arr("configOptions"), fallback = options)
-        catalog.publish(this, options)
-        val meta = runtimeMeta(model = options.currentModel, effort = options.currentEffort)
-        return listOfNotNull(meta) + continueConfigChain(write)
-    }
-
-    private suspend fun onConfigFailed(write: ConfigWrite, why: String): List<AgentEvent> {
-        log.warn("dsh set_config_option(${write.configId}=${write.value}) failed: $why")
-        // Only a user-driven switch says so out loud (see [ConfigWrite.announce]).
-        if (write.announce) {
-            val what = if (write.configId == DshConfigOptions.MODEL) "the model" else "the reasoning effort"
-            client.injectNotice("⚠️ could not switch $what: $why")
-        }
-        return continueConfigChain(write)
-    }
-
-    /** Send the next write of the chain, or — when this was the last one — open the prompt gate (returning the
-     *  error turns of any prompt it refused). A FAILED write still advances: queued prompts must never be held
-     *  hostage by a preference that dsh refused. */
-    private suspend fun continueConfigChain(write: ConfigWrite): List<AgentEvent> {
-        val next = pendingConfig.pollFirst()
-        val sid = client.sessionId
-        if (next != null && sid != null) {
-            sendConfig(sid, next)
-            return emptyList()
-        }
-        // End of the chain — or the session went away under it, which must not strand the queue either.
-        return if (write.flushAfter || next != null) client.openPromptGate() else emptyList()
+        return config.start(writes)
     }
 
     /**
@@ -500,6 +426,7 @@ class DshBackend(
         if (sessionId != null && wd.isNotBlank()) DshWorkspaceRegistry.adopt(sessionId, wd)
         catalog.unpublish(this)
         client.processEnded()
+        config.close()
         runCatching { scope?.cancel() }
         scope = null
     }
@@ -636,8 +563,5 @@ class DshBackend(
         /** The launch-time model/effort never landed: the session was not started on the user's choice. */
         const val STAGE_CONFIG = "could not apply the chosen model settings to the DeepSeek Harness session — " +
             "nothing was sent on a different model"
-
-        /** The pump-bound verdict of [watchConfig] (namespaced like [dev.ccpocket.daemon.acp.AcpSynthetic]'s). */
-        const val CONFIG_TIMEOUT_TYPE = "cc-pocket/dsh-config-timeout"
     }
 }

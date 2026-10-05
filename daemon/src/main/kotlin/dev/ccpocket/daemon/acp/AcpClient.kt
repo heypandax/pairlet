@@ -41,7 +41,8 @@ import org.slf4j.Logger
  * terminal state with its watchdogs (an `initialize`, then a session open, that never answers).
  *
  * What stays in the backend ([Host]): what an open session announces, how `session/update` payloads become
- * events, what a permission card shows, and any requests of its own (dsh's config writes).
+ * events, what a permission card shows, and any requests of its own (the launch-time config writes, on
+ * [AcpConfigChain]).
  */
 class AcpClient(
     private val config: Config,
@@ -379,7 +380,7 @@ class AcpClient(
 
     /**
      * A startup stage of the HOST's own failed — one it runs between the session opening and the prompt gate
-     * (dsh applies the launch-time model/effort there). The same terminal settlement as [failStartup]: every
+     * (the launch-time config writes of [AcpConfigChain]). The same terminal settlement as [failStartup]: every
      * waiting prompt gets its error turn, later ones are refused with the message, nothing is retried. On the
      * parse pump (the events are returned).
      */
