@@ -1,4 +1,4 @@
-package dev.ccpocket.daemon.review
+package dev.ccpocket.daemon.peer
 
 import dev.ccpocket.protocol.PocketJson
 import kotlinx.serialization.Serializable
@@ -175,21 +175,21 @@ class PeerLinkStore private constructor(
     }
 
     private fun writeLinks(next: StoredLinks): Boolean =
-        publicPath?.let { ReviewFiles.write(it, PocketJson.encodeToString(StoredLinks.serializer(), next)) } ?: true
+        publicPath?.let { AtomicStoreFiles.write(it, PocketJson.encodeToString(StoredLinks.serializer(), next)) } ?: true
 
     private fun writeSecrets(next: StoredSecrets): Boolean =
-        secretPath?.let { ReviewFiles.write(it, PocketJson.encodeToString(StoredSecrets.serializer(), next)) } ?: true
+        secretPath?.let { AtomicStoreFiles.write(it, PocketJson.encodeToString(StoredSecrets.serializer(), next)) } ?: true
 
     companion object {
-        fun defaultPublicPath(): File = ReviewFiles.path("peer-links.json")
-        fun defaultSecretPath(): File = ReviewFiles.path("peer-link-secrets.json")
+        fun defaultPublicPath(): File = AtomicStoreFiles.path("peer-links.json")
+        fun defaultSecretPath(): File = AtomicStoreFiles.path("peer-link-secrets.json")
 
         fun load(
             publicPath: File = defaultPublicPath(),
             secretPath: File = defaultSecretPath(),
         ): PeerLinkStore = PeerLinkStore(publicPath, secretPath).apply {
-            ReviewFiles.read(publicPath) { PocketJson.decodeFromString(StoredLinks.serializer(), it) }?.let { links = it }
-            ReviewFiles.read(secretPath) { PocketJson.decodeFromString(StoredSecrets.serializer(), it) }?.let { secrets = it }
+            AtomicStoreFiles.read(publicPath) { PocketJson.decodeFromString(StoredLinks.serializer(), it) }?.let { links = it }
+            AtomicStoreFiles.read(secretPath) { PocketJson.decodeFromString(StoredSecrets.serializer(), it) }?.let { secrets = it }
 
             synchronized(lock) {
                 if (secrets.pendingLinks.isNotEmpty()) {

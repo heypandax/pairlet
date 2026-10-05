@@ -2,7 +2,7 @@ package dev.ccpocket.daemon.execution
 
 import dev.ccpocket.daemon.diagnostics.storageReadFailed
 import dev.ccpocket.daemon.diagnostics.storageWriteFailed
-import dev.ccpocket.daemon.review.ReviewFiles
+import dev.ccpocket.daemon.peer.AtomicStoreFiles
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.EXECUTION_OUTPUT_MAX_BYTES
@@ -364,7 +364,7 @@ class RunJournal(
         writeAtomic(budgetFile(grantId), PocketJson.encodeToString(Budget.serializer(), Budget(accepted = value)))
 
     /**
-     * 0600 + atomic + fsync. [ReviewFiles.write] is atomic but deliberately fsync-free; a run journal is
+     * 0600 + atomic + fsync. [AtomicStoreFiles.write] is atomic but deliberately fsync-free; a run journal is
      * the record of what a REMOTE caller made this machine do, so it must survive a power cut, not merely
      * a torn write.
      */
@@ -417,11 +417,11 @@ class RunJournal(
         private val REQUEST_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
         private val RNG = SecureRandom()
 
-        fun defaultRoot(): File = ReviewFiles.path("execution-runs")
+        fun defaultRoot(): File = AtomicStoreFiles.path("execution-runs")
 
         fun validRequestId(id: String): Boolean = REQUEST_ID.matches(id)
 
-        fun newRunId(): String = "xr_" + dev.ccpocket.daemon.review.b64(ByteArray(16).also { RNG.nextBytes(it) })
+        fun newRunId(): String = "xr_" + dev.ccpocket.daemon.peer.b64(ByteArray(16).also { RNG.nextBytes(it) })
 
         /** The idempotency payload digest. Covers everything a retry must not be able to change. */
         @OptIn(ExperimentalStdlibApi::class)

@@ -1,4 +1,4 @@
-package dev.ccpocket.daemon.review
+package dev.ccpocket.daemon.peer
 
 import dev.ccpocket.daemon.diagnostics.storageReadFailed
 import dev.ccpocket.daemon.diagnostics.storageWriteFailed
@@ -24,7 +24,7 @@ import java.nio.file.attribute.PosixFilePermissions
  *    silently overwrite whatever was actually in there on the next persist; keeping the bytes means a
  *    human can still recover the requests, and the loud log says to.
  */
-internal object ReviewFiles {
+internal object AtomicStoreFiles {
 
     private val log = logger("ReviewFiles")
 

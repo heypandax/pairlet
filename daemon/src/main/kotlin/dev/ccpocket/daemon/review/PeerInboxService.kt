@@ -1,5 +1,11 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.daemon.peer.PeerLink
+import dev.ccpocket.daemon.peer.PeerLinkSecret
+import dev.ccpocket.daemon.peer.PeerLinkStore
+import dev.ccpocket.daemon.peer.PeerTransport
+import dev.ccpocket.daemon.peer.RelayPeerTransport
+import dev.ccpocket.daemon.peer.TextLimits
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AcknowledgeReviewRequest
 import dev.ccpocket.protocol.DeclineReviewRequest
@@ -92,7 +98,7 @@ class PeerInboxService(
      * persist would silently burn the invite and leave the user re-scanning for no reason.
      */
     suspend fun join(rawInvite: String, label: String?): JoinResult {
-        ReviewLimits.singleLine(label, ReviewLimits.MAX_LABEL, "label")?.let {
+        TextLimits.singleLine(label, TextLimits.MAX_LABEL, "label")?.let {
             return JoinResult.Refused("invite_invalid", it)
         }
         // the REVIEW door only (REVIEW-REQUEST.md §13.3): a Session Handoff ticket pasted here would be
@@ -215,7 +221,7 @@ class PeerInboxService(
         queue(requestId, ReviewStatus.IN_PROGRESS) { id, key -> StartReviewRequest(id, key) }
 
     fun decline(requestId: String, reason: String?): ActionResult {
-        ReviewLimits.text(reason, ReviewLimits.MAX_TEXT, "reason")?.let { return ActionResult.Refused("review_invalid", it) }
+        TextLimits.text(reason, ReviewLimits.MAX_TEXT, "reason")?.let { return ActionResult.Refused("review_invalid", it) }
         return queue(requestId, ReviewStatus.DECLINED) { id, key -> DeclineReviewRequest(id, reason, key) }
     }
 

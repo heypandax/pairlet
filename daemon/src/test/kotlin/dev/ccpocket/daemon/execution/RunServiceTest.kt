@@ -8,7 +8,7 @@ import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.approval.ApprovalCoordinator
 import dev.ccpocket.daemon.claude.StreamParser
 import dev.ccpocket.daemon.identity.Identity
-import dev.ccpocket.daemon.review.b64
+import dev.ccpocket.daemon.peer.b64
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Decision
