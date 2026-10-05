@@ -2000,6 +2000,9 @@ class PocketRepository(
      *  and a loser that reports its timeout afterwards would arm a failure card over a completed pairing. */
     private var pairAttempt = 0
 
+    /** Test seam: stands in for the relay round-trip of [Pairing.redeem] (the store upsert + active pin still run). */
+    internal var redeemForTest: (suspend (dev.ccpocket.app.pairing.PairingInfo) -> PairedDaemon)? = null
+
     private fun setPairFailure(kind: PairFailure?) {
         pairFailure.value = kind
         pairFailureSeq.value++
@@ -2023,15 +2026,32 @@ class PocketRepository(
             val info = getInfo(client)
             pairTrace?.stage(DiagnosticStage.REQUEST)
             val keys = Pairing.deviceKeys()
-            paired.value = Pairing.redeem(info, keys, client!!) // upserts the list + pins this as the active account
+            // upserts the list + pins this as the active account
+            val bound = redeemForTest?.let { fake -> fake(info).also { Pairing.upsert(it); Pairing.setActive(it.accountId) } }
+                ?: Pairing.redeem(info, keys, client!!)
             projectPinRegistry.refreshAfterPairingChange { Pairing.loadAll() } // #362: a replaced credential retires old pin leases now
             // a FRESH pairing (e.g. a guest redeeming a new invite for the same daemon/accountId) supersedes
-            // any recorded "share ended" terminal state — else the new binding would open on the dead card
-            paired.value?.let { SecureStore.remove(K_SHARE_ENDED_PREFIX + it.accountId) }
-            shareEnded.value = null
+            // any recorded "share ended" terminal state — else the new binding would open on the dead card.
+            // Removed BEFORE a switch below, which re-reads it for the target account.
+            SecureStore.remove(K_SHARE_ENDED_PREFIX + bound.accountId)
+            // A pair link opened (system camera, tapped URL) while a link to ANOTHER computer is live — or while
+            // the demo / a LAN-direct link holds the session. startRelay() below would no-op on that live link:
+            // the title would say B while A's socket, chat and pending approvals stayed up, the fleet would then
+            // dial A a second time as a satellite (same deviceId, two sockets kicking each other), and the next
+            // reconnect would dial B and replay A's OpenSession/ListSessions at it. Leaving a computer has ONE
+            // path — the user's own switch — so take it, carrying this pairing's first-connect ticket along.
+            val leavesAnotherLink = sessionActive.value && (demoMode.value || paired.value?.accountId != bound.accountId)
             replace(pairedList, Pairing.loadAll())
-            bindProjectPins() // #362: the new binding's own pins (and, once, where the legacy list belongs)
             addingDevice.value = false
+            if (leavesAnotherLink) {
+                switchDaemon(bound, firstPairTicket = info.ticket)
+                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source, TelKey.Attempt to attempt) + productDimensions())
+                pairTrace?.finish(Outcome.SUCCESS, DiagnosticStage.COMMIT)
+                return
+            }
+            paired.value = bound
+            shareEnded.value = null
+            bindProjectPins() // #362: the new binding's own pins (and, once, where the legacy list belongs)
             firstTicket = info.ticket
             Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source, TelKey.Attempt to attempt) + productDimensions())
             pairTrace?.finish(Outcome.SUCCESS, DiagnosticStage.COMMIT)
@@ -2581,6 +2601,10 @@ class PocketRepository(
     /** (Re)open the active transport's socket. Both transports re-handshake on every connect() call.
      *  [force] bypasses the #143 coalescing — for triggers that deliberately tear down a LIVE socket
      *  (the deaf-link retry, the presence probe's escalation, the user's manual "Try again"). */
+    /** Test seam: replaces the relay/direct dial of one transport launch — gets the binding it would dial and the
+     *  first-pair ticket it would present, and holds the "socket" for as long as it suspends. */
+    internal var dialForTest: (suspend (PairedDaemon, String?) -> Unit)? = null
+
     private fun launchTransport(reconnect: Boolean, force: Boolean = false) {
         if (demoMode.value) return // demo mode never touches the network
         // #143: five triggers fire this independently (presence edge, foreground return, retry timer,
@@ -2639,6 +2663,7 @@ class PocketRepository(
             val result = runCatching {
                 if (useRelay) {
                     val p = paired.value ?: error("not paired")
+                    dialForTest?.let { dial -> dial(p, firstTicket.also { firstTicket = null }); return@runCatching }
                     // direct-first: the daemon-advertised LAN/loopback address skips the relay AND the
                     // proxy leg entirely. Unreachable/refused/bad handshake → silent same-attempt relay
                     // fallback + cooldown. A drop AFTER it was live exits normally into the reconnect path.
@@ -2913,6 +2938,17 @@ class PocketRepository(
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
         clearReviewState() // a review ledger belongs to one machine — never show the last daemon's inbox
+        // The frozen features' cached LISTINGS of this daemon's truth (their logic is not touched here). Each is
+        // re-pulled from the next daemon when its surface opens (chat → ListHandoffs, contacts → ListCollaborators,
+        // bridges page → ListBridges, shares page → ListShares). Kept, they crossed machines — and activeHandoff,
+        // which is not scoped to the chat on screen, locked the composer of a new session on the next computer
+        // (one with no session id yet never sends the scoped ListHandoffs that would replace it). Request
+        // results, one-shot artefacts and this device's own invites/links are not listings and stay.
+        handoffs.clear(); activeHandoff.value = null
+        collaborators.clear(); collaboratorsLoaded.value = false
+        bridgesDeadline?.cancel(); bridgesDeadline = null
+        bridges.clear(); bridgesLoaded.value = false; bridgesUnavailable.value = false
+        shares.clear(); sharesLoaded.value = false
         // the link is down: the coordinator must stop submitting into nothing (its round parks on
         // `connected` instead of burning attempts). The per-pairing CONFIRMATION deliberately survives —
         // a reconnect is not evidence that the relay forgot the token — while a machine SWITCH retargets
@@ -2965,6 +3001,25 @@ class PocketRepository(
         // the auto-continue / repair offers name a session on the machine we are leaving (#137)
         limitOffer.value = null; limitConfirmed.value = null
         repairOffer.value = null; repairProgress.value = null
+        // daemon-side preferences are this computer's truth; null is the "not answered (yet)" state the settings
+        // pages gate on — kept, a next daemon too old to answer showed the last one's switches, and they did nothing
+        pushPrefs.value = null; approvalPrefs.value = null; approvalFullControlExpiryMs.value = null
+        // the rewind sheet names a cut in this computer's conversation (confirming it would send that anchor to the
+        // next computer's chat) and its refusal bar is this chat's too. sessionLineage / rewindAwaiting stay: both
+        // match on a daemon-minted convoId, which no other computer reproduces
+        rewindSheet.value = null; rewindError.value = null
+        // the archive toast's action re-sends SetSessionArchived for this computer's (workdir, session), and its
+        // target is what a later `archive_failed` resurrects (renameError is keyed by a session id: left as is)
+        archiveToast.value = null; archiveTarget = null
+        slashCommands.clear() // CommandList is per conversation; a backend that never sends one would inherit these
+        clearSessionPanels()
+        // only a frame of the conversation on screen clears this, and none will come: left true, the project list's
+        // busy/finished poll (it skips while a turn streams) stayed off on the next computer
+        streaming.value = false
+        // the computer switcher's current row reads the title ungated — it named this computer's chat under the next
+        // one. sessionKey / currentSessionId / observing stay: every reader is gated on a convoId, and SessionLive
+        // re-sets all three together with it
+        chatTitle.value = null
         convoId.value = null
         sessionsDir.value = null
         browseIntentDir = null // #349: a browse intent belongs to the link/machine that accepted the tap
@@ -3035,8 +3090,10 @@ class PocketRepository(
 
     /** Switch the active computer: tear down the current link, pin [target], reconnect to it.
      *  This is the COLD path — [FleetCoordinator.switchTo] promotes a hot satellite instead when it can
-     *  (issue #103) and only falls back here when no live link to [target] exists yet. */
-    fun switchDaemon(target: PairedDaemon) {
+     *  (issue #103) and only falls back here when no live link to [target] exists yet.
+     *  [firstPairTicket] is set only by a pairing that lands while another computer's link is live
+     *  ([doPair]): the freshly redeemed binding still needs its ticket as the PSK of its first connect. */
+    fun switchDaemon(target: PairedDaemon, firstPairTicket: String? = null) {
         sidePanes.clear() // #311: panes name sessions on the machine we are leaving
         if (paired.value?.accountId == target.accountId && sessionActive.value) return
         onBeforeSwitch?.invoke(target.accountId)
@@ -3046,7 +3103,7 @@ class PocketRepository(
         loadWorkingSet(target.accountId) // #165: and so does the switcher's memory — see [workingSetMru]
         bindProjectPins() // #362: and so do its pins — the target computer's own scope, never the outgoing list
         Pairing.setActive(target.accountId)
-        firstTicket = null // an already-paired daemon authenticates by static key — the PSK is only for first pair
+        firstTicket = firstPairTicket // an already-paired daemon authenticates by static key — the PSK is only for first pair
         startRelay()
     }
 
@@ -3139,12 +3196,7 @@ class PocketRepository(
         clearAskQueue()
         transcript.clearMessages(); pendingImages.clear()
         resetHistoryPaging() // #147
-        terminalEntries.clear(); terminalBusy.value = false
-        changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
-        closeFileViewer()
-        clearGitState() // the Git panel is per-session too (#280/#281)
-        pathListing.value = null
-        resetFileBrowser() // …and the 全部 视角 (cache + view + level) belongs to the workdir we're leaving
+        clearSessionPanels()
         allowRules.clear()
         slashCommands.clear()
         clearBackgroundJobs()
@@ -3153,6 +3205,125 @@ class PocketRepository(
         contextUsed.value = null; contextWindow.value = null
         refreshing.value = false; sessionsRefreshing.value = false
         abandonVoice()
+    }
+
+    /**
+     * The open session's side panels — quick terminal, changed files + viewer, Git/worktrees, the @-completion
+     * listing and the file tree — and every reply deadline they armed. Leaving a COMPUTER drops them all
+     * ([disconnect], [demoteToSatellite]): `pathListing` and `changedFilesUnavailable` survive [openSession]
+     * itself, so without this the next computer's first chat completed `@` from the last computer's files and
+     * a fresh session's file panel opened on "unavailable".
+     */
+    private fun clearSessionPanels() {
+        terminalEntries.clear(); terminalBusy.value = false
+        changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
+        closeFileViewer()
+        clearGitState() // the Git panel is per-session too (#280/#281)
+        pathListing.value = null
+        resetFileBrowser() // …and the 全部 视角 (cache + view + level) belongs to the workdir we're leaving
+    }
+
+    // ── unscoped PocketError attribution ────────────────────────────────────────────────────────────
+    // A PocketError without a convoId used to be read as "about the chat on screen" (a row in its transcript)
+    // and, with an open in flight, as that open's refusal. Many are neither: they answer a list / usage /
+    // allowance / schedule / panel request. The wire carries no request id, so only two facts attribute one
+    // without guessing: the daemon NAMED the frame it refuses (its guard and unhandled-frame messages do), or the
+    // error is the generic `internal` (a handler threw) while exactly ONE such request is outstanding and nothing
+    // session-side is. Everything else keeps the old route.
+
+    /** The non-session requests the client waits on, by the frames that start them. [OTHER] has no wait state
+     *  of its own: naming one of its frames only keeps the refusal out of the chat and off the open. */
+    private enum class NonSessionRequest { USAGE, QUOTA, SCHEDULES, SKILLS, GIT_STATUS, GIT_DIFF, GIT_ACTION, WORKTREES, CHANGED_FILES, FILE, OTHER }
+
+    /** How many requests of [r] are outstanding right now. */
+    private fun outstanding(r: NonSessionRequest): Int = when (r) {
+        NonSessionRequest.USAGE -> if (usageLoading.value) 1 else 0
+        NonSessionRequest.QUOTA -> quotaOutstanding.values.sum()
+        NonSessionRequest.SCHEDULES -> if (scheduleDeadline?.isActive == true) 1 else 0
+        NonSessionRequest.SKILLS -> if (skillCatalogLoading.value) 1 else 0
+        NonSessionRequest.GIT_STATUS -> if (gitStatusLoading.value) 1 else 0
+        NonSessionRequest.GIT_DIFF -> if (gitDiffPath.value != null && gitDiff.value == null) 1 else 0
+        NonSessionRequest.GIT_ACTION -> if (gitBusyOp.value != null) 1 else 0
+        NonSessionRequest.WORKTREES -> if (worktreesLoading.value) 1 else 0
+        NonSessionRequest.CHANGED_FILES -> if (changedFilesLoading.value) 1 else 0
+        NonSessionRequest.FILE -> if (viewedFilePath.value != null && (viewedFile.value == null || exportWaiting.value)) 1 else 0
+        NonSessionRequest.OTHER -> 0
+    }
+
+    /** End the ONE outstanding request of [r] the way its own reply deadline would, carrying [f]'s message where
+     *  the surface shows one. More than one outstanding: which of them this answers is unknown — leave them to
+     *  their deadlines. */
+    private fun failNonSession(r: NonSessionRequest, f: PocketError) {
+        if (outstanding(r) != 1) return
+        when (r) {
+            NonSessionRequest.USAGE -> usageLoading.value = false
+            NonSessionRequest.QUOTA -> {
+                val agent = quotaOutstanding.entries.first { it.value > 0 }.key
+                quotaDeadlines.remove(agent)?.cancel()
+                quotaOutstanding[agent] = 0
+                quotaLoadingByAgent[agent] = false
+                if (quotaLoadingByAgent.none { it.value }) onClaudeQuotaReply?.invoke()
+            }
+            NonSessionRequest.SCHEDULES -> {
+                scheduleDeadline?.cancel(); scheduleDeadline = null
+                scheduleError.value = f.message
+                if (!schedulesLoaded.value) schedulesUnavailable.value = true
+            }
+            NonSessionRequest.SKILLS -> {
+                skillCatalogDeadline?.cancel()
+                skillCatalogLoading.value = false; skillCatalogUnavailable.value = true
+            }
+            NonSessionRequest.GIT_STATUS -> {
+                gitStatusDeadline?.cancel()
+                gitStatusLoading.value = false; gitStatusUnavailable.value = true
+            }
+            NonSessionRequest.GIT_DIFF -> {
+                gitDiffDeadline?.cancel()
+                val path = gitDiffPath.value ?: return
+                gitDiff.value = GitDiff(convoId.value ?: "", workdir.value ?: "", path, gitDiffStaged.value, ok = false, error = f.message)
+            }
+            NonSessionRequest.GIT_ACTION -> {
+                gitActionDeadline?.cancel()
+                val op = gitBusyOp.value ?: return
+                gitBusyOp.value = null
+                gitPendingAction = null; gitPendingRemove = null; pendingWorktreeAddBranch = null
+                gitError.value = GitActionResult(convoId.value ?: "", op, ok = false, error = f.message)
+            }
+            NonSessionRequest.WORKTREES -> {
+                worktreesDeadline?.cancel()
+                worktreesLoading.value = false; worktreesUnavailable.value = true
+            }
+            NonSessionRequest.CHANGED_FILES -> {
+                changedFilesDeadline?.cancel()
+                changedFilesLoading.value = false; changedFilesUnavailable.value = true
+            }
+            NonSessionRequest.FILE -> {
+                val path = viewedFilePath.value ?: return
+                viewedFileDeadline?.cancel(); exportDeadline?.cancel(); exportWaiting.value = false
+                dropChunkStream()
+                viewedFile.value = FileContent(workdir.value ?: "", sessionKey.value ?: currentSessionId ?: "", path, ok = false, error = f.message)
+            }
+            NonSessionRequest.OTHER -> Unit
+        }
+    }
+
+    /** True when [f] (no convoId) certainly answers a non-session request — whose failure path has then run. */
+    private fun answeredNonSessionRequest(f: PocketError): Boolean {
+        refusedFrameName(f.message)?.let { name ->
+            // the daemon named it: a session-side frame (OpenSession, a verdict, a mode switch…) or one this build
+            // does not classify keeps the old route
+            val r = NON_SESSION_REQUEST_FRAMES[name] ?: return false
+            failNonSession(r, f)
+            return true
+        }
+        if (f.code != ERROR_INTERNAL) return false
+        // anything session-side in flight could be what threw — and so could a list whose wait has no family here
+        if (opening.value || openInFlight != null || promptPending || switching.value) return false
+        if (sessionsOpening.value != null || refreshing.value || sessionsRefreshing.value || archivedRefreshing.value) return false
+        val waiting = NonSessionRequest.entries.filter { outstanding(it) > 0 }
+        if (waiting.size != 1 || outstanding(waiting.single()) != 1) return false
+        failNonSession(waiting.single(), f)
+        return true
     }
 
     /** Write-through for a binding's stored direct URL: persist, refresh the list, patch the active copy.
@@ -4184,6 +4355,9 @@ class PocketRepository(
                 // archive_failed answers the last archive/restore: the toast that confirmed it optimistically
                 // now states the failure (phone), and the desktop sidebar row reads the same state inline.
                 if (f.code == "archive_failed") archiveTarget?.let { archiveToast.value = it.copy(failed = true, at = epochMillis()) }
+            } else if (f.convoId == null && answeredNonSessionRequest(f)) {
+                // It answered a list / usage / allowance / schedule / panel request (see answeredNonSessionRequest),
+                // whose own failure path has run: not the chat on screen's row, not the refusal of an open in flight.
             } else if (f.convoId != null && (openInFlight != null || f.convoId != convoId.value)) {
                 // Conversation-scoped errors fan out from background sessions just like SessionLive and
                 // stream frames. They must not splice a system row into this transcript or terminate a
@@ -8287,6 +8461,9 @@ class PocketRepository(
         clearPromptLifecycleState()
         convoId.value = null
         chatTitle.value = null
+        // a turn left running in the background is no longer this screen's: nothing would clear the flag (its
+        // TurnDone no longer matches convoId), and the list's busy/finished poll skips while it reads true
+        streaming.value = false
         transcript.clearMessages()
         resetHistoryPaging() // #147
         pendingImages.clear()
@@ -8436,6 +8613,40 @@ class PocketRepository(
          * which request an unscoped error answers, so those keep the existing routing.
          */
         private val LIST_ACTION_ERROR_CODES = setOf("archive_failed")
+
+        /** The daemon's code for "the handler of your request threw" — carries no hint of which request. */
+        private const val ERROR_INTERNAL = "internal"
+
+        /** The daemon's refusals that name the refused frame by its class name: the unhandled-frame fall-through,
+         *  the control plane not being wired yet, and the bridge / guest / collaborator ingress guards. */
+        private val REFUSED_FRAME_PATTERNS = listOf(
+            Regex("""^frame not handled by daemon: ([A-Z][A-Za-z0-9]*)$"""),
+            Regex("""^the daemon isn't ready for ([A-Z][A-Za-z0-9]*)$"""),
+            Regex("""^not permitted for a [^:]+: ([A-Z][A-Za-z0-9]*)$"""),
+        )
+
+        private fun refusedFrameName(message: String): String? =
+            REFUSED_FRAME_PATTERNS.firstNotNullOfOrNull { it.find(message)?.groupValues?.get(1) }
+
+        /** Which non-session request a refused frame starts. Names come from the classes, so a rename follows. */
+        private val NON_SESSION_REQUEST_FRAMES: Map<String, NonSessionRequest> = buildMap {
+            fun put(r: NonSessionRequest, vararg k: kotlin.reflect.KClass<*>) = k.forEach { c -> c.simpleName?.let { put(it, r) } }
+            put(NonSessionRequest.USAGE, FetchUsage::class)
+            put(NonSessionRequest.QUOTA, ClaudeQuotaGet::class)
+            put(NonSessionRequest.SCHEDULES, ScheduleList::class, ScheduleCreate::class, ScheduleCancel::class)
+            put(NonSessionRequest.SKILLS, FetchSkillCatalog::class)
+            put(NonSessionRequest.GIT_STATUS, FetchGitStatus::class)
+            put(NonSessionRequest.GIT_DIFF, ReadGitDiff::class)
+            put(NonSessionRequest.GIT_ACTION, GitAction::class, AddWorktree::class, RemoveWorktree::class)
+            put(NonSessionRequest.WORKTREES, ListWorktrees::class)
+            put(NonSessionRequest.CHANGED_FILES, ListSessionFiles::class)
+            put(NonSessionRequest.FILE, ReadFile::class, ReadFileDiff::class, ExportFile::class)
+            put(
+                NonSessionRequest.OTHER, ListDirectories::class, ListSessions::class, ListManagedSessions::class,
+                ListArchivedSessions::class, ListPathEntries::class, FetchModels::class, FetchAuthStatus::class,
+                FetchPresets::class, SetPushPrefs::class, SetApprovalPrefs::class,
+            )
+        }
 
         /** The folder browser's workdir anchor (issue #152): the literal "~" the daemon expands to ITS
          *  home. Also the [PathEntries] routing key that separates browser replies from @-completion
