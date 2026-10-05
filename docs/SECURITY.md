@@ -93,7 +93,7 @@ daemon 改用你的域名：`cc-pocket-daemon run --relay wss://<你的域名>`�
 ## 已知限制 / 后续硬化
 
 - **设备私钥存储**：移动端 v1 用 NSUserDefaults / SharedPreferences（应用私有但非硬件级）。生产应迁到 iOS Keychain / Android Keystore（接口 `SecureStore` 已就位，换实现即可）。
-- **配对录入**：支持相机扫码（App 内置 qrkit 扫码器）、手输 6 位码、粘贴 `ccpocket://` 链接，以及局域网直连 URL（高级选项）。
+- **配对录入**：支持相机扫码（App 内置 qrkit 扫码器）、手输 6 位码、粘贴 `ccpocket://` 链接。旧版无配对、无加密的明文局域网模式（`run --local` 与 App 的局域网直连地址）已移除。
 - **票据↔设备 PSK 匹配**：daemon 用「最近 mint 的票据」启发式关联刚配对的设备（交互式串行配对下正确）。
 - **未经独立审计**：Noise 风格通道为本项目自实现（基于 cryptography-kotlin 原语）。欢迎审计。
 - **客户端遥测**：App 接入 Firebase（Analytics/Crashlytics），仅上报枚举级事件元数据（如 AppLaunch / Paired / Connected）与崩溃信息，**不含 prompt、代码或会话内容**；它直连 Google、**不经 relay**，与「relay 零知识」是两回事（源码 `telemetry/` 可关闭或替换）。
