@@ -1,9 +1,9 @@
 package dev.ccpocket.daemon
 
 import com.github.ajalt.clikt.core.parse
-import dev.ccpocket.daemon.review.PeerLink
-import dev.ccpocket.daemon.review.PeerLinkSecret
-import dev.ccpocket.daemon.review.PeerLinkStore
+import dev.ccpocket.daemon.peer.PeerLink
+import dev.ccpocket.daemon.peer.PeerLinkSecret
+import dev.ccpocket.daemon.peer.PeerLinkStore
 import dev.ccpocket.daemon.review.RelayPeerTransport
 import dev.ccpocket.daemon.schedule.ScheduleEntry
 import dev.ccpocket.daemon.schedule.ScheduleStore

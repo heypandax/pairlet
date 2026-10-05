@@ -190,7 +190,7 @@ class RelayClient(
         val (linkFile, secretFile) = dev.ccpocket.daemon.execution.client.ExecutionClient.defaultLinkPaths()
         val client = dev.ccpocket.daemon.execution.client.ExecutionClient(
             transport = dev.ccpocket.daemon.review.RelayPeerTransport(),
-            links = dev.ccpocket.daemon.review.PeerLinkStore.load(linkFile, secretFile),
+            links = dev.ccpocket.daemon.peer.PeerLinkStore.load(linkFile, secretFile),
             runs = dev.ccpocket.daemon.execution.client.ExecutionClientStore.load(
                 dev.ccpocket.daemon.execution.client.ExecutionClientStore.defaultPath(),
             ),

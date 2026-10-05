@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.daemon.peer.PeerLink
 import dev.ccpocket.protocol.ArtifactKind
 import dev.ccpocket.protocol.ArtifactRef
 import dev.ccpocket.protocol.ReviewBrief

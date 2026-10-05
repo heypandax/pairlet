@@ -76,7 +76,7 @@ object ExecutionFingerprint {
  * out-of-band invite. The relay still redeems the RAW ticket; the handshake uses the derived value, which the
  * relay cannot compute.
  *
- * The derived value is returned as base64url TEXT so it can ride [dev.ccpocket.daemon.review.PeerLinkSecret.ticket]
+ * The derived value is returned as base64url TEXT so it can ride [dev.ccpocket.daemon.peer.PeerLinkSecret.ticket]
  * unchanged — [dev.ccpocket.daemon.review.PeerHandshake.psk] mixes its UTF-8 bytes, and the target arms exactly
  * those bytes.
  */

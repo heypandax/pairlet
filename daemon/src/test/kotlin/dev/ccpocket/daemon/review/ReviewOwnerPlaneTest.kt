@@ -14,6 +14,9 @@ import dev.ccpocket.daemon.handoff.CollaboratorCaps
 import dev.ccpocket.daemon.handoff.CollaboratorControl
 import dev.ccpocket.daemon.handoff.CollaboratorDirectory
 import dev.ccpocket.daemon.handoff.CollaboratorScope
+import dev.ccpocket.daemon.peer.PeerLink
+import dev.ccpocket.daemon.peer.PeerLinkSecret
+import dev.ccpocket.daemon.peer.PeerLinkStore
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.server.RequestRouter
