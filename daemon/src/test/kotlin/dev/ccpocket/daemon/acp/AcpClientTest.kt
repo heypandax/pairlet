@@ -28,7 +28,6 @@ class AcpClientTest {
 
     private fun client(
         resume: AcpClient.Resume = AcpClient.Resume.RESUME,
-        filter: Boolean = true,
         timeoutMs: Long = 30_000,
     ): AcpClient {
         lateinit var c: AcpClient
@@ -43,7 +42,6 @@ class AcpClientTest {
                 handshakeTimeoutMs = timeoutMs,
                 handshakeHint = { "no answer" },
                 describeError = { it?.get("message")?.jsonPrimitive?.content ?: "error" },
-                filterForeignUpdates = filter,
             ),
             LoggerFactory.getLogger("AcpClientTest"),
             object : AcpClient.Host {
@@ -234,16 +232,15 @@ class AcpClientTest {
     }
 
     @Test
-    fun `foreign session updates are dropped only when filtering is configured`() = runBlocking {
-        val foreign = """{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"other","update":{"sessionUpdate":"x"}}}"""
-        val filtering = client(filter = true)
-        filtering.start()
-        filtering.open()
-        assertTrue(filtering.parse(foreign).isEmpty())
-        val open = client(filter = false)
-        open.start()
-        open.open()
-        assertEquals(1, open.parse(foreign).size)
+    fun `another session's updates are dropped, unstamped and own ones flow`() = runBlocking {
+        fun update(session: String?) = """{"jsonrpc":"2.0","method":"session/update","params":{""" +
+            (session?.let { """"sessionId":"$it",""" } ?: "") + """"update":{"sessionUpdate":"x"}}}"""
+        val c = client()
+        c.start()
+        c.open()
+        assertTrue(c.parse(update("other")).isEmpty())
+        assertEquals(1, c.parse(update("s1")).size)
+        assertEquals(1, c.parse(update(null)).size, "an unstamped update is not judged")
     }
 
     @Test

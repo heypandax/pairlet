@@ -490,6 +490,19 @@ class KimiBackendTest {
         assertEquals(blocks("try again"), contentOf(prompts(w).single()), "the new process takes prompts normally")
     }
 
+    // ---- session/update stamped with another session (behaviour aligned with DSH, audit 2026-10-04) ----
+
+    /** A frame stamped with somebody else's session (a sub-agent's) must never enter this chat. */
+    @Test
+    fun `another session's update is dropped`() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        val chunk = """{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"not mine"}}"""
+        val foreign = """{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"someone-else","update":$chunk}}"""
+        assertTrue(b.parse(foreign).isEmpty())
+        assertTrue(b.parse(update(chunk)).any { it is AgentEvent.AssistantText }, "its own session still streams")
+    }
+
     private companion object {
         /** The handshake every other test here answers with: no `agentCapabilities` at all. */
         const val NO_CAPABILITIES = """{"protocolVersion":1}"""

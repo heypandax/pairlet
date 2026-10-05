@@ -138,7 +138,6 @@ class DshBackend(
             // profile with no app in it, so nothing ever claims stdio. The message names the version to install.
             handshakeHint = DshLauncher::outdatedHint,
             describeError = ::describeError,
-            filterForeignUpdates = true,
             keepSessionOpenIdAcrossRelaunch = true,
         ),
         log,

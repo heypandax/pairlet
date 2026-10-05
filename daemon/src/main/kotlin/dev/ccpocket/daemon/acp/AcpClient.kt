@@ -64,8 +64,6 @@ class AcpClient(
         val handshakeHint: () -> String,
         /** A JSON-RPC error object → the one line a user is shown. */
         val describeError: (JsonObject?) -> String,
-        /** Drop `session/update` frames stamped with another session's id (a sub-agent's). */
-        val filterForeignUpdates: Boolean,
         /**
          * Keep the previous process's session-open request id across a relaunch. dsh's backend never reset
          * it, which made its handshake watchdog guard only the FIRST process a backend instance launched;
@@ -306,12 +304,10 @@ class AcpClient(
         return when (method) {
             "session/update" -> {
                 if (replaying) return emptyList() // historical replay from session/load — drop
-                if (config.filterForeignUpdates) {
-                    // The stdio connection is single-session, but the agent stamps every update anyway; a frame
-                    // for another session (a sub-agent's) must never be spliced into this chat.
-                    val sid = params.str("sessionId")
-                    if (sid != null && sessionId != null && sid != sessionId) return emptyList()
-                }
+                // The stdio connection is single-session, but the agent stamps every update anyway; a frame for
+                // another session (a sub-agent's) must never be spliced into this chat.
+                val sid = params.str("sessionId")
+                if (sid != null && sessionId != null && sid != sessionId) return emptyList()
                 host.onUpdate(params.obj("update") ?: return emptyList())
             }
             else -> emptyList()
