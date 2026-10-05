@@ -6,8 +6,12 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Short 6-digit pairing codes -> the payload a phone needs to pair (account id, daemon E2E pubkey,
- * ticket). In-memory, single-use, short-TTL. This is the convenience path; a phone that scans the QR
- * instead gets the daemon pubkey out-of-band (the relay never substitutes it there).
+ * ticket). In-memory, single-use, short-TTL, registered only for interactive owner pairings.
+ *
+ * This is THE pairing path in production: `pairlet pair`'s QR encodes only the code
+ * (`ccpocket://pair?code=…`), so scanning and typing both resolve here, and the daemon pubkey the phone
+ * pins is the one this relay returns. A compromised relay could return a different one; owners detect
+ * that by comparing pairing fingerprints (`pairlet devices` against the App), not by anything here.
  */
 class CodeStore(private val clock: () -> Long = System::currentTimeMillis) {
     private class Entry(val accountId: String, val e2ePub: String, val ticket: String, val expiresAt: Long)

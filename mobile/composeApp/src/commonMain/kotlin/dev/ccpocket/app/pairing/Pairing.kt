@@ -20,7 +20,8 @@ import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 
-/** What the daemon's QR encodes: ccpocket://pair?relay=<wss>&acct=<id>&dpk=<daemon e2e pub>&ticket=<one-time>. */
+/** Everything a redeem needs. Parsed from a full link ccpocket://pair?relay=<wss>&acct=<id>&dpk=<daemon e2e pub>&ticket=<one-time>
+ *  (the daemon does not print one today), or resolved through the relay from the 6-digit code that `pairlet pair`'s QR carries. */
 data class PairingInfo(val relay: String, val accountId: String, val daemonPub: String, val ticket: String)
 
 /**
@@ -55,7 +56,7 @@ private object BindingRoleSerializer : KSerializer<BindingRole> {
 data class PairedDaemon(
     val relay: String,
     val accountId: String,
-    val daemonPub: String,   // base64url P-256, learned out-of-band from the QR (authenticates the daemon)
+    val daemonPub: String,   // base64url P-256 pinned at pairing (authenticates the daemon from then on); for a code pairing the relay supplied it — compare the "Computer fingerprint"
     val deviceId: String,
     val credential: String,  // relay bearer credential
     val label: String? = null, // user-assigned local nickname; wins over hostName/accountId in displayName()

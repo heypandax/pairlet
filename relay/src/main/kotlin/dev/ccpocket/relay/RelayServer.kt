@@ -173,9 +173,10 @@ class RelayServer(
                         is PairingService.RedeemResult.Err ->
                             call.respondError(HttpStatusCode.BadRequest, r.code)
                         is PairingService.RedeemResult.Ok -> {
-                            // hint the daemon (advisory; it allow-lists only after the ticket-PSK handshake
-                            // succeeds). A HEADLESS redeem is withheld from pre-bridge daemons (issue #91):
-                            // they have no bridges store and would file the key as a full-power device.
+                            // tell the daemon. It allow-lists the key on this announce when a ticket it minted is
+                            // still armed there — the announce, i.e. this relay, is its only source for the key.
+                            // A HEADLESS redeem is withheld from pre-bridge daemons (issue #91): they have no
+                            // bridges store and would file the key as a full-power device.
                             val daemonConn = broker.daemonConn(r.accountId)
                             if (!req.headless || (daemonConn != null && daemonConn.daemonProtoV >= PROTO_V_HEADLESS)) {
                                 broker.controlToDaemon(r.accountId, controlText(DevicePaired(r.deviceId, r.devicePubKey)))

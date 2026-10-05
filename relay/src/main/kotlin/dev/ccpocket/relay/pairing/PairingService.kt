@@ -10,8 +10,9 @@ import kotlinx.coroutines.sync.withLock
 /**
  * Mints and redeems pairing tickets. Minting is only ever invoked for an already-authenticated
  * daemon (the relay enforces that at the call site); redeeming atomically consumes a single-use,
- * high-entropy ticket and issues a bearer credential. The relay never sees either party's static
- * key as a source of truth — the device's X25519 pubkey is stored only to forward as a hint.
+ * high-entropy ticket and issues a bearer credential. The device's P-256 pubkey is stored and forwarded
+ * to the daemon, which today has no other source for it — so pairing trusts this relay to forward it
+ * unchanged (owners can check afterwards with the pairing fingerprints).
  */
 class PairingService(
     private val store: RelayStore,
