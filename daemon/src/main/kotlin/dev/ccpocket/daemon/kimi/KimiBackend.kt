@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -57,7 +58,8 @@ import java.util.concurrent.ConcurrentHashMap
  * writes run on both paths. Only DEFAULT → `default` and PLAN → `plan` are written: BYPASS_PERMISSIONS stays
  * on kimi's `default` with the daemon's permission bridge approving every ask (never kimi's own `yolo`/`auto`,
  * which would move the approval decision into kimi). kimi's `plan` is NOT read-only — a Bash call still asks
- * and runs once approved.
+ * and runs once approved. A mode switch on an open session is written at once (kimi switches without a
+ * restart); leaving Plan for Full access writes `default` back. A model switch relaunches.
  */
 class KimiBackend(
     private val kimiBin: String?,
@@ -84,6 +86,13 @@ class KimiBackend(
 
     /** This process's session has been announced ([AgentEvent.SessionInit]) — once, after the launch writes. */
     @Volatile private var announced = false
+
+    /** The mode the launch writes were computed for; a switch landing while they are in flight is caught up
+     *  once they settle (see the config host's onChainSettled). */
+    @Volatile private var launchMode: PermissionMode = PermissionMode.DEFAULT
+
+    /** Owns the mid-session mode writes fired from [applySettings]; replaced on attach, cancelled at process end. */
+    @Volatile private var scope: CoroutineScope? = null
 
     /**
      * The ACP protocol half shared with DSH: handshake, session open, the one-in-flight prompt FIFO
@@ -142,7 +151,15 @@ class KimiBackend(
                 return emptyList()
             }
 
-            override suspend fun onChainSettled(timedOut: Boolean) = announce(timedOut)
+            override suspend fun onChainSettled(timedOut: Boolean): List<AgentEvent> {
+                val events = announce(timedOut)
+                // the user switched mode while the launch writes were in flight — those were computed before it
+                if (!timedOut && mode != launchMode) {
+                    launchMode = mode
+                    switchTarget(mode).takeIf { it != (currentMode ?: MODE_DEFAULT) }?.let { writeMode(it) }
+                }
+                return events
+            }
         },
     )
 
@@ -180,6 +197,8 @@ class KimiBackend(
         // reset per-process state (runs on every (re)launch)
         currentModel = null; currentMode = null; announced = false
         config.reset()
+        scope?.let { runCatching { it.cancel() } }
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         toolCalls.clear()
         stopTaskWatchers() // the previous process's tasks are no longer this conversation's jobs
         // kick off the ACP handshake — session open happens when the initialize response lands
@@ -207,6 +226,7 @@ class KimiBackend(
         currentModel = null; currentMode = null
         readBack(result?.arr("configOptions"))
         client.bindSession(sid)
+        launchMode = mode
         if (config.start(launchWrites())) return emptyList()
         return announce(timedOut = false) + client.openPromptGate()
     }
@@ -339,14 +359,32 @@ class KimiBackend(
         client.respondPermission(askId, allow, remember)
     }
 
-    // A model change relaunches; the new process writes it at session open ([launchWrites]). A mode change does
-    // not force a relaunch — approvals always flow through the permission bridge either way — so it reaches kimi
-    // at the next launch's writes. (Neither is hot-switched mid-session.)
+    /**
+     * A model change relaunches; the new process writes it at session open ([launchWrites]). A mode change never
+     * relaunches (the return value keeps saying so): on an OPEN session it is written to kimi right away — kimi
+     * switches mode without a restart — through the same config chain, as a user-driven write that reports its own
+     * failure. Before the session is open it is only recorded; the launch writes carry it.
+     *
+     * Runs on the Conversation's command path, so the write is fired on the per-process scope, not awaited.
+     */
     override fun applySettings(mode: PermissionMode?, model: String?, effort: String?): Boolean {
         var relaunch = false
         model?.let { if (it != this.model) { this.model = it; relaunch = true } }
-        mode?.let { this.mode = it }
+        mode?.let { wanted ->
+            val before = switchTarget(this.mode)
+            this.mode = wanted
+            val target = switchTarget(wanted)
+            // a changed target, or one kimi is not on (a refused launch write); never a repeat of the same request
+            if (announced && (target != before || target != (currentMode ?: MODE_DEFAULT))) {
+                scope?.launch { writeMode(target) }
+            }
+        }
         return relaunch
+    }
+
+    /** A mid-session mode write. The chain's own settle re-opens nothing new: the gate is already open. */
+    private suspend fun writeMode(target: String) {
+        config.start(listOf(AcpConfigChain.Write(CONFIG_MODE, target, announce = true)))
     }
 
     // kimi self-manages its session store. A dead process cannot take a completion frame any more (inject
@@ -355,6 +393,8 @@ class KimiBackend(
         stopTaskWatchers()
         client.processEnded()
         config.close()
+        scope?.let { runCatching { it.cancel() } }
+        scope = null
     }
 
     // ---- background task completion (issue #391) ----
@@ -438,6 +478,10 @@ class KimiBackend(
             PermissionMode.PLAN -> "plan"
             PermissionMode.ACCEPT_EDITS, PermissionMode.BYPASS_PERMISSIONS -> null
         }
+
+        /** The kimi mode a MID-SESSION switch moves to: the same mapping, with the daemon-enforced modes back on
+         *  kimi's `default` — leaving Plan for Full access must not leave kimi in `plan`. */
+        internal fun switchTarget(mode: PermissionMode): String = kimiMode(mode) ?: MODE_DEFAULT
 
         // kimi's own task-id shape (its VALID_TASK_ID, read out of the 2.1.1 bundle). The id becomes a file
         // name under the session dir, so anything else — a path, a `..` — is refused rather than resolved.

@@ -281,6 +281,33 @@ class KimiBackendLiveIT {
         assertTrue(ran.toFile().exists(), "the approved command did not run — plan would then be read-only after all")
     }
 
+    /** A mode switch on an open session reaches kimi at once — no relaunch — and leaving Plan for Full access puts
+     *  kimi back on `default` (never `yolo`). */
+    @Test
+    fun a_mid_session_mode_switch_reaches_kimi_without_a_relaunch() = runBlocking {
+        val h = launch("switch")
+        h.opened()
+        suspend fun awaitMode(mode: String): Boolean {
+            val deadline = System.currentTimeMillis() + 30_000
+            while (System.currentTimeMillis() < deadline) {
+                if (h.lines.any { !it.outbound && "\"current_mode_update\"" in it.text && "\"currentModeId\":\"$mode\"" in it.text }) return true
+                kotlinx.coroutines.delay(50)
+            }
+            return false
+        }
+        assertEquals(false, h.backend.applySettings(PermissionMode.PLAN, null, null), "a mode switch is not a relaunch")
+        assertTrue(awaitMode("plan"), "kimi never reported plan")
+        h.backend.sendPrompt("Reply with exactly one word: PONG. Do not use any tool.", emptyList())
+        assertTrue(h.turn().result?.isError == false)
+        assertEquals(false, h.backend.applySettings(PermissionMode.BYPASS_PERMISSIONS, null, null))
+        assertTrue(awaitMode("default"), "kimi stayed in plan after leaving it")
+        h.dump("switch"); report(h, "switch")
+        val writes = h.outbound("session/set_config_option").map { it.text }
+        println("[kimi-live] switch: writes=$writes updates=${h.lines.filter { !it.outbound && "current_mode_update" in it.text }.map { it.text.takeLast(60) }}")
+        assertTrue(writes.none { "yolo" in it }, "$writes")
+        assertEquals(1, h.outbound("initialize").size, "the process was not relaunched")
+    }
+
     /** The case 547f7651 (drop `session/update`s stamped with another session's id) has to get right. */
     @Test
     fun sub_agent_traffic_carries_the_main_session_id() = runBlocking {

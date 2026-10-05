@@ -175,6 +175,85 @@ class KimiLaunchConfigTest {
         assertTrue(injected.isEmpty(), "a launch-time refusal stays quiet, like dsh's: $injected")
     }
 
+    // ---- mid-session mode switch: written at once on an open session, never a relaunch ----
+
+    private suspend fun awaitWrites(n: Int) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (writes().size < n && System.currentTimeMillis() < deadline) kotlinx.coroutines.delay(10)
+        assertEquals(n, writes().size, "writes: ${writes()}")
+    }
+
+    private suspend fun answer(b: KimiBackend, write: String, mode: String) =
+        b.parse("""{"jsonrpc":"2.0","id":${idOf(write)},"result":{"configOptions":${configOptions(mode = mode)}}}""")
+
+    @Test
+    fun `switching an open session to plan writes plan at once without a relaunch`() = runBlocking {
+        val (b, _) = open()
+        assertEquals(false, b.applySettings(mode = PermissionMode.PLAN, model = null, effort = null), "no relaunch")
+        awaitWrites(1)
+        val write = writes().single()
+        assertEquals("s1", param(write, "sessionId"))
+        assertEquals("mode", param(write, "configId"))
+        assertEquals("plan", param(write, "value"))
+        answer(b, write, "plan")
+        // the prompt is not held by a mid-session write
+        b.sendPrompt("hello", emptyList())
+        assertTrue(prompts().single().contains("hello"))
+        b.onProcessEnded("s1")
+    }
+
+    @Test
+    fun `switching back to default writes default`() = runBlocking {
+        val (b, _) = open(mode = PermissionMode.PLAN, current = configOptions(mode = "plan"))
+        assertTrue(writes().isEmpty())
+        assertEquals(false, b.applySettings(mode = PermissionMode.DEFAULT, model = null, effort = null))
+        awaitWrites(1)
+        assertEquals("default", param(writes().single(), "value"))
+        b.onProcessEnded("s1")
+    }
+
+    @Test
+    fun `leaving plan for full access writes kimi back to default, never yolo`() = runBlocking {
+        val (b, _) = open(mode = PermissionMode.PLAN, current = configOptions(mode = "plan"))
+        assertEquals(false, b.applySettings(mode = PermissionMode.BYPASS_PERMISSIONS, model = null, effort = null))
+        awaitWrites(1)
+        assertEquals("default", param(writes().single(), "value"))
+        assertTrue(w.none { "yolo" in it }, "$w")
+        b.onProcessEnded("s1")
+    }
+
+    @Test
+    fun `a switch before the session opens is only recorded and the launch writes carry it once`() = runBlocking {
+        val b = KimiBackend(null)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+            AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT),
+        )
+        b.parse("""{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}""")
+        assertEquals(false, b.applySettings(mode = PermissionMode.PLAN, model = null, effort = null))
+        kotlinx.coroutines.delay(100)
+        assertTrue(writes().isEmpty(), "nothing to write to before the session exists: ${writes()}")
+        b.parse("""{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1","configOptions":${configOptions()}}}""")
+        val launch = writes().single()
+        assertEquals("plan", param(launch, "value"))
+        answer(b, launch, "plan")
+        kotlinx.coroutines.delay(100)
+        assertEquals(1, writes().size, "written once, by the launch chain: ${writes()}")
+        b.onProcessEnded("s1")
+    }
+
+    @Test
+    fun `a switch while the launch writes are in flight is caught up once they settle`() = runBlocking {
+        val (b, _) = open(model = "mock-b")
+        val launch = writes().single()
+        assertEquals(false, b.applySettings(mode = PermissionMode.PLAN, model = null, effort = null))
+        kotlinx.coroutines.delay(100)
+        assertEquals(1, writes().size, "not written over the launch chain: ${writes()}")
+        b.parse("""{"jsonrpc":"2.0","id":${idOf(launch)},"result":{"configOptions":${configOptions(model = "mock-b")}}}""")
+        assertEquals("plan", param(writes().last(), "value"))
+        b.onProcessEnded("s1")
+    }
+
     /** Same as dsh: a launch write that never answers fails the open with a stage error and settles the waiting
      *  prompt — never "carry on on kimi's default", which would let the user believe their pick took effect. */
     @Test
