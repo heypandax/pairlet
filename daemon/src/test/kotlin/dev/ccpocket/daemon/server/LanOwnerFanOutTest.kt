@@ -14,9 +14,6 @@ import dev.ccpocket.daemon.handoff.HandoffService
 import dev.ccpocket.daemon.handoff.HandoffStore
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
-import dev.ccpocket.daemon.review.ReviewRegistry
-import dev.ccpocket.daemon.review.ReviewService
-import dev.ccpocket.daemon.review.ReviewStore
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
@@ -28,9 +25,6 @@ import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PocketJson
-import dev.ccpocket.protocol.ReviewRequest
-import dev.ccpocket.protocol.ReviewStatus
-import dev.ccpocket.protocol.ReviewUpdated
 import dev.ccpocket.protocol.SessionHandoff
 import io.ktor.websocket.WebSocketExtension
 import io.ktor.websocket.WebSocketSession
@@ -55,16 +49,13 @@ import kotlin.test.assertTrue
 import io.ktor.websocket.Frame as WsFrame
 
 /**
- * The DIRECT (LAN / loopback) transport's owner fan-out (REVIEW-REQUEST.md §5.1).
+ * The DIRECT (LAN / loopback) transport's owner fan-out.
  *
  * The desktop app on the daemon's own machine — and any phone on the same network — arrives HERE, not
- * over the relay. [dev.ccpocket.daemon.relay.DeviceSessions] attaches an owner's sink to BOTH the handoff
- * and the review services; this transport used to attach only the first. The symptom was quiet and
- * confusing rather than broken: commands answered normally, a colleague's response landed in the daemon's
- * ledger, and the Review Center simply never showed it until something forced a re-list.
+ * over the relay, and must see the same owner pushes a relay connection sees.
  *
- * So what is under test is the SYMMETRY, in both directions: a live LAN owner sees `ReviewUpdated`
- * pushes, and the sink dies with its own socket — not with a sibling's.
+ * So what is under test is the SYMMETRY, in both directions: a live LAN owner sees owner pushes, and the
+ * sink dies with its own socket — not with a sibling's.
  */
 class LanOwnerFanOutTest {
 
@@ -113,7 +104,6 @@ class LanOwnerFanOutTest {
         private val tmp = Files.createTempDirectory("ccp-lan-fanout").toFile()
         val registry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { StubBackend() }))
         val handoffs = HandoffService(HandoffRegistry(HandoffStore.load(tmp.resolve("handoffs.json"))))
-        val reviews = ReviewService(ReviewRegistry(ReviewStore.load(tmp.resolve("reviews.json"))))
         val router = RequestRouter(
             registry = registry,
             dirs = DirectoryService(),
@@ -129,7 +119,6 @@ class LanOwnerFanOutTest {
                 dev.ccpocket.daemon.schedule.ScheduleStore.load(tmp.resolve("schedules.json")),
                 executor = { null },
             ),
-            reviews = reviews,
         )
 
         init { registry.handoffs = handoffs }
@@ -139,7 +128,7 @@ class LanOwnerFanOutTest {
         fun connect(): Pair<FakeWsSession, Job> {
             val ws = FakeWsSession(scope.coroutineContext)
             val job = scope.launch {
-                WsConnection(ws, router, registry, e2e = null, ownerControls = null, reviews = reviews).serve()
+                WsConnection(ws, router, registry, e2e = null, ownerControls = null).serve()
             }
             return ws to job
         }
@@ -163,37 +152,25 @@ class LanOwnerFanOutTest {
             @Suppress("UNREACHABLE_CODE") error("unreachable")
         }
 
-    private fun review(id: String, status: ReviewStatus) = ReviewRequest(
-        id = id, senderDeviceId = "devA", recipientDeviceId = "devB",
-        title = "the LAN push", status = status, revision = 1, createdAt = 1, updatedAt = 1,
-    )
-
     private fun handoff(id: String) = SessionHandoff(
         id = id, sourceSessionId = "sess-1", workdir = "/tmp/wd",
         initiatorDeviceId = "devA", status = HandoffStatus.WAITING,
     )
 
     @Test
-    fun a_lan_owner_receives_live_review_updates_and_stops_the_moment_its_socket_dies() = runBlocking {
+    fun a_lan_owner_receives_live_owner_pushes_and_stops_the_moment_its_socket_dies() = runBlocking {
         val f = Fixture(this)
         val (ws, job) = f.connect()
 
         // 1. live: the push arrives on this socket without the client asking for anything
-        val got = awaitPush(ws) { f.reviews.broadcast(listOf(review("rq-1", ReviewStatus.RESPONDED))) }
-        val updated = assertNotNull(got as? ReviewUpdated, "a LAN owner must see ReviewUpdated: $got")
-        assertEquals("rq-1", updated.request.id)
-        assertEquals(ReviewStatus.RESPONDED, updated.request.status)
-
-        // 2. …and the handoff fan-out this sits beside is untouched
         val handoffPush = awaitPush(ws) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
         assertEquals("h-1", assertNotNull(handoffPush as? HandoffUpdated).handoff.id)
 
-        // 3. the socket dies -> the sink goes with it, on BOTH services
+        // 2. the socket dies -> the sink goes with it
         ws.hangUp()
         job.join()
         while (withTimeoutOrNull(20) { ws.sent.receive() } != null) Unit // drain anything already queued
 
-        f.reviews.broadcast(listOf(review("rq-2", ReviewStatus.CLOSED)))
         f.handoffs.broadcast(listOf(handoff("h-2")))
         assertNull(
             withTimeoutOrNull(200) { ws.sent.receive() },
@@ -213,8 +190,8 @@ class LanOwnerFanOutTest {
         val (second, _) = f.connect()
 
         // both live
-        awaitPush(first) { f.reviews.broadcast(listOf(review("rq-1", ReviewStatus.DELIVERED))) }
-        awaitPush(second) { f.reviews.broadcast(listOf(review("rq-1", ReviewStatus.DELIVERED))) }
+        awaitPush(first) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
+        awaitPush(second) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
 
         first.hangUp()
         firstJob.join()
@@ -222,8 +199,8 @@ class LanOwnerFanOutTest {
         while (withTimeoutOrNull(20) { second.sent.receive() } != null) Unit
         while (withTimeoutOrNull(20) { first.sent.receive() } != null) Unit
 
-        val stillLive = awaitPush(second) { f.reviews.broadcast(listOf(review("rq-3", ReviewStatus.RESPONDED))) }
-        assertEquals("rq-3", assertNotNull(stillLive as? ReviewUpdated).request.id)
+        val stillLive = awaitPush(second) { f.handoffs.broadcast(listOf(handoff("h-3"))) }
+        assertEquals("h-3", assertNotNull(stillLive as? HandoffUpdated).handoff.id)
 
         assertNull(
             withTimeoutOrNull(200) { first.sent.receive() },

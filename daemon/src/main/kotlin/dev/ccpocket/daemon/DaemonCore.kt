@@ -285,8 +285,6 @@ class DaemonCore(
         approvals = approvals,
         grants = grants,
         approvalHistory = approvalHistory,
-        reviews = reviews,
-        reviewOwner = reviewOwner,
         projectPins = projectPins,
         managedSessions = managedSessions, // issue #360: without this the router advertises and serves nothing
         voiceMemo = voiceMemo,

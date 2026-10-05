@@ -113,7 +113,6 @@ import dev.ccpocket.protocol.ListSessions
 import dev.ccpocket.protocol.ListArchivedSessions
 import dev.ccpocket.protocol.PathEntries
 import dev.ccpocket.protocol.PendingApprovals
-import dev.ccpocket.daemon.review.dispatchReviewFrame
 import dev.ccpocket.protocol.ReadFile
 import dev.ccpocket.protocol.ReadFileDiff
 import dev.ccpocket.protocol.RenameSession
@@ -195,15 +194,6 @@ class RequestRouter(
     // the session-archive store's backing file (issue #202). Injectable like prefs/presets/schedules so a
     // test never reads or rewrites the developer's real ~/.cc-pocket/session-archive.json.
     private val archiveFile: java.io.File = SessionArchive.defaultFile(),
-    /** ReviewRequest, sender-authoritative side (REVIEW-REQUEST.md). Null = this daemon has no review
-     *  plane wired (a bare router in a unit test): every pocket/review.* frame then answers with an
-     *  honest `review_unavailable` instead of silently doing nothing. Deliberately a SEPARATE handle
-     *  from [SessionRegistry.handoffs] — the two planes never share state. */
-    private val reviews: dev.ccpocket.daemon.review.ReviewService? = null,
-    /** The OWNER-LOCAL review plane (contacts + THIS machine's received inbox + prepare + queued
-     *  recipient actions), shared with the CLI's local control API so both run one implementation.
-     *  Null = not wired: the owner frames answer `review_unavailable` rather than half-working. */
-    private val reviewOwner: dev.ccpocket.daemon.review.ReviewOwnerService? = null,
     /** Project-pin sync (issue #362): this computer's authoritative pin list. Null = not wired (a bare router
      *  in a unit test): a pin request then answers `pins_unavailable` instead of silently doing nothing. */
     private val projectPins: dev.ccpocket.daemon.pins.ProjectPinService? = null,
@@ -1270,11 +1260,13 @@ class RequestRouter(
             is ReturnHandoff -> handoffMutation(sink, origin, guestScope, collabScope, recipientSide = true, handoffId = frame.handoffId) { it.returnHandoff(frame.handoffId, dev, frame.result) }
             is CompleteHandoff -> handoffMutation(sink, origin, guestScope, collabScope) { it.complete(frame.handoffId, dev) }
 
-            // ReviewRequest frames (REVIEW-REQUEST.md §10 + the owner-local plane) are dispatched by
-            // [dispatchReviewFrame] (review/ReviewRouting.kt) — false = not a review frame.
-            else -> if (!dispatchReviewFrame(frame, sink, dev, origin, guestScope, collabScope, reviews, reviewOwner)) {
-                sink.emit(PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"))
-            }
+            // Review requests are retired: the three list requests answer an empty list of their own type
+            // ([retiredReviewListing]); every other frame not handled above, the other retired review
+            // requests included, answers `unsupported`.
+            else -> sink.emit(
+                retiredReviewListing(frame)
+                    ?: PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"),
+            )
         }
     }
 

@@ -91,18 +91,6 @@ class WsConnection(
      *  pass the LAN gate). Null while the relay link is still coming up, or forever on a LAN-only `serve`
      *  (minting needs the relay). */
     private val ownerControls: (() -> Triple<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?, dev.ccpocket.daemon.handoff.CollaboratorControl?>)? = null,
-    /** ReviewRequest fan-out (REVIEW-REQUEST.md §5.1), for the SAME reason [ownerControls] is served here:
-     *  the desktop app on the daemon's own machine — and any phone on the LAN — arrives on this transport,
-     *  not over the relay. Without it those clients answer commands but never see a live `ReviewUpdated`,
-     *  so a colleague's response only appears on a manual re-list.
-     *
-     *  [dev.ccpocket.daemon.server.DaemonServer] passes it on BOTH flavours, including the plaintext
-     *  `--local` one, and that is not an oversight: a `--local` socket already routes to the router as a
-     *  full-power owner (no origin, no guest/collab scope), so it can enumerate every row with
-     *  `ListReviewRequests` whether or not it is attached here. Push adds no authority it lacks — the
-     *  loopback-only default is what bounds that socket, not this parameter. Null only for a caller that
-     *  hasn't got the service (tests). */
-    private val reviews: dev.ccpocket.daemon.review.ReviewService? = null,
 ) {
     private val outbox = Channel<Envelope>(Channel.BUFFERED)
     private val nextId = AtomicLong(0)
@@ -248,11 +236,6 @@ class WsConnection(
         // construction (the gate refuses restricted credentials), so it may see HandoffUpdated pushes.
         // Instance-keyed (one sink per connection) — MUST detach on disconnect, see the finally below.
         registry.handoffs?.attach(sink)
-        // …and the review fan-out on the same footing, with NO recipient filter — exactly the owner
-        // attach the relay branch does (DeviceSessions: `core.reviews.attach(sink)`). The two transports
-        // must agree about what an owner sees, or "did my colleague answer yet" depends on which one the
-        // desktop app happened to connect over.
-        reviews?.attach(sink)
         // project-pin pushes (issue #362) — for a GATED socket only: the plaintext --local socket has no
         // transport-authenticated device and never syncs. Resolved at emission, and re-checked by the writer.
         val pins = if (crypto != null) router.projectPinService else null
@@ -416,8 +399,7 @@ class WsConnection(
             }
         } finally {
             registry.handoffs?.detach(sink) // this connection's fan-out slot dies with the socket
-            reviews?.detach(sink)           // …keyed by THIS sink, so a sibling connection is untouched
-            pins?.detach(sink)              // #362: same per-connection slot for pin pushes
+            pins?.detach(sink)            // #362: same per-connection slot for pin pushes
             managed?.detach(sink)           // #360: …and for managed session list pushes
             caps.pinRetired = true          // …and a closed connection can never hold a pin subscription again
             caps.pinSubscriptionId = null
