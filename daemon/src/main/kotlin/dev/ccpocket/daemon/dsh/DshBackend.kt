@@ -534,12 +534,6 @@ class DshBackend(
      *  read-back rather than the request — see [DshBackendLiveIT]). */
     internal fun liveModelForTest(): String? = options.currentModel
 
-    /** VISIBLE FOR TESTS ONLY: stands in for the session a live handshake would have opened. */
-    internal fun bindSessionForTest(id: String, options: DshConfigOptions = DshConfigOptions.EMPTY) {
-        client.bindSession(id)
-        this.options = options
-    }
-
     // ---- helpers ----
 
     /** A [AgentEvent.RuntimeMeta] only when at least one field is really present — an all-null event would

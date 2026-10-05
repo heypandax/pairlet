@@ -104,29 +104,6 @@ object DshLauncher {
      *  local API this backend used to drive — see [DshBackend]). Quoted in the user-facing hints. */
     const val MIN_VERSION = "0.1.2-rc.1"
 
-    /**
-     * Translate a launch failure's stderr into something a user can act on, or null when it says nothing
-     * we recognize.
-     *
-     *  - **Too-old dsh.** `--profile acp` on a pre-0.1.2 install boots a profile whose bundle list has no
-     *    app in it: nothing ever claims stdio and the handshake simply never answers. That is also the
-     *    exact symptom of the release that broke the old web transport, so it is worth naming the version.
-     *  - **Too-old Node.** dsh requires Node ≥ 22.12; under an older one the failure surfaces as an opaque
-     *    syntax/engine error.
-     */
-    fun launchHint(stderr: String?): String? {
-        val s = stderr?.lowercase() ?: return null
-        val looksLikeEngineFailure = "unsupported engine" in s ||
-            ("node" in s && ("requires" in s || "engine" in s)) ||
-            "unexpected token" in s || "syntaxerror" in s
-        if (looksLikeEngineFailure) {
-            return "DeepSeek Harness requires Node.js 22.12 or newer — upgrade Node, or point --dsh-bin at a " +
-                "dsh installed under a newer runtime."
-        }
-        val looksLikeMissingProfile = "profile" in s && ("acp" in s || "unknown" in s || "no app" in s)
-        return if (looksLikeMissingProfile) outdatedHint() else null
-    }
-
     /** What to tell a user whose dsh cannot serve ACP at all. */
     fun outdatedHint(): String =
         "this DeepSeek Harness has no `acp` profile — cc-pocket needs dsh $MIN_VERSION or newer " +
@@ -145,7 +122,7 @@ object DshLauncher {
      *    the same underneath, which is what the user actually sees first.
      *
      * Deliberately NOT matched: `unknown profile` / `no app` (that is a too-old dsh → [outdatedHint], not
-     * a missing file a reinstall of the SAME version would restore) and plain engine errors ([launchHint]).
+     * a missing file a reinstall of the SAME version would restore) and plain engine errors (a too-old Node).
      */
     fun looksLikeIncompleteInstall(stderr: String?): Boolean {
         val s = stderr?.lowercase() ?: return false
