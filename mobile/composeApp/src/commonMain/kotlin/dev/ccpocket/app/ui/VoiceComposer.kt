@@ -409,6 +409,8 @@ fun RecordingBar(
     levels: List<Float>,
     onCancel: () -> Unit,
     onDone: () -> Unit,
+    /** S3 while the audio is still queued on the phone: the same spinner row reads the upload line instead. */
+    uploading: Boolean = false,
 ) {
     val appear = remember { Animatable(0f) }
     LaunchedEffect(Unit) { appear.animateTo(1f, tween(220, easing = MorphEasing)) }
@@ -433,7 +435,8 @@ fun RecordingBar(
                 // Keep the live region on the stable state text only. Putting it on the whole bar would
                 // re-announce every timer tick; this announces the Recording -> Transcribing edge once.
                 Text(
-                    stringResource(Res.string.transcribing),
+                    // one recording → the file strip's own "uploading 1 of 1" line
+                    if (uploading) stringResource(Res.string.file_strip_uploading, 1, 1) else stringResource(Res.string.transcribing),
                     color = Tok.tx2,
                     fontSize = 13.sp,
                     style = tightCenter(13.sp),

@@ -1802,8 +1802,18 @@ class PocketRepository(
     private val recorder by lazy { VoiceRecorder() }
     private var usingNative = false
     private var preferRemote = false                         // sticky after a native-engine failure
-    private var keptAudio: RecordedAudio? = null             // retained for S5 retry (re-send, not re-record)
+    internal var keptAudio: RecordedAudio? = null            // retained for S5 retry (re-send, not re-record); internal: tests stage a capture
     internal var captureId: String? = null // internal: tests drive onTranscript's capture-match gate
+    // Every send of [keptAudio] that may still answer: [captureId] plus the earlier sends a retry left in
+    // flight. They carry the same recording, so whichever transcript lands first is used and the rest are
+    // dropped; a failure only ends the wait once none is left. Replaced as a whole, never mutated in place
+    // (a transient upload's fence reads it from the writer).
+    private var voiceAttempts: Set<String> = emptySet()
+    // The capture's audio is queued but the socket has not taken it yet (S3 shows "uploading", and the
+    // transcript wait has not started). Only on a connection that reports writes; see [sendVoiceChunks].
+    val voiceUploading = mutableStateOf(false)
+    /** Test seam: stands in for the transient enqueue of a dictation chunk, so a test controls when it is written. */
+    internal var voiceUploadForTest: ((Frame) -> dev.ccpocket.app.net.TransientTicket)? = null
     private var voiceTicker: Job? = null
     private var voiceTimeout: Job? = null
     private var levelsJob: Job? = null
@@ -6217,7 +6227,9 @@ class PocketRepository(
             return false
         }
         degradedSendArmed = false // consumed — the next prompt into a still-degraded session gates again
-        if (voice.value is VoiceState.Failed) clearVoice() // sending dismisses the error chip
+        // sending dismisses the error chip, and the slow-transcript note with it (a late result must not
+        // reappear in the composer after the user moved on and sent something else)
+        if (voice.value is VoiceState.Failed || voice.value is VoiceState.StillWaiting) clearVoice()
         val images = ready.map { ImageData("image/jpeg", Base64.Default.encode(it)) }
         // landed files ride as `@path` references appended to the prompt — the #75 mechanism, so the
         // agent Reads the inbox file by path; the daemon never re-parses anything upload-specific
@@ -6883,7 +6895,13 @@ class PocketRepository(
     fun startVoice() {
         if (convoId.value == null) return
         if (memoHost.holdsMicrophone) return // one recorder: a memo capture is using the microphone
-        if (voice.value !is VoiceState.Idle && voice.value !is VoiceState.Failed) return
+        val v = voice.value
+        if (v !is VoiceState.Idle && v !is VoiceState.Failed && v !is VoiceState.StillWaiting) return
+        // a new recording abandons whatever the last one was still waiting for: a late transcript of the old
+        // capture must never land beside (or instead of) the new one
+        voiceTimeout?.cancel()
+        voiceAttempts = emptySet()
+        voiceUploading.value = false
         clearNotice()
         voiceLevels.clear()
         if (NativeDictation.available && !preferRemote && !voiceWhisper.value) startNativeVoice() else startRemoteVoice()
@@ -6929,7 +6947,7 @@ class PocketRepository(
         voiceStartJob?.cancel(); interruptJob?.cancel() // #266: cancel a start still in its async window, and the interruption watch
         when (voice.value) {
             is VoiceState.Recording -> if (usingNative) NativeDictation.cancel() else recorder.cancel()
-            is VoiceState.Transcribing -> {
+            is VoiceState.Transcribing, is VoiceState.StillWaiting -> {
                 if (usingNative) NativeDictation.cancel()
                 if (notifyDaemon) {
                     val id = captureId
@@ -6942,7 +6960,8 @@ class PocketRepository(
         clearVoice()
     }
 
-    /** S5 retry mic: re-send the kept audio without re-recording; else record again (remote engine after a native failure). */
+    /** S5 retry mic: re-send the kept audio without re-recording; else record again (remote engine after a native failure).
+     *  From [VoiceState.StillWaiting] the earlier send stays acceptable: both carry the same recording. */
     fun retryVoice() {
         val kept = keptAudio
         if (kept != null) {
@@ -7075,34 +7094,121 @@ class PocketRepository(
         val c = convoId.value ?: run { clearVoice(); return }
         val id = randomCaptureId()
         captureId = id
+        voiceAttempts = voiceAttempts + id // a retry keeps the earlier send of the same recording acceptable
+        voiceTimeout?.cancel()
         scope.launch {
             val parts = Base64.Default.encode(audio.bytes).chunked(AUDIO_CHUNK_B64)
+            val frames = parts.mapIndexed { i, p -> AudioChunk(c, id, i, last = i == parts.lastIndex, mediaType = audio.mediaType, base64 = p) }
             try {
-                parts.forEachIndexed { i, p ->
-                    send(AudioChunk(c, id, i, last = i == parts.lastIndex, mediaType = audio.mediaType, base64 = p))
-                }
+                sendVoiceChunks(id, frames) { id in voiceAttempts && convoId.value == c }
+            } catch (e: CancellationException) {
+                throw e
             } catch (t: Throwable) {
-                voice.value = VoiceState.Failed(Res.string.voice_daemon_unreachable)
+                if (captureId == id) {
+                    voiceUploading.value = false
+                    voiceAttempts = emptySet()
+                    voice.value = VoiceState.Failed(Res.string.voice_daemon_unreachable)
+                }
                 return@launch
             }
-            startVoiceTimeout(TRANSCRIBE_TIMEOUT_MS)
+            // the capture may have been answered (demo loopback), cancelled or superseded by a retry meanwhile
+            if (captureId != id || id !in voiceAttempts) return@launch
+            voiceUploading.value = false
+            if (voice.value is VoiceState.Transcribing) armTranscriptWait(id)
         }
+    }
+
+    /**
+     * Queue one capture's chunks and return once they are out of the app's hands.
+     *
+     * Where the connection reports writes (the transient outbox the voice memo upload uses — an owner binding
+     * on the relay or the direct leg), the chunks are queued on it and this returns only when the socket has
+     * taken the last of them: the transcript wait starts from there, so time spent queued behind a stalled
+     * upload no longer counts against the computer (2026-10-05). Meanwhile S3 reads "uploading". A transient
+     * frame is bound to one connection and dropped, never re-sent, when that connection goes away; dictation
+     * wants the opposite, so any chunk that was not proven written is handed to the ordinary outbox, which
+     * carries it across the reconnect as before. Same captureId: the daemon drops a chunk of a capture it
+     * already assembled as stale. A capture abandoned meanwhile ([live] false) is not re-sent — its fence
+     * already kept the queued chunks off the wire.
+     *
+     * Elsewhere (plain LAN, demo, a non-owner binding) the chunks take the ordinary outbox and the wait starts
+     * once they are queued, as it always has.
+     */
+    private suspend fun sendVoiceChunks(id: String, frames: List<AudioChunk>, live: () -> Boolean) {
+        val seam = voiceUploadForTest
+        val transport = if (seam == null) memoTransport() else null
+        if (seam == null && transport == null) {
+            frames.forEach { send(it) }
+            return
+        }
+        voiceUploading.value = true
+        armUploadGuard(id)
+        val fence = dev.ccpocket.app.net.TransientDispatchFence { live() }
+        val tickets = frames.map { f ->
+            if (seam != null) { onSendForTest?.invoke(f); seam(f) } else memoEnqueue(transport!!, f, fence)
+        }
+        val outcomes = tickets.map { it.outcome.await() }
+        if (!live()) return
+        frames.filterIndexed { i, _ -> outcomes[i] != dev.ccpocket.app.net.TransientDisposition.WRITTEN }
+            .forEach { send(it) }
+    }
+
+    /** While the chunks are still queued: a capture whose audio never leaves the phone gives up after the same
+     *  final bound a sent one gets, instead of reading "uploading" for ever. */
+    private fun armUploadGuard(id: String) {
+        voiceTimeout?.cancel()
+        voiceTimeout = scope.launch {
+            delay(TRANSCRIBE_GIVE_UP_MS)
+            if (captureId == id && voiceUploading.value && voice.value is VoiceState.Transcribing) giveUpTranscript()
+        }
+    }
+
+    /**
+     * The transcript wait of send [id], from the moment its audio left the phone. After [TRANSCRIBE_TIMEOUT_MS]
+     * the wait turns neutral ([VoiceState.StillWaiting]: a late transcript is still used, retry is offered);
+     * only [TRANSCRIBE_GIVE_UP_MS] gives up. A retry re-arms this for its own send.
+     */
+    private fun armTranscriptWait(id: String) {
+        voiceTimeout?.cancel()
+        voiceTimeout = scope.launch {
+            delay(TRANSCRIBE_TIMEOUT_MS)
+            if (captureId != id) return@launch
+            if (voice.value is VoiceState.Transcribing) voice.value = VoiceState.StillWaiting
+            delay(TRANSCRIBE_GIVE_UP_MS - TRANSCRIBE_TIMEOUT_MS)
+            val v = voice.value
+            if (captureId == id && (v is VoiceState.StillWaiting || v is VoiceState.Transcribing)) giveUpTranscript()
+        }
+    }
+
+    /** Final: no send of this recording is waited for any longer. A retry starts a fresh one. */
+    private fun giveUpTranscript() {
+        voiceUploading.value = false
+        voiceAttempts = emptySet()
+        voice.value = VoiceState.Failed(Res.string.voice_no_response)
     }
 
     private fun onTranscript(f: Transcript) {
         // #266: bind to the conversation too, not just captureId. A capture dictated in session A whose
         // transcript arrives after the user jumped to session B must never land in B's composer — captureId
         // alone let it through because it isn't reset on session switch.
-        if (f.captureId != captureId || f.convoId != convoId.value) return // a superseded/cancelled/foreign capture
-        voiceTimeout?.cancel()
-        if (voice.value !is VoiceState.Transcribing) return
+        if (f.convoId != convoId.value) return // a foreign capture
+        // the current send, or an earlier send of the SAME recording a retry left in flight
+        if (f.captureId != captureId && f.captureId !in voiceAttempts) return // a superseded/cancelled capture
+        val v = voice.value
+        if (v !is VoiceState.Transcribing && v !is VoiceState.StillWaiting) return
         if (f.ok) {
-            deliverTranscript(f.text)
-        } else {
-            voice.value = VoiceState.Failed(Res.string.voice_transcribe_failed, f.error)
+            voiceTimeout?.cancel()
+            deliverTranscript(f.text) // clears every send: a second transcript of this recording is dropped
+            return
         }
+        voiceAttempts = voiceAttempts - f.captureId
+        if (voiceAttempts.isNotEmpty()) return // another send of this recording may still answer
+        voiceTimeout?.cancel()
+        voiceUploading.value = false
+        voice.value = VoiceState.Failed(Res.string.voice_transcribe_failed, f.error)
     }
 
+    /** Native engine only: stop() → Final guard. The remote engine waits with [armTranscriptWait]. */
     private fun startVoiceTimeout(ms: Long) {
         voiceTimeout?.cancel()
         voiceTimeout = scope.launch {
@@ -7135,6 +7241,8 @@ class PocketRepository(
         livePartial.value = ""
         keptAudio = null
         captureId = null
+        voiceAttempts = emptySet() // also fences off any chunk still queued for one of them
+        voiceUploading.value = false
         usingNative = false
     }
 
@@ -7771,7 +7879,13 @@ class PocketRepository(
         fun base64Len(rawBytes: Int) = 4 * ((rawBytes + 2) / 3)
 
         const val LEVEL_WINDOW = 48                  // rolling waveform samples (~4 s at 12 Hz)
-        const val TRANSCRIBE_TIMEOUT_MS = 15_000L    // upload → Transcript round-trip guard
+        // Remote dictation, counted from the moment the audio left the phone (or was queued, on a connection
+        // that does not report writes). Past TIMEOUT the wait turns neutral and a late transcript still lands;
+        // GIVE_UP is final. 90 s covers the daemon's own worst case — audio conversion (15 s) plus whisper
+        // (WHISPER_TIMEOUT_S = 60 s), after which it answers "transcription timed out" itself — with margin
+        // for the trip back.
+        const val TRANSCRIBE_TIMEOUT_MS = 15_000L
+        const val TRANSCRIBE_GIVE_UP_MS = 90_000L
         const val NATIVE_FINAL_TIMEOUT_MS = 8_000L   // native engine: stop() → Final guard
 
         // file uploads (issue #90)

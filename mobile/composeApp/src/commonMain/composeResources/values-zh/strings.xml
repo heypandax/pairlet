@@ -270,6 +270,7 @@
     <string name="voice_daemon_unreachable">无法连接守护进程，请检查连接</string>
     <string name="voice_transcribe_failed">转写失败，请重试</string>
     <string name="voice_no_response">无响应，请检查连接</string>
+    <string name="voice_still_waiting">网络较慢，仍在等待转写结果…</string>
     <string name="voice_dictation_failed">听写失败</string>
     <string name="voice_speech_unavailable">语音识别不可用</string>
     <string name="voice_audio_engine">音频引擎启动失败</string>

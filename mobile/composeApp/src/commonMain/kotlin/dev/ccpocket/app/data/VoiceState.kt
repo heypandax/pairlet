@@ -17,6 +17,13 @@ sealed interface VoiceState {
     data object Transcribing : VoiceState
 
     /**
+     * S3′ — the computer has not answered within the ordinary window. NOT a failure: the capture is still
+     * outstanding, a transcript that arrives now is used as usual, and the mic offers a retry meanwhile. Only
+     * the final give-up turns this into [Failed]. Remote (daemon whisper) engine only.
+     */
+    data object StillWaiting : VoiceState
+
+    /**
      * S5 — error chip + retry mic (retry re-sends the kept audio, or re-records when none is kept).
      * [detail] (daemon- or OS-provided text) wins over the localized [res] fallback when present.
      */

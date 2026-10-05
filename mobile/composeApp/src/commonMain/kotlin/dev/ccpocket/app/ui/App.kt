@@ -3274,6 +3274,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             levels = repo.voiceLevels,
                             onCancel = repo::cancelVoice,
                             onDone = repo::stopVoice,
+                            uploading = voiceState is VoiceState.Transcribing && repo.voiceUploading.value,
                         )
                         // RecordingBar's ✕/✓ own the voice capture. If an agent turn is also running,
                         // keep its separate interrupt reachable instead of hiding it for the entire recording
@@ -3291,6 +3292,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         }
                     } else {
                         val failed = voiceState as? VoiceState.Failed
+                        // the computer is slow to answer: not a failure, but Mic offers the same retry
+                        val stillWaiting = voiceState is VoiceState.StillWaiting
                         // Two-layer composer (issue #157 follow-up, design: mobile-composer.jsx): the field
                         // owns the full width on top; attach + model chip + the action slot live on an
                         // accessory row below — the chip no longer squeezes what you type on narrow phones.
@@ -3327,6 +3330,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                         }
                                     }
                                 }
+                                // the wait is still on and a late transcript will land: the quiet note, not the danger ribbon
+                                stillWaiting -> ComposerNote(stringResource(Res.string.voice_still_waiting))
                                 uploadsBusy -> ComposerNote(
                                     stringResource(
                                         Res.string.composer_uploading,
@@ -3364,7 +3369,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                     // uploading, and mid-turn with nothing typed, which is precisely when you
                                     // want to dictate the message the ribbon above promises to queue.
                                     trailingAction = {
-                                        VoiceActionButton(failed != null) { if (failed != null) repo.retryVoice() else repo.startVoice() }
+                                        val retry = failed != null || stillWaiting
+                                        VoiceActionButton(retry) { if (retry) repo.retryVoice() else repo.startVoice() }
                                     },
                                 )
                                 // one tap to any other session you're juggling, across projects (issue #165).
