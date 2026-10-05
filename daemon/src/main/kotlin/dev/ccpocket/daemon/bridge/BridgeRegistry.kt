@@ -43,9 +43,9 @@ class BridgeRegistry(
     // issue #367: the fourth credential file, derived the same way so a temp-dir test stays isolated
     private val executionKeyStore: File = store.parentFile?.let { File(it, "execution-credentials.json") }
         ?: ExecutionCredentialStore.file(),
-    // the retired-collaborator tombstones (see [retireCollaborators]), derived the same way
-    private val retiredCollaboratorStore: File = store.parentFile?.let { File(it, RetiredCollaboratorStore.FILE_NAME) }
-        ?: RetiredCollaboratorStore.file(),
+    // the retired-credential tombstones (see [retireCollaborators] / [retireGuests]), derived the same way
+    private val retiredStore: File = store.parentFile?.let { File(it, RetiredCredentialStore.FILE_NAME) }
+        ?: RetiredCredentialStore.file(),
 ) {
     private val log = logger("BridgeRegistry")
     private val b64enc: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
@@ -64,9 +64,12 @@ class BridgeRegistry(
     // deviceId -> sessionIds the guest started, PERSISTED so "visibility by initiator" survives a restart
     private val guestSessions = HashMap<String, MutableSet<String>>()
 
-    // deviceIds of retired Collaborator Link credentials whose relay-side revoke is not confirmed yet
-    // (see [retireCollaborators]); guarded by `this`
+    // deviceIds of retired credentials (Collaborator Links, folder-share guests) whose relay-side revoke is not
+    // confirmed yet (see [retireCollaborators] / [retireGuests]); guarded by `this`
     private val retired = LinkedHashSet<String>()
+    // false when the tombstone file exists but could not be read at startup: it is then never overwritten,
+    // and nothing whose retirement depends on writing it is retired this run; guarded by `this`
+    private var tombstonesWritable = true
 
     init {
         BridgeStore.load(store).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.BRIDGE) }
@@ -94,24 +97,24 @@ class BridgeRegistry(
      *  1. read the deviceIds out of collaborator-keys.json (every COLLABORATOR row — a row this daemon holds
      *     as a live credential of another kind is left alone, since revoking it at the relay would cut that
      *     credential);
-     *  2. merge them into the tombstone file ([RetiredCollaboratorStore]) — ids only, no key material;
+     *  2. merge them into the tombstone file ([RetiredCredentialStore]) — ids only, no key material;
      *  3. only once that write has succeeded, empty collaborator-keys.json.
      *
      * A failed step 2 keeps the keys file as it is (fail closed: the next start retries); the ids are still
      * tombstoned in memory, so this run treats them exactly as if the write had worked. A tombstoned id is
-     * KNOWN to [isRetiredCollaborator] until the relay confirms its revoke ([confirmRetired]) — the transport
+     * KNOWN to [isRetiredCredential] until the relay confirms its revoke ([confirmRetired]) — the transport
      * relies on that to keep a still-valid relay credential out of the full-power allow-list. Nothing here
      * touches any other credential file.
      */
     private fun retireCollaborators() {
-        val stored = runCatching { RetiredCollaboratorStore.load(retiredCollaboratorStore) }
-            .onFailure { log.warn("retired-collaborator tombstones unreadable (${it.message}) — leaving them and the collaborator keys as they are") }
-        synchronized(this) { retired += stored.getOrNull().orEmpty() }
+        val stored = runCatching { RetiredCredentialStore.load(retiredStore) }
+            .onFailure { log.warn("retired-credential tombstones unreadable (${it.message}) — leaving them and the collaborator keys as they are") }
+        synchronized(this) { retired += stored.getOrNull().orEmpty(); tombstonesWritable = stored.isSuccess }
         val rows = CollaboratorKeyStore.load(collaboratorKeyStore)
         if (rows.isEmpty()) return
         val ids = rows.filter { (id, entry) -> entry.spec.kind == CredentialKind.COLLABORATOR && id !in bridgePubs }.keys
         val all = synchronized(this) { retired += ids; retired.toList() }
-        if (stored.isFailure || !RetiredCollaboratorStore.save(all, retiredCollaboratorStore)) {
+        if (stored.isFailure || !RetiredCredentialStore.save(all, retiredStore)) {
             log.warn("could not record ${ids.size} retired collaborator credential(s) — keeping collaborator-keys.json for the next start")
             return
         }
@@ -250,15 +253,15 @@ class BridgeRegistry(
     @Synchronized
     fun isGuest(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.GUEST && deviceId in bridgePubs
 
-    /** A retired Collaborator Link credential whose relay-side revoke is not confirmed yet: its key is gone,
-     *  but the relay may still announce the id, so it must be treated as known (never armed, never
-     *  allow-listed, never bound to another credential). */
+    /** A retired credential (a Collaborator Link or a folder-share guest) whose relay-side revoke is not
+     *  confirmed yet: its key is gone, but the relay may still announce the id, so it must be treated as known
+     *  (never armed, never allow-listed, never bound to another credential). */
     @Synchronized
-    fun isRetiredCollaborator(deviceId: String): Boolean = deviceId in retired
+    fun isRetiredCredential(deviceId: String): Boolean = deviceId in retired
 
     /** Every tombstoned id the relay still has to be asked to revoke. */
     @Synchronized
-    fun retiredCollaboratorIds(): Set<String> = retired.toSet()
+    fun retiredCredentialIds(): Set<String> = retired.toSet()
 
     /** The relay no longer honours [deviceId] (it confirmed the revoke, or its authoritative replay left the id
      *  out): drop the tombstone. True when [deviceId] was one. A failed write only means the next start asks
@@ -266,11 +269,59 @@ class BridgeRegistry(
     @Synchronized
     fun confirmRetired(deviceId: String): Boolean {
         if (!retired.remove(deviceId)) return false
-        if (!RetiredCollaboratorStore.save(retired.toList(), retiredCollaboratorStore)) {
-            log.warn("retired collaborator ${deviceId.take(8)}… confirmed revoked, but the tombstone file could not be updated")
+        if (!RetiredCredentialStore.save(retired.toList(), retiredStore)) {
+            log.warn("retired credential ${deviceId.take(8)}… confirmed revoked, but the tombstone file could not be updated")
         }
-        log.info("retired collaborator ${deviceId.take(8)}… revoked at the relay — tombstone removed")
+        log.info("retired credential ${deviceId.take(8)}… revoked at the relay — tombstone removed")
         return true
+    }
+
+    /** Every confirmed folder-share GUEST credential still held — the ones still to be retired. */
+    @Synchronized
+    fun guestIds(): List<String> =
+        specs.entries.filter { it.value.kind == CredentialKind.GUEST && it.key in bridgePubs }.map { it.key }
+
+    /*
+     * Folder sharing (#115) was retired (2026-10), and with it the GUEST credential. Unlike a Collaborator Link a
+     * guest key is still loaded at startup — so the transport keeps recognising the kind (and refusing it), and the
+     * relay's replay of the id takes the restricted early-return instead of looking like a new device. Once the
+     * relay's device set is known the transport retires them in the same order as [retireCollaborators]:
+     *
+     *  1. [tombstoneGuests]: merge the ids into the tombstone file ([RetiredCredentialStore]) — ids only;
+     *  2. only for the ids that write covered, [forgetRetiredGuests]: drop each key and rewrite guests.json
+     *     without it. ONLY guests.json is written — bridges.json, execution-credentials.json and every other
+     *     file stay byte for byte;
+     *  3. the relay is asked to revoke each tombstoned id, and the tombstone goes once it confirms
+     *     ([confirmRetired]).
+     */
+
+    /** Step 1 of retiring guests: tombstone those of [ids] that are confirmed GUEST credentials. Returns the ids
+     *  now tombstoned — empty when there were none or the write failed, in which case nothing changed at all (the
+     *  keys stay loaded, still refused at ingress, and the next attach tries again). */
+    @Synchronized
+    fun tombstoneGuests(ids: Collection<String>): List<String> {
+        val guests = ids.filter { specs[it]?.kind == CredentialKind.GUEST && it in bridgePubs }
+        if (guests.isEmpty()) return emptyList()
+        if (!tombstonesWritable || !RetiredCredentialStore.save((retired + guests).toList(), retiredStore)) {
+            log.warn("could not record ${guests.size} retired guest credential(s) — keeping their keys for the next attach")
+            return emptyList()
+        }
+        retired += guests
+        return guests
+    }
+
+    /** Step 2 of retiring guests: drop the key of every one of [ids] that is a TOMBSTONED guest and rewrite
+     *  guests.json without them — no other file. Closing their sessions is the transport's job, by deviceId. */
+    @Synchronized
+    fun forgetRetiredGuests(ids: Collection<String>) {
+        val guests = ids.filter { it in retired && specs[it]?.kind == CredentialKind.GUEST }
+        if (guests.isEmpty()) return
+        guests.forEach { id ->
+            bridgePubs.remove(id); specs.remove(id); createdAts.remove(id); provisionalPub.remove(id)
+            guards.remove(id); guestGuards.remove(id)
+        }
+        GuestStore.save(rows(CredentialKind.GUEST), guestStore)
+        log.info("retired ${guests.size} folder-share guest credential(s): keys cleared, relay revoke pending")
     }
 
     /** issue #367: this deviceId is a confirmed EXECUTION link credential (a peer daemon's run link). */
@@ -390,17 +441,19 @@ class BridgeRegistry(
         // ONLY execution links — the downgrade-isolation invariant (an older daemon reading its own files
         // must never see a newer kind's key). A retired COLLABORATOR row is never written anywhere: the
         // keys file is only ever emptied, by [retireCollaborators].
-        val byKind = bridgePubs.entries.groupBy { specs[it.key]?.kind }
-        fun rows(kind: CredentialKind) = (byKind[kind] ?: emptyList()).associate { (id, pub) ->
-            // keep each credential's ORIGINAL bind time — an unrelated persist (another bind, a revoke)
-            // must not restamp every row's createdAt
-            id to BridgeEntry(b64enc.encodeToString(pub), specs[id]!!, createdAts[id] ?: System.currentTimeMillis())
-        }
         BridgeStore.save(rows(CredentialKind.BRIDGE), store)
         GuestStore.save(rows(CredentialKind.GUEST), guestStore)
         ExecutionCredentialStore.save(rows(CredentialKind.EXECUTION), executionKeyStore) // issue #367
 
     }
+
+    /** The persisted rows of one [kind], in the shape its file holds. Caller holds `this`. */
+    private fun rows(kind: CredentialKind): Map<String, BridgeEntry> =
+        bridgePubs.entries.filter { specs[it.key]?.kind == kind }.associate { (id, pub) ->
+            // keep each credential's ORIGINAL bind time — an unrelated persist (another bind, a revoke)
+            // must not restamp every row's createdAt
+            id to BridgeEntry(b64enc.encodeToString(pub), specs[id]!!, createdAts[id] ?: System.currentTimeMillis())
+        }
 
     private fun persistGuestSessions() {
         runCatching {

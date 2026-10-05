@@ -238,7 +238,7 @@ object GuestStore {
  * The file the RETIRED Collaborator Link credentials (session handoff / review contacts, retired 2026-10)
  * were kept in: deviceId -> [BridgeEntry] (kind = COLLABORATOR), `~/.cc-pocket/collaborator-keys.json`.
  * Nothing loads these keys any more. [BridgeRegistry] reads the file once at startup, moves every row's
- * deviceId into [RetiredCollaboratorStore] and empties the file — see [BridgeRegistry] for the order.
+ * deviceId into [RetiredCredentialStore] and empties the file — see [BridgeRegistry] for the order.
  */
 object CollaboratorKeyStore {
     fun file(): File = credentialFile("collaborator-keys.json")
@@ -249,13 +249,19 @@ object CollaboratorKeyStore {
 }
 
 /**
- * Tombstones of retired Collaborator Link credentials: `~/.cc-pocket/retired-collaborators.json`, device
- * ids ONLY — no key, no spec. An id stays here from the moment its key is cleared until the relay has
+ * Tombstones of retired restricted credentials, device ids ONLY — no key, no spec, no kind. Two retired
+ * features share it: the Collaborator Link (session handoff / review contacts) and the folder-share GUEST
+ * (#115), both retired 2026-10. An id stays here from the moment its key is cleared until the relay has
  * confirmed the credential is revoked, and for that whole time the daemon treats the id as KNOWN: a relay
  * announce for it is never armed with a pairing ticket, so it can never be written into the full-power
  * devices.json during someone's pairing window. Written atomically, owner-only.
+ *
+ * The file is still `retired-collaborators.json` with the format it was introduced with, because the
+ * collaborator retirement shipped first: tombstones an earlier build wrote keep loading, and a build that
+ * only knows collaborators reads guest ids as tombstones too (the list carries no kind), so a downgrade
+ * keeps holding them off the allow-list.
  */
-object RetiredCollaboratorStore {
+object RetiredCredentialStore {
     fun file(): File = credentialFile(FILE_NAME)
 
     const val FILE_NAME = "retired-collaborators.json"
