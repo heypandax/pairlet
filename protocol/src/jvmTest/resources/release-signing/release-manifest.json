@@ -1,0 +1,13 @@
+{
+  "assets": {
+    "cc-pocket-daemon-2.4.0-linux-x86_64.tar.gz": {
+      "sha256": "6883e2065f22140917a863742bf7c779e5d32e8fd02ab269deaba0b8781feb76"
+    },
+    "cc-pocket-desktop-macos-arm64.dmg": {
+      "sha256": "7f3d898a8548e8d696097077ec39cfcff45f1e1bb887a8732217e0b497ca48e2"
+    }
+  },
+  "publishedAt": "2026-10-05T00:00:00Z",
+  "schema": "pairlet-release-manifest/1",
+  "version": "2.4.0"
+}
