@@ -1085,14 +1085,17 @@ class DeviceSessions(
         // allows. The frame is sized to the LIVE connection's declared cap (the newest handshake's holder —
         // no link means the frame is undeliverable anyway, see below) before it is sealed.
         val cap = mutex.withLock { sessions[deviceId]?.activeCaps?.maxFrameBytes } ?: return
+        var shrunk = false
         val json = try {
             dev.ccpocket.daemon.server.FrameFitter.encodeWithin(
                 Envelope(nextId.getAndIncrement().toString(), 0L, body = frame), cap,
-            ) { log.warn("frame cap for ${deviceId.take(8)}…: $it") }
+            ) { shrunk = true; log.warn("frame cap for ${deviceId.take(8)}…: $it") }
         } catch (error: Exception) {
             Diagnostics.report(ErrorPath.PAYLOAD_SEND, DiagnosticStage.ENCODE, ErrorCode.UNEXPECTED, error)
             throw error
         }
+        // the open's history log line wants the size that actually ships (a no-op outside a metered emit)
+        dev.ccpocket.daemon.diagnostics.HistoryFrameMeter.record(frame, json.size, shrunk)
         // serialize seals per session (the GCM counter must advance atomically). Resolve the live session
         // at seal time rather than capturing one in the sink: conversation sinks outlive a phone reconnect,
         // and a re-handshake re-keys — a stale session would seal frames the device can't decrypt. No link

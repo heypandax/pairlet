@@ -6,6 +6,7 @@ import dev.ccpocket.daemon.agent.ToolMetadata
 import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.daemon.disk.ReplaySlice
 import dev.ccpocket.daemon.disk.ReplaySlicer
+import dev.ccpocket.daemon.disk.sizeOrNull
 import dev.ccpocket.daemon.disk.TranscriptNoise
 import dev.ccpocket.daemon.opencode.ToolNameMapper
 import dev.ccpocket.protocol.ChatRole
@@ -66,7 +67,7 @@ object DshTranscriptReplay {
             cursorVersion(it) == parsed.version
         }
         return ReplaySlicer.slice(parsed.rows, parsed.cursor, compatibleCursor, maxMessages, maxFrameTextBytes)
-            .copy(quality = parsed.quality, sourceRows = parsed.lineCount, failedRows = parsed.failedRows)
+            .copy(quality = parsed.quality, sourceRows = parsed.lineCount, failedRows = parsed.failedRows, sourceBytes = file.sizeOrNull())
     }
 
     fun page(
