@@ -91,6 +91,40 @@ class ConversationLifecycleFixTest {
         }
     }
 
+    /** D3'' — pumpCrashed drops the handle, then suspends in the shutdown. A prompt in that window lazily
+     *  starts a new process; the crash handler resuming afterwards must not clear that process's running
+     *  turn, drop its permission bridge (its pending ask) or tell the user the session stopped. */
+    @Test
+    fun a_late_pump_crash_settles_only_its_own_process() = runBlocking {
+        if (LifecycleHarness.isWindows()) return@runBlocking
+        val backend = LifecycleBackend(endThrowsOnce = true) { index, _ ->
+            if (index == 0) "IFS= read -r l; printf 'init:s1\\nuser:%s\\n' \"\$l\"; exit 3"
+            else "IFS= read -r l; printf 'user:%s\\nsay:working\\nask:q1\\n' \"\$l\"; $SILENT_TAIL"
+        }
+        val h = LifecycleHarness(backend, "cS3c")
+        val gate = ProbeGate(LifecyclePoint.PUMP_CRASHED_AFTER_SHUTDOWN)
+        h.convo.lifecycleProbe = gate::onProbe
+        try {
+            h.convo.open(resumeId = null, model = null)
+            h.convo.sendPrompt("one", promptId = "one") // #0 dies; its death cleanup throws → pumpCrashed
+            withTimeoutOrNull(10_000) { gate.reached.await() } ?: error("pumpCrashed never reached")
+            h.convo.sendPrompt("two", promptId = "two") // proc == null → lazy start of #1
+            h.await(what = "the new process's ask") { h.convo.hasPendingAsk() && chunk(h, "working") }
+            gate.release.complete(Unit)
+            delay(300)
+            assertTrue(h.convo.isExecuting(), "the new process's turn must still be running")
+            assertTrue(h.convo.hasPendingAsk(), "the new process's pending ask must still be visible")
+            assertTrue(h.convo.hasLiveProcess())
+            assertTrue(
+                h.framesOf<PocketError>().none { "internal daemon error" in it.message },
+                "no stale 'session stopped' for a session that is running: ${h.framesOf<PocketError>()}",
+            )
+        } finally {
+            gate.release.complete(Unit)
+            h.close()
+        }
+    }
+
     private companion object {
         /** Keep a one-shot child alive (no further output) until its stdin closes. */
         const val SILENT_TAIL = "while IFS= read -r x; do :; done"

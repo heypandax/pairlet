@@ -1991,7 +1991,7 @@ class Conversation(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                pumpCrashed(p, e)
+                pumpCrashed(p, b, e)
             }
         }
     }
@@ -2008,9 +2008,10 @@ class Conversation(
      * failed into the SupervisorJob with no trace on the wire and the session wedged. Give it a terminal
      * state the way an unexpected death does: stop the process this pump served, drop the handle so the
      * next prompt respawns, clear the turn and tell the client. A newer launch that already owns the
-     * conversation, or a deliberate stop, is left alone.
+     * conversation, or a deliberate stop, is left alone — including one that appears WHILE this process is
+     * being shut down (see below). [b] is this process's own permission bridge.
      */
-    private suspend fun pumpCrashed(p: AgentProcess, e: Exception) {
+    private suspend fun pumpCrashed(p: AgentProcess, b: PermissionBridge, e: Exception) {
         log.error("$convoId pump crashed — stopping its process and settling the session", e)
         Diagnostics.report(ErrorPath.TURN, Stage.EXIT, ErrorCode.UNEXPECTED, e,
             SafeMetrics(backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }), isError = true)
@@ -2019,6 +2020,17 @@ class Conversation(
         if (owned) proc = null
         runCatching { p.shutdown() }
         lifecycleProbe?.invoke(LifecyclePoint.PUMP_CRASHED_AFTER_SHUTDOWN)
+        // The shutdown above suspends for up to the whole EOF → TERM → KILL ladder, and `proc` is already null:
+        // a prompt landing meanwhile lazily started a NEW process. Clearing the turn, revoking grants or
+        // dropping `bridge` now would hit that process — its running turn reads idle, its pending asks vanish
+        // from hasPendingAsk / the approval inbox, and the reaper may take it mid-question (lifecycle design
+        // D3''). Settle only what belonged to this process — its own bridge's open cards — and stop there; the
+        // newer launch owns the conversation, so "send again to restart it" would be stale advice too.
+        if (proc != null) {
+            log.info("$convoId pump crash: a newer process took over during the shutdown — settling only process ${p.pid}")
+            runCatching { b.cancelAll() }
+            return
+        }
         revokeAllBridgeGrants()
         clearTurnWork()
         runCatching { bridge?.cancelAll() }
