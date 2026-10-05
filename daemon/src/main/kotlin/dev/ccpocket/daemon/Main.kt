@@ -167,11 +167,14 @@ internal class RunCmd(
     // to it, so a launch script still carrying it just gets a warning.
     private val removedLocal by option("--local", hidden = true).flag()
     private val removedHost by option("--host", hidden = true)
-    private val directBind by option(
+    // No clikt default on purpose: null = "not given", so the persisted `config --direct-connect` applies;
+    // any value typed here (even 127.0.0.1) overrides it. See DirectConnect.resolveBind.
+    private val directBindFlag by option(
         "--direct-bind",
         help = "relay mode: also listen for E2E direct connections on this interface (paired devices skip the relay). " +
-            "Default 127.0.0.1 = same-machine apps only; pass 0.0.0.0 to open it to your LAN (still Noise-gated), or 'none' to disable",
-    ).default("127.0.0.1")
+            "Default: the `pairlet config --direct-connect` setting (local = 127.0.0.1, same-machine apps only). " +
+            "Pass 0.0.0.0 to open it to your LAN (still Noise-gated), or 'none' to disable; overrides the setting",
+    )
     private val pairPort by option("--pair-port", help = "loopback port for the `pair` command").int().default(8799)
     private val takeover by option("--takeover", help = "if another cc-pocket daemon is already running, stop it and run this one instead (default: exit and leave it running)").flag()
     private val autoUpdate by option(
@@ -186,7 +189,8 @@ internal class RunCmd(
         if (removedLocal) throw com.github.ajalt.clikt.core.CliktError(
             "`run --local` (unencrypted LAN mode) has been removed: it had no pairing, no authentication and no encryption.\n" +
                 "Use `pairlet run` (relay mode) and pair with `pairlet pair`. Paired devices on the same network still connect " +
-                "directly, end-to-end encrypted — open that to your LAN with `--direct-bind 0.0.0.0`.",
+                "directly, end-to-end encrypted — open that to your LAN with `pairlet config --direct-connect lan` " +
+                "(or `--direct-bind 0.0.0.0` on the command line) and restart the daemon.",
         )
         if (removedHost != null) {
             echo("note: --host only applied to the removed --local mode and is ignored; use --direct-bind for the E2E direct listener", err = true)
@@ -253,17 +257,16 @@ internal class RunCmd(
             echo("(the daemon signs in separately: if sessions report auth errors, sign in from the app's Settings → Account)")
         }
         val identity = Identity.loadOrCreate()
+        // Where the direct listener binds: `--direct-bind` if given, else `config --direct-connect`
+        // (local / lan / off), else 127.0.0.1. Read once here — a changed setting needs a restart.
+        val direct = DirectConnect.resolveBind(directBindFlag, prefs.directConnect)
+        val directBind = direct.bind
         // What DaemonInfo advertises after each handshake: where paired devices can reach us without
         // the relay. Bind-specific IP → advertise it; 0.0.0.0 → advertise the current LAN IP (recomputed
         // per handshake, so a DHCP move heals itself); none/no usable interface → null (devices clear
         // any stored address and stay on the relay).
-        val directUrl: () -> String? = {
-            when {
-                directBind == "none" -> null
-                directBind == "0.0.0.0" -> lanIp()?.let { "ws://$it:$port/v1/ws" }
-                else -> "ws://$directBind:$port/v1/ws"
-            }
-        }
+        val directUrl: () -> String? = { DirectConnect.advertisedUrl(directBind, port, ::lanIp) }
+        var directListening = false // set once the bind below succeeds; reported by `pairlet status`
         // the OS computer name — advertised in DaemonInfo so a paired client shows "Pandas-MacBook-Pro"
         // as the default binding name instead of a truncated account-id hash (issue #62). A provider
         // like [directUrl], resolved lazily at the first handshake: getLocalHost() can stall seconds
@@ -293,7 +296,7 @@ internal class RunCmd(
         // straight to us (no proxy/relay leg — the fix for flaky-uplink send/receive). It REQUIRES the
         // Noise handshake, so a wide bind stays safe. A bind failure (port taken) degrades to relay-only
         // instead of killing the daemon.
-        if (directBind != "none") {
+        if (directBind != DirectConnect.NONE) {
             val gate = LanE2E(
                 identity, directUrl, hostName, gatewayUrl,
                 firstContactPending = relayClient::deviceFirstContactPending,
@@ -304,7 +307,10 @@ internal class RunCmd(
             // settling for relay-only for this instance's whole life
             val bindDirect = { DaemonServer(core, directBind, port, gate).start() }
             runCatching { if (tookOver) SingleInstance.retryBind(bind = bindDirect) else bindDirect() }
-                .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
+                .onSuccess {
+                    directListening = true
+                    echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)")
+                }
                 .onFailure {
                     dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.STARTUP,
                         dev.ccpocket.observability.Stage.CONNECT, dev.ccpocket.observability.ErrorCode.UNAVAILABLE, it,
@@ -323,7 +329,12 @@ internal class RunCmd(
             },
         )?.let { echo(it) }
         // the single-instance check ran first thing in run(); claim the pair port it probed
-        PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort, core).start()
+        PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort, core, directStatus = {
+            dev.ccpocket.daemon.relay.LoopbackDirect(
+                mode = DirectConnect.modeOf(directBind), bind = directBind, port = port,
+                listening = directListening, url = directUrl(), fromFlag = direct.fromFlag,
+            )
+        }).start()
         // daily new-version check: log + one phone push per version, and — for installer-managed
         // installs — a hot-swap to the new version. On by default (issue #244); --auto-update / the
         // env toggle / `config --auto-update off` override, see UpdateChecker.resolveAutoApply.
@@ -671,6 +682,9 @@ private class StatusCmd : CliktCommand(name = "status") {
                     echo("  relay:    ✗ link down (reconnecting — backoff reaches 30s; check network/proxy to $DEFAULT_RELAY)")
                 }
             }
+            // 1b. the E2E direct listener: what the daemon runs vs what `config --direct-connect` asks for
+            val configuredDirect = runCatching { DaemonPrefs.load().directConnect }.getOrNull()
+            DirectConnect.statusLines(st?.direct, configuredDirect, daemonUp = st != null).forEach { echo(it) }
             // 2. background service registered?
             val os = System.getProperty("os.name").lowercase()
             val service = when {
@@ -698,7 +712,11 @@ private class StatusCmd : CliktCommand(name = "status") {
     }
 }
 
-private class ConfigCmd : CliktCommand(name = "config") {
+/** [prefsFile] / [osName] are injectable only so a test can drive it against a temp file and a fixed OS. */
+internal class ConfigCmd(
+    private val prefsFile: java.io.File = DaemonPrefs.defaultPath(),
+    private val osName: String = System.getProperty("os.name"),
+) : CliktCommand(name = "config") {
     private val isolatedClaudeAuth by option(
         "--isolated-claude-auth",
         help = "on|off — give the daemon's claude its own login (separate CLAUDE_CONFIG_DIR; history and " +
@@ -728,8 +746,18 @@ private class ConfigCmd : CliktCommand(name = "config") {
         help = "forget the pinned dsh path and go back to auto-detection",
     ).flag()
 
+    private val directConnect by option(
+        "--direct-connect",
+        help = "local|lan|off — who can reach the daemon's end-to-end encrypted direct listener (port 8765), " +
+            "which lets paired devices skip the relay. local (default) = only apps on this computer; lan = also " +
+            "phones on the same network (listens on all interfaces; every connection must pass the paired-device " +
+            "handshake); off = everything goes through the relay. `run --direct-bind` overrides it. " +
+            "Takes effect on daemon restart.",
+        metavar = "local|lan|off",
+    )
+
     override fun run() {
-        val prefs = DaemonPrefs.load()
+        val prefs = DaemonPrefs.load(prefsFile)
         when (isolatedClaudeAuth?.lowercase()) {
             null -> {}
             "on", "true", "1" -> prefs.setIsolatedClaudeAuth(true)
@@ -748,6 +776,15 @@ private class ConfigCmd : CliktCommand(name = "config") {
         }
         if (clearDshBin) prefs.setDshBin(null)
         dshBin?.let { prefs.setDshBin(it) }
+        directConnect?.let { raw ->
+            when (raw.trim().lowercase()) {
+                "default", "unset" -> prefs.setDirectConnect(null)
+                else -> prefs.setDirectConnect(
+                    DirectConnectMode.parse(raw)
+                        ?: throw com.github.ajalt.clikt.core.CliktError("--direct-connect takes local|lan|off"),
+                )
+            }
+        }
         echo("isolated-claude-auth: ${if (prefs.isolatedClaudeAuth) "on" else "off"}")
         val autoEffective = dev.ccpocket.daemon.update.UpdateChecker.resolveAutoApply(
             flag = false, // the `run` flag isn't in scope here; show what a plain `run` would resolve to
@@ -756,9 +793,21 @@ private class ConfigCmd : CliktCommand(name = "config") {
         )
         echo("auto-update: ${if (autoEffective) "on" else "off"}${if (prefs.autoUpdate == null) " (default)" else ""}")
         echo("dsh-bin: ${prefs.dshBin ?: "(auto-detect)"}")
-        if (isolatedClaudeAuth != null || autoUpdate != null || dshBin != null || clearDshBin) {
-            echo("restart the daemon for this to take effect — e.g.:")
-            echo("  ${daemonStartHint().substringAfter("start it:  ")}")
+        val directMode = prefs.directConnect ?: DirectConnect.DEFAULT
+        echo("direct-connect: ${directMode.wire}${if (prefs.directConnect == null) " (default)" else ""}")
+        if (directConnect != null) {
+            when (directMode) {
+                DirectConnectMode.LAN -> DirectConnect.lanNotice().forEach { echo(it) }
+                DirectConnectMode.OFF -> echo("direct-connect off: the desktop App on this computer will use the relay too.")
+                DirectConnectMode.LOCAL -> {}
+            }
+        }
+        if (isolatedClaudeAuth != null || autoUpdate != null || dshBin != null || clearDshBin || directConnect != null) {
+            // The background service has to be RESTARTED (not just started — it is already running), and never
+            // replaced by a hand-run `pairlet run` next to it: that makes two daemons fight over one account.
+            echo("restart the daemon for this to take effect:")
+            echo("  ${DirectConnect.restartCommand(osName)}")
+            if (directConnect != null) echo("  (a daemon started with `run --direct-bind` keeps that value instead)")
         }
     }
 }

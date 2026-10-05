@@ -22,6 +22,7 @@ class DaemonPrefs private constructor(private val path: File) {
         val fullControlExpiryMs: Long = 0L,
         val autoUpdate: Boolean? = null,
         val dshBin: String? = null,
+        val directConnect: String? = null,
     )
 
     @Volatile
@@ -73,6 +74,20 @@ class DaemonPrefs private constructor(private val path: File) {
     var dshBin: String? = null
         private set
 
+    /** Who may reach the E2E direct listener when `run` has no `--direct-bind`: local (127.0.0.1, this
+     *  computer's desktop App), lan (0.0.0.0, phones on the same network) or off. null = never set →
+     *  [DirectConnect.DEFAULT] (local). Like [dshBin] it exists because a service-managed daemon is a bare
+     *  `run` that can't carry the flag. Read at daemon startup; set via `config --direct-connect`. An
+     *  unrecognised stored value reads as null, i.e. the safe default. */
+    @Volatile
+    var directConnect: DirectConnectMode? = null
+        private set
+
+    fun setDirectConnect(v: DirectConnectMode?) {
+        directConnect = v
+        persist()
+    }
+
     fun setAutoUpdate(v: Boolean?) {
         autoUpdate = v
         persist()
@@ -101,7 +116,7 @@ class DaemonPrefs private constructor(private val path: File) {
     private fun persist() {
         runCatching {
             path.parentFile?.mkdirs()
-            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth, askNoAutoDeny, fullControlExpiryMs, autoUpdate, dshBin)))
+            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth, askNoAutoDeny, fullControlExpiryMs, autoUpdate, dshBin, directConnect?.wire)))
         }
     }
 
@@ -119,6 +134,7 @@ class DaemonPrefs private constructor(private val path: File) {
                 fullControlExpiryMs = s.fullControlExpiryMs
                 autoUpdate = s.autoUpdate
                 dshBin = s.dshBin
+                directConnect = DirectConnectMode.parse(s.directConnect)
             }
         }
     }
