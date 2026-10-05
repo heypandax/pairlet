@@ -117,4 +117,35 @@ class DisconnectPerComputerStateTest {
         assertFalse(r.changedFilesUnavailable.value)
         assertFalse(r.gitStatusLoading.value)
     }
+
+    private fun liveTurnOnA(): PocketRepository = PocketRepository(CoroutineScope(Dispatchers.Unconfined)).apply {
+        paired.value = PairedDaemon(relay = "wss://test", accountId = "acct-a", daemonPub = "pk", deviceId = "dev", credential = "cred")
+        receiveForTest(SessionLive("c1", "/w", "sid-1", executing = true, title = "Fix the build"))
+        assertTrue(streaming.value, "precondition: A's turn is running")
+    }
+
+    /**
+     * NOTE-流式: the flag is only ever cleared by a frame of the conversation on screen, so leaving a RUNNING chat
+     * left it true with no chat to clear it — and the project list's 12 s busy/finished poll (App.kt) skips while
+     * it is true, so the list stopped noticing other sessions finishing until some chat was opened again.
+     */
+    @Test
+    fun leavingARunningChatDropsTheStreamingFlag() {
+        val disconnected = liveTurnOnA()
+        disconnected.disconnect()
+        assertFalse(disconnected.streaming.value, "B's project list must keep polling")
+
+        val backed = liveTurnOnA()
+        backed.backToBrowse()
+        assertFalse(backed.streaming.value, "the list behind a backgrounded turn must keep polling")
+    }
+
+    /** NOTE-身份: the computer switcher's current row reads chatTitle ungated — B's row said A's chat title. */
+    @Test
+    fun disconnectDropsTheChatTitle() {
+        val r = liveTurnOnA()
+        assertEquals("Fix the build", r.chatTitle.value)
+        r.disconnect()
+        assertNull(r.chatTitle.value)
+    }
 }

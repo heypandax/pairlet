@@ -383,11 +383,17 @@ class ResetInventoryTest {
         //   OK-降级    DEM keeps limitOffer/limitConfirmed/repairOffer/repairProgress: both banners render only for a
         //              matching convoId, the desktop (the only shell that demotes) renders neither, and the next
         //              openSession on the promoted repo clears all four before any chat exists
-        // NOTE-* = asymmetries this run found that the proposal's list does not name; recorded, not judged:
-        //   NOTE-流式   transcript.streaming survives DSC/SWC/BCK/TKO/DIR
-        //   NOTE-身份   DSC/SWC null convoId but keep sessionKey/currentSessionId/chatTitle/observing
-        //   NOTE-不对称 DEM clears these, DSC/SWC do not
-        //   NOTE-从不清 no exit clears it
+        // The NOTE-* asymmetries this run first found (not named by the proposal), now judged:
+        //   FIX-流式   transcript.streaming is cleared on DSC/SWC/BCK (and DIR, which delegates to BCK): only a frame of
+        //              the on-screen conversation clears it, so leaving a running chat left it true, and the project
+        //              list's busy/finished poll skips while it reads true. TKO keeps it — its own SessionLive re-sets it
+        //   FIX-身份   chatTitle: the computer switcher's current row reads it ungated, so B's row named A's chat
+        //   OK-身份    sessionKey / currentSessionId / observing: every reader is gated on convoId (or on a workdir that
+        //              DSC clears), and SessionLive re-sets all three together with convoId
+        //   OK-不对称  DEM clears these, DSC/SWC do not: each spinner/flag is cleared by the next list reply (or its own
+        //              8 s safety timer for `switching`), and its screen is not reachable before that reply
+        //   OK-从不清  no exit clears it: timedOutAskId only matches the exact (UUID convoId, askId); the single-slot
+        //              changedFilesDeadline is cancelled by every new fetch and no-ops unless a fetch is loading
         private val MATRIX = """
             # field                      D S D O B S T D
             #                            S W E P C T K I
@@ -457,7 +463,7 @@ class ResetInventoryTest {
             unseenSessions               R R K K K K K K
             lastWorkingSessions          R R K K K K K K
             lastWorkingDirectories       R R K K K K K K
-            sessionKey                   K K R C K K K K  # NOTE-身份
+            sessionKey                   K K R C K K K K  # OK-身份
             composerEpoch                K K K C K K K K
             browsePath                   K K K K K K K K
             pendingOpen                  R R R K K K K K
@@ -474,7 +480,7 @@ class ResetInventoryTest {
             directories                  R R K K K K K K
             directoriesLoaded            R R K K K K K K
             handoffsLoaded               R R K K K K K K
-            refreshing                   K K R K K K K K  # NOTE-不对称
+            refreshing                   K K R K K K K K  # OK-不对称
             sessions                     R R R K K K K R
             sessionsDir                  R R R K K K K R
             sessionGroups                R R K K K K K K
@@ -482,7 +488,7 @@ class ResetInventoryTest {
             daemonManagedAgents          R R K K K K K K
             managedList                  R R K K K K K K
             managedMissing               R R K K K K K K
-            managedListLoading           K K R K K K K R  # NOTE-不对称
+            managedListLoading           K K R K K K K R  # OK-不对称
             legacySessions               R R R K K K K R
             managedByDir                 R R K K K K K K
             managedPending               R R K K K K K K
@@ -510,7 +516,7 @@ class ResetInventoryTest {
             rewindAwaiting               K K K K K K K K  # OK-回退
             transcript.messages          R R R R R R R R
             transcript.sessionNotice     R R R R R R R R
-            transcript.streaming         K K R R K R K K  # NOTE-流式
+            transcript.streaming         R R R R R R K R  # FIX-流式
             transcript.toolOutcomesLive  K K K R K K K K
             transcript.childCallIds      K K K R K K K K
             transcript.replayEcho        K K K R K K K K
@@ -527,7 +533,7 @@ class ResetInventoryTest {
             pendingIdSeq                 K K K K K K K K
             convoId                      R R R R R R R R
             workdir                      R R R K K K K K
-            chatTitle                    K K R R R R K R  # NOTE-身份
+            chatTitle                    R R R R R R K R  # FIX-身份
             pendingAsk                   R R R R K K K K
             askQueue                     R R R R K K K K
             askQueueProgress             R R R R K K K K
@@ -535,7 +541,7 @@ class ResetInventoryTest {
             askBurstTotal                R R R R K K K K
             askBurstDone                 R R R R K K K K
             pendingApprovals             R R K K K K K K
-            timedOutAskId                K K K K K K K K  # NOTE-从不清
+            timedOutAskId                K K K K K K K K  # OK-从不清
             slashCommands                R R R K K K K K  # FIX-会话视图
             terminalEntries              R R R R K K K K  # FIX-面板
             terminalBusy                 R R R R K K K K  # FIX-面板
@@ -588,7 +594,7 @@ class ResetInventoryTest {
             viewedWorkflowRunId          R R R R R R K R
             allowRules                   K K R R K K K K  # GAP-会话视图
             pendingGrantMutations        K K K K K K K K
-            switching                    K K R K K K K K  # NOTE-不对称
+            switching                    K K R K K K K K  # OK-不对称
             opening                      R R R K R R K R
             switchingSession             R R R K R R K R
             openTimedOut                 R R R R R R K R
@@ -612,8 +618,8 @@ class ResetInventoryTest {
             openInFlight                 R R R C R R K R
             lastOpenAttempt              R R R C R R K R
             autoFocusComposer            K K R R K K K K
-            observing                    K K R K R K R R  # NOTE-身份
-            currentSessionId             K K R K K K K K  # NOTE-身份
+            observing                    K K R K R K R R  # OK-身份
+            currentSessionId             K K R K K K K K  # OK-身份
             historySeq                   R R R R R R R R
             historySeqSession            R R R R R R R R
             historyFirstSeq              R R R R R R R R
@@ -776,8 +782,8 @@ class ResetInventoryTest {
             managedAcceptedByKey         R R K K K K K K
             managedStale                 R R K K K K K K
             managedTombstones            R R K K K K K K
-            sessionsRefreshing           K K R K K K K K  # NOTE-不对称
-            changedFilesDeadline         K K K K K K K K  # NOTE-从不清
+            sessionsRefreshing           K K R K K K K K  # OK-不对称
+            changedFilesDeadline         K K K K K K K K  # OK-从不清
             viewedFileDeadline           R R R R K K K K  # FIX-面板
             fileViewObservation          R R R R K K K K  # FIX-面板
             exportDeadline               R R R R K K K K  # FIX-面板

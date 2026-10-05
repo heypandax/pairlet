@@ -3002,6 +3002,13 @@ class PocketRepository(
         archiveToast.value = null; archiveTarget = null
         slashCommands.clear() // CommandList is per conversation; a backend that never sends one would inherit these
         clearSessionPanels()
+        // only a frame of the conversation on screen clears this, and none will come: left true, the project list's
+        // busy/finished poll (it skips while a turn streams) stayed off on the next computer
+        streaming.value = false
+        // the computer switcher's current row reads the title ungated — it named this computer's chat under the next
+        // one. sessionKey / currentSessionId / observing stay: every reader is gated on a convoId, and SessionLive
+        // re-sets all three together with it
+        chatTitle.value = null
         convoId.value = null
         sessionsDir.value = null
         browseIntentDir = null // #349: a browse intent belongs to the link/machine that accepted the tap
@@ -8337,6 +8344,9 @@ class PocketRepository(
         clearPromptLifecycleState()
         convoId.value = null
         chatTitle.value = null
+        // a turn left running in the background is no longer this screen's: nothing would clear the flag (its
+        // TurnDone no longer matches convoId), and the list's busy/finished poll skips while it reads true
+        streaming.value = false
         transcript.clearMessages()
         resetHistoryPaging() // #147
         pendingImages.clear()
