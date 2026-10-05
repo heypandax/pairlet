@@ -1269,34 +1269,6 @@ class PermissionBridgeTest {
     // ── §18.1 P1 attack paths ────────────────────────────────────────────────────────────────────
 
     @Test
-    fun handoff_bash_offers_only_once_and_a_hostile_scope_claim_forms_nothing() = runBlocking {
-        // P1-2: the ceiling is DAEMON state — a modified client claiming task/session gets nothing standing
-        val scope = CoroutineScope(Dispatchers.Unconfined)
-        val coord = ApprovalCoordinator(scope)
-        val grants = dev.ccpocket.daemon.approval.ApprovalGrantStore()
-        val rules = mutableSetOf<String>()
-        val emitted = mutableListOf<Frame>()
-        val responses = mutableListOf<Resp>()
-        val wd = java.nio.file.Files.createTempDirectory("ccp-ho-wd").toFile().canonicalPath
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, rules,
-            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
-            handoffAccess = dev.ccpocket.protocol.HandoffAccess.REVIEW_READ_ONLY,
-            grants = grants, taskId = { "t1" }, workdir = wd)
-
-        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
-        val ask = emitted.filterIsInstance<PermissionAsk>().single()
-        assertEquals(listOf("once"), ask.grantOptions, "a handoff shell decision is one-command-at-a-time")
-        coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true, grantScope = "task"))
-        assertTrue(responses.single().allow)
-        assertFalse(responses.single().remember)
-        assertTrue(rules.isEmpty(), "no session rule may form on a handoff shell ask")
-        emitted.clear()
-        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status") }))
-        assertTrue(emitted.filterIsInstance<PermissionAsk>().isNotEmpty(), "the second command must re-ask — no task grant formed")
-        scope.cancel()
-    }
-
-    @Test
     fun full_control_expiry_bites_the_next_tool_call_even_mid_turn() = runBlocking {
         // P1-6: the bypass authority is read per decision, never cached at construction
         val scope = CoroutineScope(Dispatchers.Unconfined)

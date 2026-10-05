@@ -225,10 +225,6 @@ class WsConnection(
     }
 
     private suspend fun pump(crypto: E2ESession) = coroutineScope {
-        // handoff fan-out target (SESSION-HANDOFF.md): every LAN peer is a full-power owner by
-        // construction (the gate refuses restricted credentials), so it may see HandoffUpdated pushes.
-        // Instance-keyed (one sink per connection) — MUST detach on disconnect, see the finally below.
-        registry.handoffs?.attach(sink)
         // project-pin pushes (issue #362) for this gated socket's device. Resolved at emission, and re-checked
         // by the writer.
         val pins = router.projectPinService
@@ -384,7 +380,6 @@ class WsConnection(
                 }
             }
         } finally {
-            registry.handoffs?.detach(sink) // this connection's fan-out slot dies with the socket
             pins?.detach(sink)            // #362: same per-connection slot for pin pushes
             managed?.detach(sink)           // #360: …and for managed session list pushes
             caps.pinRetired = true          // …and a closed connection can never hold a pin subscription again

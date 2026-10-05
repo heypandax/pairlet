@@ -85,14 +85,6 @@ class PermissionBridge(
     // agent runs with the session cwd, which is itself inside the scope).
     private val pathScope: List<String>? = null,
     private val workdir: String? = null,
-    // SESSION-HANDOFF §8.3: the Handoff Grant's operation ceiling for a COLLABORATOR-opened
-    // conversation; null for every other kind. Under REVIEW_READ_ONLY (and any access that isn't
-    // explicitly CONTINUE_SCOPED — UNKNOWN clamps to the safest) the write tools are HARD-DENIED
-    // before any ask exists: the recipient is the session's lease controller and answers its own
-    // asks, so "every write surfaces as a PermissionAsk" would let it approve its own writes.
-    // Bash still routes to the normal ask (command policy is a separate concern); Read/Glob/Grep
-    // are untouched (the pathScope wall above already confines their targets).
-    private val handoffAccess: dev.ccpocket.protocol.HandoffAccess? = null,
     // ── approval design M2 ──
     /** TASK-scoped grants ("允许本任务") shared with the quick terminal. Defaulted for tests. */
     private val grants: ApprovalGrantStore = ApprovalGrantStore(),
@@ -140,21 +132,12 @@ class PermissionBridge(
 
     suspend fun onControlRequest(ev: AgentEvent.ControlRequest) {
         val meta = ToolMetadata.of(ev.toolName, ev.input)
-        // #367 EXECUTION WALL — FIRST, ahead of every other branch including the handoff one. A remote run
+        // #367 EXECUTION WALL — FIRST, ahead of every other branch. A remote run
         // has no human reading its prompts, so anything that could turn a workspace file into the owner's
         // machine is refused outright rather than routed to a card. See [ExecutionSandbox] for the split
         // between "refused for every tool" and "refused for writes".
         executionForbidden(ev.toolName, ev.input)?.let { code ->
             respond(ev.requestId, false, false, ev.input, null, "denied — a remote execution run may not touch this path ($code)")
-            return
-        }
-        // HANDOFF READ-ONLY WALL (SESSION-HANDOFF §8.3, crypto review MUST-FIX): a write tool under a
-        // review/read-only Handoff Grant is refused HERE — first, before every auto-allow path and
-        // before any PermissionAsk is minted, exactly like the guest out-of-scope guard below. No ask
-        // ever exists, so no verdict (the recipient's own, or anyone's) can approve it: the deny
-        // precedes the verdict channel structurally, not by policy.
-        if (handoffWriteBanned(ev.toolName)) {
-            respond(ev.requestId, false, false, ev.input, null, "denied — this handoff grant is review/read-only; write tools are disabled")
             return
         }
         // ── PRE-GRANT POLICY CHECKS (§18.1 P1-8 / design §6): no request approval, remembered rule,
@@ -274,10 +257,7 @@ class PermissionBridge(
         // neverRemember tools (ExitPlanMode, AskUserQuestion) are a human-decision gate: never satisfy them
         // from a remembered rule. [forceNeverRemember] extends that to EVERY ask on a bridge-origin session
         // (issue #91), so an owner's earlier "always allow" can't auto-clear a new attacker-supplied prompt.
-        // §18.1 P1-2: a HANDOFF conversation's shell is confirmed ONE COMMAND AT A TIME by the DAEMON —
-        // no task/session scope may ever form for it, whatever a (possibly modified) client claims.
-        val handoffOneOff = handoffAccess != null && ev.toolName == "Bash"
-        val neverRemember = meta.neverRemember || forceNeverRemember || handoffOneOff
+        val neverRemember = meta.neverRemember || forceNeverRemember
         // a chained/redirected Bash line only shares its FIRST command's rule — never let it ride (audit M3)
         if (!neverRemember && meta.sessionRuleMatchable && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
             coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "remembered-rule")
@@ -353,7 +333,7 @@ class PermissionBridge(
                                 coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, rule, "scope-clamped")
                             }
                             // session memory: legacy remember=true OR the M2 grantScope="session" — a
-                            // plan-approval/question/bridge/handoff one-off gate is never remembered
+                            // plan-approval/question/bridge one-off gate is never remembered
                             val remember = (v.remember || scope == "session") && !neverRemember && "session" in offered
                             if (remember) allowRules.add(rule) // future matching requests auto-allow this session
                             // M2 "允许本任务": issue a task grant that dies with the task/session/2h TTL,
@@ -511,15 +491,6 @@ class PermissionBridge(
         return canonicalTargets.none { BridgeGrant.executesForTheOwner(it) }
     }
 
-    /** Is [tool] a write tool this conversation's Handoff Grant refuses outright (§8.3)? Fail-closed
-     *  on the access axis: only an explicit CONTINUE_SCOPED grants writes — REVIEW_READ_ONLY and a
-     *  newer peer's UNKNOWN both land here. Codex's apply_patch is synthesized into the Claude-shaped
-     *  "Edit" upstream, but the raw names stay on the list as defense in depth. */
-    private fun handoffWriteBanned(tool: String): Boolean =
-        handoffAccess != null &&
-            handoffAccess != dev.ccpocket.protocol.HandoffAccess.CONTINUE_SCOPED &&
-            tool in HANDOFF_WRITE_TOOLS
-
     /** The in-stream audit chip for a grant-covered auto-run (approval design M2 §9.6). [summary] is the
      *  RULE (two tokens / tool family) — deliberately not the full command: chips ride the conversation
      *  stream to every attached client and must stay as redacted as History. Old clients drop the frame. */
@@ -531,11 +502,6 @@ class PermissionBridge(
         )
 
     companion object {
-        /** The file-WRITE tool families a review/read-only Handoff Grant hard-refuses (§8.3): the
-         *  built-in Claude names plus the raw Codex patch-tool spellings (normally synthesized to
-         *  "Edit" before reaching here). Bash is deliberately absent — it keeps the normal ask. */
-        val HANDOFF_WRITE_TOOLS = setOf("Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch", "ApplyPatch")
-
         /** "换种安全方式" (M2): phrase the deny as re-planning guidance the agent can act on. */
         fun retrySaferMessage(constraints: List<String>?, note: String?): String = buildString {
             append("The user asked you to try a SAFER approach instead — this is NOT a plain rejection. ")

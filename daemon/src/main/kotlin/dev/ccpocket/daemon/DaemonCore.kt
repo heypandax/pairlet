@@ -54,11 +54,6 @@ class DaemonCore(
     zcodeModels: dev.ccpocket.daemon.zcode.ZCodeModelService = dev.ccpocket.daemon.zcode.ZCodeModelService(),
     codexModels: CodexModelService = CodexModelService(),
     dshModels: dev.ccpocket.daemon.dsh.DshModelService = dev.ccpocket.daemon.dsh.DshModelService(),
-    /** Session Handoff (SESSION-HANDOFF.md): registry + guard + fan-out, shared by both transports.
-     *  Installed onto [SessionRegistry.handoffs] below so the router's drive gate, the §4.1 create
-     *  checks, the graceful-recall turn control and the idle-reaper protection all read one truth.
-     *  Injectable so a test can hand in a temp-store instance instead of the real ~/.cc-pocket one. */
-    val handoffs: dev.ccpocket.daemon.handoff.HandoffService = dev.ccpocket.daemon.handoff.HandoffService(),
     /** Project-pin sync (issue #362). The file store reads lazily — an embedded core that never receives a pin
      *  request never touches ~/.cc-pocket — and tests hand in a temp-file or in-memory store instead. */
     projectPinStore: dev.ccpocket.daemon.pins.ProjectPinStore =
@@ -99,7 +94,6 @@ class DaemonCore(
     val registry = SessionRegistry(scope, backends, approvals = approvals, grants = grants)
 
     init {
-        registry.handoffs = handoffs
         // issue #201: mirror the persisted "wait for my decision" preference into the per-ask read. Done
         // here (not lazily in ApprovalTimeout) so the object never has to know about DaemonPrefs — the
         // router writes the same pair whenever a client flips it.
@@ -118,9 +112,6 @@ class DaemonCore(
                 delay(SPAWNED_SWEEP_PERIOD_MS)
             }
         }
-        // periodic handoff expiry sweep + HandoffUpdated fan-out — on the core scope like the schedule
-        // pump below, so BOTH transports (relay client + local server) get it for free
-        scope.launch { handoffs.sweepLoop() }
     }
 
     val dirs = DirectoryService()

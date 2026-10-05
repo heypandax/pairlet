@@ -716,10 +716,6 @@ class DeviceSessions(
                 // transport uses. A restricted credential never reaches this branch (its own whitelist
                 // denies these frames), so re-sharing the machine or minting another bridge is
                 // structurally impossible.
-                // Also register as a handoff fan-out target (SESSION-HANDOFF.md): keyed per device, so each
-                // frame just refreshes the same slot; owner devices only (a restricted credential's egress
-                // whitelist would drop HandoffUpdated anyway — this keeps it out of the target set entirely).
-                core.registry.handoffs?.attach(sink)
                 // project-pin pushes (issue #362): ONE subscriber per device key, idempotent across frames, and
                 // resolved entirely at emission by [deliverProjectPins]. Attaching delivers nothing by itself —
                 // the device's CURRENT connection must also have declared the capability and fetched.
