@@ -112,10 +112,18 @@ class DeviceSessions(
     // relay handshake. Display only (`pairlet devices`); never consulted for authority.
     private val anchoredAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
-    // Full-power devices the OWNER revoked in this process (`pairlet devices revoke`). Until the relay has
-    // processed the revoke — which may be queued behind a reconnect — an attach replay can still announce the
-    // id; it must not be re-anchored on whatever ticket happens to be armed. Ids are random and never reused.
-    private val revokedHere: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    // Full-power devices the OWNER revoked (`pairlet devices revoke`) are tombstoned on disk in the registry
+    // ([BridgeRegistry.tombstoneRevokedDevice]) until the relay confirms — see [revokeOwnerDevice].
+    init {
+        // A revoke interrupted between its tombstone and the devices.json rewrite (a crash, a kill): finish it now,
+        // before the relay link or the direct-LAN listener — which reads devices.json — can serve the device.
+        val interrupted = devicePubs.keys.filter { bridges.isRetiredCredential(it) }
+        if (interrupted.isNotEmpty()) {
+            interrupted.forEach { devicePubs.remove(it) }
+            PairedDevices.save(HashMap(devicePubs), store)
+            log.info("finished ${interrupted.size} interrupted device revoke(s): pruned from the allow-list, relay revoke pending")
+        }
+    }
 
     /** A freshly minted pairing ticket becomes a candidate PSK for the next device that pairs.
      *  Only INTERACTIVE mints stamp the exclusion clock — see [interactivePairingPending] — and only they
@@ -167,18 +175,29 @@ class DeviceSessions(
     }
 
     /**
-     * The owner revokes a FULL-POWER device (`pairlet devices revoke`): the local half — key out of
-     * devices.json (which also cuts a live direct-LAN socket via the allow-list epoch), its relay session and
-     * its first-contact PSK — happens here, at once; the caller sends the relay's `RevokeDevice`. False when
-     * [deviceId] is not a full-power device (restricted credentials have their own commands).
+     * The owner revokes a FULL-POWER device (`pairlet devices revoke`): the local half happens here, at once, in
+     * this order —
+     *
+     *  1. the id is tombstoned on disk ([BridgeRegistry.tombstoneRevokedDevice]), so from now until the relay
+     *     confirms the revoke no replayed announce can re-anchor it, across any number of restarts;
+     *  2. its key leaves devices.json (which also cuts a live direct-LAN socket via the allow-list epoch), with its
+     *     relay session and its first-contact PSK.
+     *
+     * The caller then sends the relay's `RevokeDevice`; the relay client also re-sends it after every attach while
+     * the tombstone stands ([pendingRetiredRevocations]). A crash after 1 is finished at the next start (see
+     * `init`); a crash after 2 just leaves the revoke to that re-send. False when [deviceId] is not a full-power
+     * device (restricted credentials have their own commands).
      */
     suspend fun revokeOwnerDevice(deviceId: String): Boolean {
         if (bridges.isRestricted(deviceId) || !mutex.withLock { devicePubs.containsKey(deviceId) }) return false
-        revokedHere += deviceId
+        bridges.tombstoneRevokedDevice(deviceId) // a failed write is logged there; the local cut goes ahead
         onDeviceRevoked(deviceId)
         anchoredAt.remove(deviceId)
         return true
     }
+
+    /** How many revoked devices the relay has not confirmed yet — every tombstoned id, whatever retired it. */
+    fun revocationsPendingCount(): Int = bridges.retiredCredentialIds().size
 
     private fun newPairingId(): String =
         B64enc.encodeToString(ByteArray(12).also { java.security.SecureRandom().nextBytes(it) })
@@ -216,16 +235,12 @@ class DeviceSessions(
     suspend fun onDevicePaired(deviceId: String, devicePubB64: String) {
         val pub = runCatching { B64dec.decode(devicePubB64) }.getOrNull() ?: return
         // confirmed bridge/guest: replay must not leak the key into devices.json. A retired credential's id (a
-        // Collaborator Link or a folder-share guest, tombstoned until the relay confirms its revoke) is held off
-        // the same way: its key is gone, so without this it would look like a brand-new device and could be armed
-        // with someone's pairing ticket.
+        // Collaborator Link, a folder-share guest, or a full-power device the owner revoked — tombstoned until the
+        // relay confirms its revoke) is held off the same way: its key is gone, so without this it would look like
+        // a brand-new device and could be armed with someone's pairing ticket. Never a fresh pairing: the relay
+        // mints a new random device id on every redeem, so a re-paired phone arrives under a new id.
         if (bridges.isRestricted(deviceId) || bridges.isRetiredCredential(deviceId)) {
             mutex.withLock { seenThisAttach.add(deviceId) }
-            return
-        }
-        // revoked by the owner here; the relay just hasn't processed that yet — never re-admit it
-        if (deviceId in revokedHere) {
-            log.info("announce for owner-revoked device ${deviceId.take(8)}… ignored")
             return
         }
         var provisionalBridge = false
@@ -336,7 +351,9 @@ class DeviceSessions(
         val revokedOrigin = if (wasRestricted && !wasGuest) bridges.specOf(deviceId)?.name else null
         val revokedConvos = mutex.withLock {
             devicePubs.remove(deviceId); sessions.remove(deviceId)?.let { retirePins(it) }; pskFor.remove(deviceId)
-            seenThisAttach.remove(deviceId)
+            // an owner revoke during an attach replay: the relay DID carry the id, so the replay barrier must not
+            // read its absence as "already revoked there" and drop the tombstone ([reconcileReplay])
+            if (!bridges.isRetiredCredential(deviceId)) seenThisAttach.remove(deviceId)
             if (wasRestricted) owned.remove(deviceId).orEmpty() else emptyList()
         }
         bridges.remove(deviceId) // a revoked credential loses its entry (and live guard) the same instant
@@ -359,8 +376,9 @@ class DeviceSessions(
     }
 
     /**
-     * The relay's `DeviceRevoked` control. For a retired credential's tombstoned id (a Collaborator Link or a
-     * folder-share guest) this is the confirmation that its credential is dead at the relay: the tombstone goes,
+     * The relay's `DeviceRevoked` control. For a retired credential's tombstoned id (a Collaborator Link, a
+     * folder-share guest, or a full-power device the owner revoked) this is the confirmation that its credential
+     * is dead at the relay: the tombstone goes,
      * and — since this daemon holds nothing else for that id — that is all (no allow-list rewrite, so no live LAN
      * socket is cut for it). Every other id takes [onDeviceRevoked], exactly as before.
      */

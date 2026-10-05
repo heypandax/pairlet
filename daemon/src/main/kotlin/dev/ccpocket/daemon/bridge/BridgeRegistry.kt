@@ -58,8 +58,9 @@ class BridgeRegistry(
     private val guards = HashMap<String, BridgeGuard>()      // deviceId -> BRIDGE enforcement (per E2E session)
     private val createdAts = HashMap<String, Long>()         // deviceId -> when the credential was bound
 
-    // deviceIds of retired credentials (Collaborator Links, folder-share guests) whose relay-side revoke is not
-    // confirmed yet (see [retireCollaborators] / [tombstoneGuests]); guarded by `this`
+    // deviceIds of retired credentials (Collaborator Links, folder-share guests, owner-revoked full-power devices)
+    // whose relay-side revoke is not confirmed yet (see [retireCollaborators] / [tombstoneGuests] /
+    // [tombstoneRevokedDevice]); guarded by `this`
     private val retired = LinkedHashSet<String>()
     // false when the tombstone file exists but could not be read at startup: it is then never overwritten,
     // and nothing whose retirement depends on writing it is retired this run; guarded by `this`
@@ -243,11 +244,30 @@ class BridgeRegistry(
     @Synchronized
     fun isGuest(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.GUEST && deviceId in bridgePubs
 
-    /** A retired credential (a Collaborator Link or a folder-share guest) whose relay-side revoke is not
-     *  confirmed yet: its key is gone, but the relay may still announce the id, so it must be treated as known
-     *  (never armed, never allow-listed, never bound to another credential). */
+    /** A retired credential (a Collaborator Link, a folder-share guest, or a full-power device the owner revoked)
+     *  whose relay-side revoke is not confirmed yet: its key is gone, but the relay may still announce the id, so
+     *  it must be treated as known (never armed, never allow-listed, never bound to another credential). */
     @Synchronized
     fun isRetiredCredential(deviceId: String): Boolean = deviceId in retired
+
+    /**
+     * The owner revoked the FULL-POWER device [deviceId] (`pairlet devices revoke`): tombstone it, BEFORE the
+     * transport drops it from devices.json, so that at no point — not even a crash between the two writes — is the
+     * device out of the allow-list with nothing on disk keeping a replayed relay announce from writing it back.
+     * The same tombstone as a retired credential's: ids only, held until the relay confirms ([confirmRetired]).
+     *
+     * The id is tombstoned in memory whatever happens, so this run keeps it out regardless. Returns false when the
+     * write did not land (or the tombstone file was unreadable at startup and is never overwritten): the revoke
+     * then still goes ahead — cutting the device now matters more — but only lasts across a restart once the relay
+     * has processed it, which is how revokes behaved before this tombstone existed.
+     */
+    @Synchronized
+    fun tombstoneRevokedDevice(deviceId: String): Boolean {
+        retired += deviceId
+        if (tombstonesWritable && RetiredCredentialStore.save(retired.toList(), retiredStore)) return true
+        log.warn("owner-revoked device ${deviceId.take(8)}… could not be tombstoned on disk — it stays out for this run; a restart before the relay processes the revoke loses that")
+        return false
+    }
 
     /** Every tombstoned id the relay still has to be asked to revoke. */
     @Synchronized
