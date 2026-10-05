@@ -1,13 +1,6 @@
 package dev.ccpocket.daemon.kimi
 
-import dev.ccpocket.daemon.acp.AcpApprovals
-import dev.ccpocket.daemon.acp.AcpPrompt
-import dev.ccpocket.daemon.acp.AcpPromptFifo
-import dev.ccpocket.daemon.acp.AcpRpc
-import dev.ccpocket.daemon.acp.AcpSynthetic
-import dev.ccpocket.daemon.acp.acpErrorEvents
-import dev.ccpocket.daemon.acp.acpErrorTurn
-import dev.ccpocket.daemon.acp.acpImageRefusal
+import dev.ccpocket.daemon.acp.AcpClient
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
@@ -27,32 +20,23 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Drives the Kimi Code CLI via `kimi acp` — the Agent Client Protocol v1 over newline-delimited JSON-RPC 2.0
- * on stdio (issue #206). A stateful per-conversation handshake machine mirroring [dev.ccpocket.daemon.codex.CodexBackend]:
- * on [attach] it sends `initialize`; on the response it opens the session (`session/new`, or `session/load`
- * for a resume); user prompts are queued until the session id lands. Turns stream `session/update`
- * notifications (translated by [KimiAcpParser]); approvals are `session/request_permission` server→client
- * requests answered by the chosen option id — the exact provider-neutral shape [PermissionBridge] expects.
+ * on stdio (issue #206). The protocol half shared with DSH — `initialize`, the session open (`session/new`,
+ * or `session/load` for a resume), the prompt FIFO, approvals answered by the chosen option id (the exact
+ * provider-neutral shape [dev.ccpocket.daemon.agent.PermissionBridge] expects) — lives in [AcpClient]. What
+ * is kimi's own stays here: `session/update` translation ([KimiAcpParser] plus the streamed tool input
+ * below), the permission card, and the background-task watchers.
  *
  * SELECTION (probe 2026-08-06): the design assumed a `kimi --wire` mode, but 0.33.0 has no such flag; `kimi
  * acp` is its complete stdio protocol (initialize handshake confirmed: loadSession/resume/fork/permissions).
@@ -72,55 +56,43 @@ class KimiBackend(
 ) : AgentBackend {
     private val log = logger("KimiBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val rpc = AcpRpc { io?.writeLine?.invoke(it) }
 
-    @Volatile private var io: AgentIo? = null
     @Volatile private var resolvedExe: Path? = null
-    @Volatile private var workdir: String = ""
-    @Volatile private var resumeId: String? = null
     @Volatile private var mode: PermissionMode = PermissionMode.DEFAULT
     @Volatile private var model: String? = null
 
-    @Volatile private var sessionId: String? = null
-
     /**
-     * Why this session will never open, once a startup stage failed (audit 2026-10-04 H1 — the #388 fix
-     * [dev.ccpocket.daemon.dsh.DshBackend] already carries). Set by [failStartup], cleared by [attach]. It
-     * silences the handshake watchdog after a real diagnosis, and settles prompts that arrive AFTER the
-     * failure — they would otherwise queue behind a session id that can never land, with no terminal state
-     * and a re-run on every relaunch. Nothing retries a stage or opens a replacement session: a resume that
-     * failed must stay the session the user asked for.
+     * The ACP protocol half shared with DSH: handshake, session open, the one-in-flight prompt FIFO
+     * (ACP rejects a second session/prompt while a turn runs — `-32600 turn.agent_busy`, probe 0.34.0), the
+     * consumption receipt synthesized on every settle (kimi's live stream carries NO user_message_chunk),
+     * approvals, cancel, and the startup-failure terminal state with its handshake watchdog (audit
+     * 2026-10-04 H1). A resume is `session/load`, which REPLAYS history — the client drops those updates.
      */
-    @Volatile private var openFailure: String? = null
-
-    /** The handshake watchdog of the CURRENT process; replaced on every [attach]. */
-    @Volatile private var handshakeWatch: Job? = null
-
-    // `agentCapabilities.promptCapabilities.image` off THIS process's `initialize` answer (issue #377) — only
-    // an explicit `true` counts, and every attach forgets the previous process's answer.
-    @Volatile private var imagePrompts = false
-
-    // JSON-RPC id correlation. The outstanding session/prompt ids live in [prompts]: each prompt's text is
-    // replayed as a synthesized [AgentEvent.UserReplay] when it settles — kimi's live stream carries NO
-    // user_message_chunk (probe 0.34.0), so the turn settling IS the consumption receipt. Without it
-    // Conversation's prompt ledger never settles: every relaunch would re-inject (re-RUN) all past prompts,
-    // and task grants would never end at the turn boundary (maybeEndTaskOnSettle).
-    @Volatile private var initializeId: Long = -1
-    @Volatile private var sessionOpenId: Long = -1
-
-    // session/load replays the whole history via session/update BEFORE its response — those are historical,
-    // not live turn output, and the daemon replays history from disk separately, so drop them in that window.
-    @Volatile private var suppressReplayUpdates = false
-
-    private val approvals = AcpApprovals(rpc)
-    private val synthetic = AcpSynthetic("kimi")
-
-    // MID-TURN PROMPT QUEUE (probe 0.34.0): ACP rejects a second session/prompt while a turn runs
-    // (-32600 turn.agent_busy "another turn is already in progress"), so at most one is in flight and the
-    // rest wait in [prompts] (see [AcpPromptFifo]). Prompts that arrive before the session opens wait there
-    // too, behind its gate: the single buffered slot this replaced let a second early prompt (a quick
-    // follow-up, or a relaunch re-injecting two) silently overwrite the first.
-    private val prompts = AcpPromptFifo(rpc::nextId)
+    private val client = AcpClient(
+        AcpClient.Config(
+            tag = "kimi",
+            productName = "Kimi Code",
+            resume = AcpClient.Resume.LOAD,
+            stageHandshake = STAGE_HANDSHAKE,
+            stageNew = STAGE_NEW,
+            stageResume = STAGE_RESUME,
+            handshakeTimeoutMs = handshakeTimeoutMs,
+            // a legacy Python `kimi` sharing the name, or a CLI that does not speak ACP v1
+            handshakeHint = {
+                "no answer to `initialize` within ${handshakeTimeoutMs / 1000}s — check that `kimi` is the Kimi Code " +
+                    "CLI (`kimi acp`), not the legacy Python kimi-cli"
+            },
+            describeError = { error -> error?.str("message") ?: "kimi error" },
+            filterForeignUpdates = false,
+        ),
+        log,
+        object : AcpClient.Host {
+            override suspend fun onSessionOpened(sessionId: String, result: JsonObject?) = sessionOpened(sessionId)
+            override fun onUpdate(update: JsonObject) = handleUpdate(update)
+            override fun permissionCard(params: JsonObject?) = approvalCard(params)
+            override fun onSyntheticFrame(type: String?, root: JsonObject) = taskSettled(type, root)
+        },
+    )
 
     // toolCallId → accumulated tool state. ACP `tool_call` carries NO rawInput (probe 0.34.0): the input
     // JSON streams as cumulative text in in_progress `tool_call_update`s; the output arrives as `rawOutput`
@@ -144,7 +116,6 @@ class KimiBackend(
     private val taskScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val taskWatchers = ConcurrentHashMap<String, Job>()
 
-
     override val kind: AgentKind = AgentKind.KIMI
 
     override fun processBuilder(spec: AgentSpec): ProcessBuilder = KimiLauncher.processBuilder(exe(), spec)
@@ -152,203 +123,39 @@ class KimiBackend(
     private fun exe(): Path = resolvedExe ?: KimiLauncher.resolveExecutable(kimiBin).also { resolvedExe = it }
 
     override suspend fun attach(io: AgentIo, spec: AgentSpec) {
-        this.io = io
-        this.workdir = spec.workdir.toString()
-        this.resumeId = spec.resumeId
         this.mode = spec.mode
         this.model = spec.model
-        // reset per-process protocol state (runs on every (re)launch)
-        sessionId = null
-        openFailure = null
-        sessionOpenId = -1
-        suppressReplayUpdates = false
-        imagePrompts = false
-        prompts.reset()
-        approvals.clear(); toolCalls.clear()
+        // reset per-process state (runs on every (re)launch)
+        toolCalls.clear()
         stopTaskWatchers() // the previous process's tasks are no longer this conversation's jobs
-        handshakeWatch?.cancel()
         // kick off the ACP handshake — session open happens when the initialize response lands
-        initializeId = rpc.request("initialize", buildJsonObject {
-            put("protocolVersion", 1)
-            putJsonObject("clientCapabilities") {
-                putJsonObject("fs") { put("readTextFile", false); put("writeTextFile", false) }
-            }
-        })
-        handshakeWatch = taskScope.launch { watchHandshake(io) }
+        client.attach(io, spec.workdir.toString(), spec.resumeId)
     }
 
-    /**
-     * An `initialize` that never answers is the one startup failure no frame can report (a legacy Python
-     * `kimi` sharing the name, a CLI that does not speak ACP v1). Bounded, like DSH's: once a session open
-     * was sent, its own error rides the wire.
-     */
-    private suspend fun watchHandshake(owner: AgentIo) {
-        delay(handshakeTimeoutMs)
-        if (io !== owner || sessionOpenId >= 0 || sessionId != null || openFailure != null) return
-        injectStartupFailure(
-            STAGE_HANDSHAKE,
-            "no answer to `initialize` within ${handshakeTimeoutMs / 1000}s — check that `kimi` is the Kimi Code " +
-                "CLI (`kimi acp`), not the legacy Python kimi-cli",
-        )
+    override suspend fun parse(line: String): List<AgentEvent> = client.parse(line)
+
+    /** Our own task-completion frame (see [watchTask]); every other synthetic frame is the client's. */
+    private fun taskSettled(type: String?, root: JsonObject): List<AgentEvent>? {
+        if (type != SYNTHETIC_TASK_SETTLED) return null
+        val taskId = root.str("taskId") ?: return emptyList()
+        return listOf(AgentEvent.BackgroundTaskUpdated(taskId, root.str("status")))
     }
 
-    override suspend fun parse(line: String): List<AgentEvent> {
-        val t = line.trim()
-        if (t.isEmpty()) return emptyList()
-        val root = runCatching { json.parseToJsonElement(t) }.getOrNull() as? JsonObject
-            ?: return listOf(AgentEvent.Unparseable(t))
-        // our own refusal (see sendPrompt) — the one frame on this pump kimi did not write
-        if (root.str("type") == synthetic.refusalType) return settleRefusal(root)
-        if (root.str("type") == synthetic.errorType) return acpErrorEvents(root.str("message").orEmpty())
-        if (root.str("type") == SYNTHETIC_TASK_SETTLED) {
-            val taskId = root.str("taskId") ?: return emptyList()
-            return listOf(AgentEvent.BackgroundTaskUpdated(taskId, root.str("status")))
-        }
-        val method = root.str("method")
-        val idEl = root["id"]?.takeIf { it !is JsonNull }
-        return runCatching {
-            when {
-                method != null && idEl != null -> handleServerRequest(method, idEl, root.obj("params"))
-                method != null -> handleNotification(method, root.obj("params"))
-                root.containsKey("result") -> handleResponse(idEl, root["result"] as? JsonObject)
-                root.containsKey("error") -> handleErrorResponse(idEl, root.obj("error"))
-                else -> emptyList()
-            }
-        }.getOrElse { log.warn("kimi parse failed: ${it.message}"); emptyList() }
+    /** session/new returns {sessionId}; session/load returns {} (the id is the one we sent). Binding the session
+     *  releases whatever arrived before it, oldest first. */
+    private suspend fun sessionOpened(sid: String): List<AgentEvent> {
+        val refusals = client.openPromptGate(bind = sid)
+        return listOf(AgentEvent.SessionInit(sessionId = sid, cwd = client.workdir, model = model)) + refusals
     }
 
-    // ---- inbound: responses to our requests ----
+    // ---- inbound: session/update ----
 
-    private suspend fun handleResponse(idEl: JsonElement?, result: JsonObject?): List<AgentEvent> {
-        val id = (idEl as? JsonPrimitive)?.longOrNull ?: return emptyList()
-        if (id == initializeId) {
-            val image = result?.obj("agentCapabilities")?.obj("promptCapabilities")?.get("image") as? JsonPrimitive
-            imagePrompts = image != null && !image.isString && image.booleanOrNull == true
-            openSession()
-            return emptyList()
-        }
-        if (id == sessionOpenId) return onSessionOpened(result)
-        val consumed = prompts.settle(id) ?: return emptyList()
-        // settle → synthesize the consumption receipt (no live user_message_chunk, probe 0.34.0) BEFORE the
-        // TurnResult, so the ledger entry is gone by the time maybeEndTaskOnSettle checks it — then let the
-        // next queued prompt go out.
-        return listOf(AgentEvent.UserReplay(consumed)) + onPromptDone(result) + flushQueuedPrompt()
-    }
-
-    private suspend fun handleErrorResponse(idEl: JsonElement?, error: JsonObject?): List<AgentEvent> {
-        val id = (idEl as? JsonPrimitive)?.longOrNull
-        val msg = error?.str("message") ?: "kimi error"
-        // A failed startup stage leaves a session that will never open: every prompt waiting on it settles
-        // (an auth wall — no model / not logged in — lands here on session open, too).
-        if (id != null && id == initializeId) return failStartup(STAGE_HANDSHAKE, msg)
-        if (id != null && id == sessionOpenId) {
-            suppressReplayUpdates = false
-            return failStartup(if (resumeId != null) STAGE_RESUME else STAGE_NEW, msg)
-        }
-        if (id != null && prompts.isInFlight(id)) {
-            val consumed = id?.let { prompts.settle(it) }
-            val next = flushQueuedPrompt() // a failed prompt must not stall the FIFO behind it
-            return listOfNotNull(
-                // an errored prompt was still CONSUMED — its failure surfaced right here as an error turn.
-                // Left unsettled, Conversation would re-inject it on every relaunch, looping the same
-                // failure (#122 warns exactly against auto-draining a failure); the client resend path is
-                // the rescue channel, not the ledger.
-                consumed?.let { AgentEvent.UserReplay(it) },
-                AgentEvent.AssistantText("⚠️ $msg"),
-                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
-            ) + next
-        }
-        log.warn("kimi error response id=$id: $msg")
-        return emptyList()
-    }
-
-    /** A startup stage failed, so this session will never open: name the stage and give every prompt waiting
-     *  on it a terminal state — an unsettled one stays in Conversation's ledger and re-runs on relaunch. */
-    private suspend fun failStartup(stage: String, why: String): List<AgentEvent> {
-        val message = "$stage: $why"
-        openFailure = message
-        log.warn("kimi startup failed — $message")
-        val stranded = prompts.drain()
-        return if (stranded.isEmpty()) acpErrorEvents(message) else stranded.flatMap { acpErrorTurn(it.text, message) }
-    }
-
-    /** [failStartup] for the watchdog, which is not on the parse pump: the same settlement, delivered through
-     *  [AgentIo.inject] (only the pump may return events). */
-    private suspend fun injectStartupFailure(stage: String, why: String) {
-        val message = "$stage: $why"
-        openFailure = message
-        log.warn("kimi startup failed — $message")
-        val stranded = prompts.drain()
-        if (stranded.isEmpty()) {
-            io?.inject?.invoke(synthetic.error(message))
-            return
-        }
-        for (prompt in stranded) {
-            val id = prompts.reserve(prompt.text)
-            io?.inject?.invoke(synthetic.refusal(id, message))
-        }
-    }
-
-    private suspend fun openSession() {
-        val rid = resumeId
-        sessionOpenId = if (rid != null) {
-            suppressReplayUpdates = true // session/load replays history via session/update before responding
-            rpc.request("session/load", buildJsonObject {
-                put("sessionId", rid)
-                put("cwd", workdir)
-                putJsonArray("mcpServers") {}
-            })
-        } else {
-            rpc.request("session/new", buildJsonObject {
-                put("cwd", workdir)
-                putJsonArray("mcpServers") {}
-            })
-        }
-    }
-
-    private suspend fun onSessionOpened(result: JsonObject?): List<AgentEvent> {
-        suppressReplayUpdates = false
-        // session/new returns {sessionId}; session/load returns {} (id is the one we sent). A session/new with
-        // no id is a session nobody can address — the same dead end as an error answer, settled the same way.
-        val sid = result?.str("sessionId") ?: resumeId
-            ?: return failStartup(STAGE_NEW, "kimi did not return a session id")
-        val refused = ArrayList<AcpPrompt>()
-        // bind the session and open the gate atomically: whatever arrived before the session goes, oldest first
-        val first = prompts.open(prepare = { sessionId = sid; true }, ::acceptable, refused)
-        first?.let { (id, prompt) -> writePrompt(id, prompt) }
-        return listOf(AgentEvent.SessionInit(sessionId = sid, cwd = workdir, model = model)) + refusals(refused)
-    }
-
-    private fun onPromptDone(result: JsonObject?): List<AgentEvent> {
-        // ACP prompt response: {stopReason: end_turn | cancelled | max_tokens | refusal | …}
-        val stop = result?.str("stopReason")
-        return listOf(
-            AgentEvent.TurnResult(
-                finalText = null, // text already streamed via agent_message_chunk
-                usage = null, // ACP carries no per-turn token usage in the response; occupancy comes from updates
-                isError = stop == "refusal",
-            ),
-        )
-    }
-
-    // ---- inbound: notifications (session/update) ----
-
-    private fun handleNotification(method: String, params: JsonObject?): List<AgentEvent> {
-        params ?: return emptyList()
-        return when (method) {
-            "session/update" -> {
-                if (suppressReplayUpdates) return emptyList() // historical replay from session/load — drop
-                val update = params.obj("update") ?: return emptyList()
-                // tool_call / tool_call_update are handled HERE (stateful input accumulation); every other
-                // update kind stays with the stateless parser.
-                when (update.str("sessionUpdate")) {
-                    "tool_call" -> onToolCall(update)
-                    "tool_call_update" -> onToolCallUpdate(update)
-                    else -> KimiAcpParser.translate(update)
-                }
-            }
-            else -> emptyList()
-        }
+    // tool_call / tool_call_update are handled HERE (stateful input accumulation); every other update kind
+    // stays with the stateless parser.
+    private fun handleUpdate(update: JsonObject): List<AgentEvent> = when (update.str("sessionUpdate")) {
+        "tool_call" -> onToolCall(update)
+        "tool_call_update" -> onToolCallUpdate(update)
+        else -> KimiAcpParser.translate(update)
     }
 
     /** `tool_call`: card opens pending with NO input (probe 0.34.0) — record it, emit nothing yet. */
@@ -408,97 +215,27 @@ class KimiBackend(
         return out
     }
 
-    // ---- inbound: server→client requests (approvals + fs/terminal we decline) ----
+    // ---- inbound: approvals ----
 
-    private suspend fun handleServerRequest(method: String, idEl: JsonElement, params: JsonObject?): List<AgentEvent> {
-        return when (method) {
-            "session/request_permission" -> {
-                val askId = approvals.register(idEl, params)
-                val toolCall = params?.obj("toolCall")
-                val name = ToolNameMapper.map(
-                    toolCall?.str("kind") ?: toolCall?.str("title") ?: "tool",
-                )
-                // probe 0.34.0: no rawInput here either — the human sentence in the content text is the
-                // only command carrier ("Requesting approval to Running: echo …"); surface it as the card body
-                val input = toolCall?.obj("rawInput") ?: buildJsonObject {
-                    put("description", toolCallContentText(toolCall?.get("content")) ?: toolCall?.str("title") ?: "tool")
-                }
-                listOf(AgentEvent.ControlRequest(askId, name, input))
-            }
-            // we declared fs caps false, so these shouldn't arrive; decline so the agent doesn't block on us.
-            else -> {
-                log.warn("kimi unsupported server request: $method")
-                rpc.respondError(idEl, AcpRpc.METHOD_NOT_FOUND, "not supported by cc-pocket")
-                emptyList()
-            }
+    /** The card of a `session/request_permission`: the tool name mapped like a tool card's. */
+    private fun approvalCard(params: JsonObject?): Pair<String, JsonObject> {
+        val toolCall = params?.obj("toolCall")
+        val name = ToolNameMapper.map(
+            toolCall?.str("kind") ?: toolCall?.str("title") ?: "tool",
+        )
+        // probe 0.34.0: no rawInput here either — the human sentence in the content text is the
+        // only command carrier ("Requesting approval to Running: echo …"); surface it as the card body
+        val input = toolCall?.obj("rawInput") ?: buildJsonObject {
+            put("description", toolCallContentText(toolCall?.get("content")) ?: toolCall?.str("title") ?: "tool")
         }
+        return name to input
     }
 
     // ---- outbound (called by Conversation) ----
 
-    override suspend fun sendPrompt(text: String, images: List<ImageData>) {
-        val prompt = AcpPrompt(text, images)
-        // the session already failed to open: queueing would park this behind a session id that can never
-        // land — settle it with the stage error instead, exactly like a refused prompt
-        openFailure?.let { why ->
-            val id = prompts.reserve(text)
-            io?.inject?.invoke(synthetic.refusal(id, why))
-            return
-        }
-        // no session yet, or a turn in flight (ACP has no mid-turn stdin queue — -32600 turn.agent_busy, probe
-        // 0.34.0): FIFO it, released by the session open / the in-flight prompt's settle
-        val reserved = prompts.admit(prompt) ?: return
-        if (acceptable(prompt)) {
-            writePrompt(reserved, prompt)
-        } else {
-            // refused through the pump, like an error response: the reservation holds everything sent after it
-            // until the refusal settles. Waiting for channel room is safe here, off the pump — a refusal the
-            // pump itself finds returns its events instead (see flushQueuedPrompt).
-            io?.inject?.invoke(synthetic.refusal(reserved, refuse(prompt)))
-        }
-    }
+    override suspend fun sendPrompt(text: String, images: List<ImageData>) = client.sendPrompt(text, images)
 
-    /** The in-flight prompt just settled (any stopReason / error) — send the oldest queued prompt, if any.
-     *  Returns the error turns of the prompts refused on the way: this runs on the pump, so injecting them
-     *  would wait for room on the very channel the pump drains. */
-    private suspend fun flushQueuedPrompt(): List<AgentEvent> {
-        val refused = ArrayList<AcpPrompt>()
-        val next = prompts.next(::acceptable, refused)
-        next?.let { (id, prompt) -> writePrompt(id, prompt) }
-        return refusals(refused)
-    }
-
-    /** A prompt [sendPrompt] reserved but refused settles here exactly once, like its error response — a stale
-     *  id (already settled, or reserved by a previous process) says nothing. */
-    private suspend fun settleRefusal(root: JsonObject): List<AgentEvent> {
-        val consumed = root.long("id")?.let { prompts.settle(it) } ?: return emptyList()
-        return acpErrorTurn(consumed, root.str("message").orEmpty()) + flushQueuedPrompt()
-    }
-
-    private suspend fun writePrompt(id: Long, prompt: AcpPrompt) {
-        val sid = sessionId ?: return
-        rpc.send(id, "session/prompt", prompt.sessionPromptParams(sid))
-    }
-
-    /** A prompt with images needs the advertised capability — sending its text alone would be the silent loss
-     *  issue #377 is about, so without it the prompt is refused. */
-    private fun acceptable(prompt: AcpPrompt): Boolean = prompt.images.isEmpty() || imagePrompts
-
-    private fun refusals(refused: List<AcpPrompt>): List<AgentEvent> =
-        refused.flatMap { acpErrorTurn(it.text, refuse(it)) }
-
-    /** Log a refusal and word it for the chat — counts only: the image bytes reach neither. */
-    private fun refuse(prompt: AcpPrompt): String {
-        val n = prompt.images.size
-        log.warn("kimi prompt with $n image(s) refused — this session did not advertise image input")
-        return acpImageRefusal("Kimi Code", n)
-    }
-
-    override suspend fun interrupt() {
-        val sid = sessionId ?: return
-        // ACP session/cancel is a NOTIFICATION (no id); the in-flight prompt then resolves stopReason=cancelled
-        rpc.notify("session/cancel", buildJsonObject { put("sessionId", sid) })
-    }
+    override suspend fun interrupt() = client.interrupt()
 
     override suspend fun respondPermission(
         askId: String,
@@ -509,7 +246,7 @@ class KimiBackend(
         denyMessage: String?,
     ) {
         // remember → the `_always` option (kimi offers both); nothing matching → cancelled
-        approvals.respond(askId, allow, remember)
+        client.respondPermission(askId, allow, remember)
     }
 
     // Model is chosen at session/new (ACP has no mid-session model swap) → relaunch to change it.
@@ -526,18 +263,18 @@ class KimiBackend(
     // drops it), so stop watching — Conversation's stale-job reaper owns the jobs of a dead agent.
     override suspend fun onProcessEnded(sessionId: String?) {
         stopTaskWatchers()
-        handshakeWatch?.cancel()
+        client.processEnded()
     }
 
     // ---- background task completion (issue #391) ----
 
     private fun watchTask(taskId: String) {
-        val sid = sessionId ?: return
-        val owner = io ?: return
+        val sid = client.sessionId ?: return
+        val owner = client.io ?: return
         taskWatchers[taskId]?.cancel()
         taskWatchers[taskId] = taskScope.launch {
             var file: Path? = null
-            while (isActive && io === owner) {
+            while (isActive && client.io === owner) {
                 delay(taskPollMs)
                 val f = file ?: runCatching { taskFile(sid, taskId) }.getOrNull()?.also { file = it } ?: continue
                 val settled = settledStatus(KimiPaths.taskStatus(f)) ?: continue
