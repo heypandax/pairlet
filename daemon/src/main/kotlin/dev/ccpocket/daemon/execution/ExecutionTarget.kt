@@ -19,7 +19,7 @@ import java.security.SecureRandom
  *
  * There is exactly ONE handshake path in this daemon and it is not here. G0 prototyped a private
  * transport/handshake responder beside the production chain; G1 deleted it. Approval now goes through the
- * SAME serialized mint the collaborator/guest/bridge planes use
+ * SAME serialized mint the guest/bridge planes use
  * ([BridgeRegistry.reserveMint] → relay mint → [BridgeRegistry.recordIntent] →
  * [dev.ccpocket.daemon.relay.DeviceSessions.onMintedTicket]), the source's first decrypt is classified by
  * [BridgeRegistry.finalize] exactly like any other restricted credential, and the only #367-specific step
@@ -55,7 +55,8 @@ class ExecutionTarget(
     private val store: ExecutionGrantStore,
     /** The shared restricted-credential authority: the mint slot, the pairing intent, the bound credential. */
     private val bridges: BridgeRegistry,
-    /** Mint a one-time HEADLESS connect ticket at the relay (production: the collaborator mint path). */
+    /** Mint a one-time HEADLESS connect ticket at the relay (production: [dev.ccpocket.daemon.relay.RelayClient.mintTicket]
+     *  with the relay's headless + `collaborator` ticket markers). */
     private val mintTicket: suspend () -> PairTicket?,
     /** Arm the derived first-contact PSK on the device pump — [dev.ccpocket.daemon.relay.DeviceSessions.onMintedTicket]
      *  with `headless = true`, so an execution mint never stamps the interactive-pairing exclusion clock. */
@@ -357,8 +358,7 @@ class ExecutionTarget(
 
 /**
  * The bind seam the transport calls, so [dev.ccpocket.daemon.relay.DeviceSessions] depends on an interface
- * rather than on the execution plane — the exact shape
- * [dev.ccpocket.daemon.handoff.CollaboratorControl.onRedeemed] already has for collaborator links.
+ * rather than on the execution plane.
  */
 interface ExecutionControl {
     suspend fun onRedeemed(deviceId: String, linkPubB64: String, grantId: String?): Boolean

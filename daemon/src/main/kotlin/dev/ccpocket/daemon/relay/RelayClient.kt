@@ -206,7 +206,7 @@ class RelayClient(
     /** Exposes the pairing-ceremony gate to the direct-LAN listener (see DeviceSessions.firstContactPending). */
     suspend fun deviceFirstContactPending(deviceId: String): Boolean = sessions.firstContactPending(deviceId)
 
-    /** #367: is [deviceId] a restricted credential (bridge / guest / collaborator / execution)? The LAN
+    /** #367: is [deviceId] a restricted credential (bridge / guest / execution)? The LAN
      *  gate refuses these EXPLICITLY as well as structurally — see [dev.ccpocket.daemon.server.LanE2E]. */
     fun deviceIsRestrictedCredential(deviceId: String): Boolean = sessions.bridges.isRestricted(deviceId)
 
@@ -331,7 +331,7 @@ class RelayClient(
      * session the user had already tapped away from stayed warm — and invisible to the picker — for days.
      * [SessionRegistry.reapIdle] now spares only conversations with a reachable attached view (a relay
      * `dev:` view while the peer is online, a LAN view while a socket lives) plus the usual busy /
-     * pending-ask / handoff shields; everything else is released on the same 90s clock as before.
+     * pending-ask shields; everything else is released on the same 90s clock as before.
      */
     private suspend fun reaperLoop() {
         residentLoop(REAP_SCAN_MS, onFailure = { log.error("idle reaper pass failed — next pass in ${REAP_SCAN_MS}ms", it) }) {

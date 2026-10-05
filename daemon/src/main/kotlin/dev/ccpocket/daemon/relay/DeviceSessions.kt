@@ -136,9 +136,9 @@ class DeviceSessions(
      *  UNANCHORED announce: entering the full-power allow-list requires that a ticket THIS daemon minted
      *  was still armed here — the arming fact, not the byte value the handshake ends up using. With
      *  nothing armed (we restarted after minting a restricted invite but before it was redeemed, or the
-     *  announce is unsolicited) the intent that says "this is a REVIEW collaborator / a bridge / a guest"
-     *  is gone with it: promoting the key would silently hand a colleague a full owner slot, past
-     *  [dev.ccpocket.protocol.CollaboratorPurpose] and every restricted capability gate. Such a key is
+     *  announce is unsolicited) the intent that says "this is a bridge / a guest / an execution link"
+     *  is gone with it: promoting the key would silently hand someone a full owner slot, past every
+     *  restricted capability gate. Such a key is
      *  held provisional instead — never persisted, never allow-listed — so its first frame hits the same
      *  fail-closed `recognized` check in [transport] and the owner mints a fresh invite. */
     suspend fun onDevicePaired(deviceId: String, devicePubB64: String) {
@@ -649,11 +649,11 @@ class DeviceSessions(
                 }
             }
             bridges.isExecution(deviceId) -> {
-                // #367 EXECUTION link: a PEER DAEMON's run link. ZERO-baseline like a collaborator, but it
+                // #367 EXECUTION link: a PEER DAEMON's run link. ZERO-baseline, and it
                 // does not reach the router AT ALL — the whitelist admits only the execution frames, the
                 // guard re-authorises the grant behind them on every single frame, and the plane is the
-                // only thing they are ever handed to. It gets no sink attach of any kind (no handoff, no
-                // review, no pins, no managed-session slot), so no fan-out can select it as a target.
+                // only thing they are ever handed to. It gets no sink attach of any kind (no pins, no
+                // managed-session slot), so no fan-out can select it as a target.
                 val request = env.body as? dev.ccpocket.protocol.ToDaemon
                 // A confirmed execution credential is itself evidence of use (ExecutionUsage), so the
                 // planes are already loaded by the time the relay delivers this frame. Defensive anyway:
@@ -784,8 +784,7 @@ class DeviceSessions(
         pin: dev.ccpocket.daemon.pins.ProjectPinConnection? = null,
     ) {
         try {
-            // deviceId is the Noise-authenticated transport identity — the handoff gate's ONLY input for
-            // "who is driving" (SESSION-HANDOFF.md §5.3: never a frame field)
+            // deviceId is the Noise-authenticated transport identity — never a frame field
             // listingLane: this reader serves EVERY device, so a session-list reply (a transcript scan) is produced on
             // the device's own lane instead of here — in order with that device's other listings, behind nobody else's
             core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, pinConnection = pin, listingLane = deviceId) { convoId ->

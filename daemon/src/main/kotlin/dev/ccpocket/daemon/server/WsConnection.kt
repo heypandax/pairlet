@@ -48,7 +48,7 @@ class LanE2E(
      *  can supply a fixture instead of the real ~/.cc-pocket/devices.json. */
     val pairedDevices: () -> Map<String, ByteArray> = { PairedDevices.load() },
     /**
-     * Is [String] a RESTRICTED credential (bridge #91 / guest #115 / collaborator / execution #367)?
+     * Is [String] a RESTRICTED credential (bridge #91 / guest #115 / execution #367)?
      * Such a key is structurally barred from this gate already — it lives in its own credential file and
      * never in devices.json, which is the only allow-list [pairedDevices] reads — so this is a SECOND,
      * explicit refusal, and it exists because of #367.
@@ -234,8 +234,8 @@ class WsConnection(
                 sink.emit(dev.ccpocket.protocol.ProjectPinsState(subscriptionId = subscription, snapshot = snapshot))
             }
         }
-        // managed session list pushes (issue #360): every LAN peer is an owner by construction (see the handoff
-        // attach above). Resolved at emission against THIS socket's current declaration and agent vocabulary, and
+        // managed session list pushes (issue #360): every LAN peer is an owner by construction (the gate refuses
+        // restricted credentials). Resolved at emission against THIS socket's current declaration and agent vocabulary, and
         // the sink's own allowedForCaps gate re-checks the frame type.
         // #360 security review M2: a GATED socket whose device was revoked while idle must not receive a push. The frame
         // is still handed to the writer, which re-checks the allow-list right before sealing, drops it and closes the
@@ -291,7 +291,7 @@ class WsConnection(
         }
         // A revoke cuts a gated socket the moment it is written (audit 2026-10-04): the epoch check in the read
         // loop below only ran when THIS device sent a frame, so a silent revoked device kept receiving every
-        // session stream, approval card and handoff/review row meanwhile. Throwing fails this scope — reader
+        // session stream and approval card meanwhile. Throwing fails this scope — reader
         // and writer with it — exactly like the writer's own "device revoked" refusal.
         val revokeWatch = if (gatedDeviceId != null) launch {
             PairedDevices.epochChanges.collect { epoch ->

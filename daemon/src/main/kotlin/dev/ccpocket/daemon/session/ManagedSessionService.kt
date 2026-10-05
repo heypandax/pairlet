@@ -79,8 +79,8 @@ fun interface NativeSessionHook {
  * evaluated when the report is processed: false once the process generation that produced it was replaced, so a
  * late init from a retired process never registers anything.
  *
- * [ownerCreated] is the three-way owner fact fixed when the conversation was OPENED (no bridge origin, no guest
- * scope, no collaborator grant). Only owner-created sessions are registered; a restricted credential's sessions stay
+ * [ownerCreated] is the owner fact fixed when the conversation was OPENED (no bridge origin, no guest
+ * scope). Only owner-created sessions are registered; a restricted credential's sessions stay
  * in discovery for the owner to import explicitly.
  */
 data class NativeSessionReport(
