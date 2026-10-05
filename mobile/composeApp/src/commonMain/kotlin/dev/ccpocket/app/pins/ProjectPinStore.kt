@@ -107,16 +107,15 @@ sealed class PinScopeKey(val storageName: String?, val synced: Boolean) {
     /** The no-pairing demo: in memory only, never written anywhere. */
     data object Demo : PinScopeKey(null, synced = false)
 
-    /** A Collaborator Link inbox: it has no projects, so it has no pins. */
-    data object Inbox : PinScopeKey(null, synced = false)
-
     companion object {
         fun of(binding: PairedDaemon?, demo: Boolean): PinScopeKey = when {
             demo -> Demo
             binding == null -> Unpaired
             binding.role == BindingRole.OWNER -> Owner(binding.accountId)
             binding.role == BindingRole.GUEST -> Guest(binding.accountId)
-            else -> Inbox
+            // the retired COLLABORATOR role, which this build never loads: as before, it has no projects,
+            // so its pins live in memory only and are never written
+            else -> Demo
         }
     }
 }
