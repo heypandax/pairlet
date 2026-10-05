@@ -227,8 +227,6 @@ class ClaudeBackend(
         SpawnedSessions.note(workdir, sessionId)
     }
 
-    override fun transcriptDir(workdir: String): Path = ProjectPaths.dirFor(workdir)
-
     override fun transcriptPath(workdir: String, sessionId: String): Path? {
         // sessionId is wire input interpolated into a filename — same guard as SessionFilesService
         if (sessionId.contains('/') || sessionId.contains('\\') || sessionId.contains("..")) return null

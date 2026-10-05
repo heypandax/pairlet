@@ -70,7 +70,6 @@ class RequestRouterListSessionsTest {
         ) = throw UnsupportedOperationException()
         override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = false
         override suspend fun onProcessEnded(sessionId: String?) {}
-        override fun transcriptDir(workdir: String): Path = throw UnsupportedOperationException()
         override fun replayHistory(workdir: String, sessionId: String) = emptyList<HistoryMessage>()
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
     }

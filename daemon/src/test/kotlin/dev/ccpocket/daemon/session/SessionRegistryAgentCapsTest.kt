@@ -58,7 +58,6 @@ class SessionRegistryAgentCapsTest {
         ) {}
         override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = false
         override suspend fun onProcessEnded(sessionId: String?) {}
-        override fun transcriptDir(workdir: String): Path = Path.of(workdir)
         override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
         override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null

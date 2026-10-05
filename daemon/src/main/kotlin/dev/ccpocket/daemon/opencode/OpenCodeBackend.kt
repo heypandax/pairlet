@@ -162,7 +162,6 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
 
     // ---- disk: transcript scanning + replay ----
 
-    override fun transcriptDir(workdir: String): Path = OpenCodePaths.dataRoot()
     override fun listSessions(workdir: String): List<SessionSummary> = OpenCodeTranscriptScanner.scan(workdir)
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
         OpenCodeTranscriptReplay.read(sessionId)

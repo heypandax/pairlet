@@ -455,8 +455,6 @@ class DshBackend(
 
     // ---- disk (unchanged by the transport switch: dsh 0.1.2 did not move or reshape the store) ----
 
-    override fun transcriptDir(workdir: String): Path = DshPaths.sessionsRoot()
-
     override fun listSessions(workdir: String): List<SessionSummary> = DshTranscriptScanner.scan(workdir)
 
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
