@@ -20,7 +20,7 @@
     <string name="reconnect_banner">连接已断开，正在重连…</string>
     <string name="status_disconnected">未连接</string>
     <string name="status_invalid_link">配对链接无效</string>
-    <string name="status_review_invite_wrong_door">这是评审邀请——请在「评审 · 联系人」里添加，且要在负责收评审的那台电脑上。</string>
+    <string name="status_feature_retired">该功能已下线</string>
     <string name="status_pairing">配对中…</string>
     <string name="status_pair_failed">配对失败：%1$s</string>
     <string name="status_connecting">连接中…</string>

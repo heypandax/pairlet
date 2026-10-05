@@ -89,11 +89,6 @@ fun JoinFolderScreen(repo: PocketRepository, onBack: () -> Unit, onJoined: () ->
         onBack = onBack,
         onInvite = { preview = it },
         onCollabInvite = { collabPreview = it },
-        // A REVIEW ticket is not for this door (REVIEW-REQUEST.md §13.3) — but it is a perfectly valid
-        // ticket, so it must not read as a broken one. Park it exactly where a deep link parks it and
-        // step out of the way: the Review Center opens over this screen at its fingerprint step, and
-        // nothing here redeems (that would burn the ticket a colleague's daemon is waiting for).
-        onReviewInvite = { uri -> repo.pendingReviewInvite.value = uri; onBack() },
     )
 }
 
@@ -104,7 +99,6 @@ private fun RedeemScreen(
     onBack: () -> Unit,
     onInvite: (ShareInvite) -> Unit,
     onCollabInvite: (dev.ccpocket.protocol.CollaboratorInvite) -> Unit = {},
-    onReviewInvite: (String) -> Unit = {},
 ) {
     var pasted by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
@@ -114,7 +108,6 @@ private fun RedeemScreen(
         when (val link = dev.ccpocket.app.pairing.parseIncomingLink(dev.ccpocket.app.pairing.canonicalLinkScheme(raw), allowBareBlob = true)) {
             is dev.ccpocket.app.pairing.IncomingLink.Share -> onInvite(link.invite)
             is dev.ccpocket.app.pairing.IncomingLink.Collab -> onCollabInvite(link.invite)
-            is dev.ccpocket.app.pairing.IncomingLink.ReviewContact -> onReviewInvite(link.uri)
             else -> error = true
         }
     }

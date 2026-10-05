@@ -137,7 +137,6 @@ import dev.ccpocket.protocol.ArtifactRef
 import dev.ccpocket.protocol.CancelReviewRequest
 import dev.ccpocket.protocol.CloseReviewRequest
 import dev.ccpocket.protocol.CollaboratorDirection
-import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.CreateReviewInvite
 import dev.ccpocket.protocol.CreateReviewRequest
 import dev.ccpocket.protocol.JoinReviewContact
@@ -326,7 +325,7 @@ import dev.ccpocket.app.resources.status_connecting
 import dev.ccpocket.app.resources.status_disconnected
 import dev.ccpocket.app.resources.status_failed
 import dev.ccpocket.app.resources.status_invalid_link
-import dev.ccpocket.app.resources.status_review_invite_wrong_door
+import dev.ccpocket.app.resources.status_feature_retired
 import dev.ccpocket.app.resources.status_pair_failed
 import dev.ccpocket.app.resources.status_pairing
 import dev.ccpocket.app.resources.status_reconnecting
@@ -6054,27 +6053,15 @@ class PocketRepository(
             is IncomingLink.Code -> pairWithCode(link.code, fromScan = fromScan)
             is IncomingLink.Pair -> pair(link.url, fromScan = fromScan)
             // every invite kind parks in a trust screen; none of them redeems here
-            is IncomingLink.Collab ->
-                // A REVIEW invite does not belong to THIS door at all (REVIEW-REQUEST.md §13.3): it is
-                // addressed to a colleague's DAEMON, and its ticket is single use, so redeeming it here
-                // would burn it into a phone binding that can never answer a review. The parser already
-                // refuses a review ticket at the collab door — this is the SECOND gate, kept because the
-                // one that matters is the one standing right before the redeem.
-                if (link.invite.purpose == CollaboratorPurpose.REVIEW) {
-                    status.value = StatusMsg(Res.string.status_review_invite_wrong_door)
-                } else {
-                    pendingCollabInvite.value = link.invite
-                }
-            // …and its own door routes into the Review Center's join confirmation, where the human
-            // compares fingerprints before the DAEMON (not this app) redeems anything.
-            is IncomingLink.ReviewContact -> pendingReviewInvite.value = link.uri
+            is IncomingLink.Collab -> pendingCollabInvite.value = link.invite
             is IncomingLink.Share -> pendingShareInvite.value = link.invite
             is IncomingLink.Session -> requestOpenSession(link.workdir, link.sessionId)
             is IncomingLink.Handoff -> pendingOfferId.value = link.handoffId
+            // a link for a feature this build no longer has: say so and do nothing else. It is a known
+            // link, not a failed pairing — so no setPairFailure and no pair_failed, unlike Unknown below.
+            is IncomingLink.Retired -> status.value = StatusMsg(Res.string.status_feature_retired)
             // an unroutable payload is the other silent pairing dead end (issue #278): the user scanned or
             // opened SOMETHING and got a red line, which the funnel used to see as no attempt at all.
-            // (The review-invite wrong-door branch above is deliberately NOT this: it is a routing correction
-            //  on a perfectly valid invite, not a failed pairing.)
             IncomingLink.Unknown -> {
                 status.value = StatusMsg(Res.string.status_invalid_link)
                 setPairFailure(PairFailure.PARSE)

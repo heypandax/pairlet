@@ -2,6 +2,7 @@ package dev.ccpocket.app.pairing
 
 import dev.ccpocket.protocol.CollaboratorInvite
 import dev.ccpocket.protocol.CollaboratorPurpose
+import dev.ccpocket.protocol.REVIEW_CONTACT_INVITE_URI_PREFIX
 import dev.ccpocket.protocol.ShareInvite
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -28,7 +29,7 @@ class IncomingLinkTest {
         relay = "wss://relay.test", accountId = "acct-a", daemonPub = dev.ccpocket.app.TEST_DAEMON_PUB,
         ticket = "tkt-1", ownerLabel = "Panda",
     )
-    /** The same establishment material, minted for the OTHER feature (REVIEW-REQUEST.md §13.3). */
+    /** The same establishment material, minted for the OTHER (now retired) feature (REVIEW-REQUEST.md §13.3). */
     private val reviewContact = collab.copy(ticket = "tkt-3", purpose = CollaboratorPurpose.REVIEW)
     private val share = ShareInvite(
         relay = "wss://relay.test", accountId = "acct-a", daemonPub = "PUBKEY", ticket = "tkt-2", folderName = "cc-pocket",
@@ -157,50 +158,40 @@ class IncomingLinkTest {
         assertIs<IncomingLink.Collab>(parseIncomingLink("ccpocket://collab#$blob"))
         assertNotNull(decodeCollaboratorInvite(blob), "a bare pre-purpose blob still pastes")
         assertIs<IncomingLink.Collab>(parseIncomingLink(blob, allowBareBlob = true))
-
-        // …and it is still not a review peer, at either form of that door
-        assertNull(decodeReviewContactInvite(REVIEW_CONTACT_URI_PREFIX + blob))
-        assertNull(decodeReviewContactInvite(blob))
     }
 
     @Test
     fun theLegacyCollabHostIsUnchangedAndTheReviewHostIsItsOwn() {
         assertTrue(collab.encode().startsWith(COLLAB_URI_PREFIX), collab.encode())
-        assertTrue(reviewContact.encode().startsWith(REVIEW_CONTACT_URI_PREFIX), reviewContact.encode())
+        assertTrue(reviewContact.encode().startsWith(REVIEW_CONTACT_INVITE_URI_PREFIX), reviewContact.encode())
 
         // an old collab link keeps routing exactly where it always did
         assertIs<IncomingLink.Collab>(parseIncomingLink(collab.encode()))
 
-        // …and a review link gets its own lane, carrying the RAW uri (the daemon redeems it, not us)
-        val link = parseIncomingLink(reviewContact.encode())
-        assertIs<IncomingLink.ReviewContact>(link)
-        assertEquals("tkt-3", link.invite.ticket)
-        assertEquals(CollaboratorPurpose.REVIEW, link.invite.purpose)
-        assertEquals(reviewContact.encode(), link.uri, "the join flow needs the line verbatim")
+        // …and a review link keeps its own lane — which now says the feature is retired
+        assertEquals(IncomingLink.Retired(RetiredFeature.REVIEW), parseIncomingLink(reviewContact.encode()))
     }
 
     @Test
     fun neitherDoorAcceptsTheOthersTicket() {
         // a review blob dressed up under the collab host — the shape a mis-built producer would emit
-        val reviewBlobUnderCollabHost = COLLAB_URI_PREFIX + reviewContact.encode().removePrefix(REVIEW_CONTACT_URI_PREFIX)
+        val reviewBlobUnderCollabHost = COLLAB_URI_PREFIX + reviewContact.encode().removePrefix(REVIEW_CONTACT_INVITE_URI_PREFIX)
         assertEquals(IncomingLink.Unknown, parseIncomingLink(reviewBlobUnderCollabHost))
         assertNull(decodeCollaboratorInvite(reviewBlobUnderCollabHost))
 
-        // …and the reverse
-        val handoffBlobUnderReviewHost = REVIEW_CONTACT_URI_PREFIX + collab.encode().removePrefix(COLLAB_URI_PREFIX)
-        assertEquals(IncomingLink.Unknown, parseIncomingLink(handoffBlobUnderReviewHost))
-        assertNull(decodeReviewContactInvite(handoffBlobUnderReviewHost))
+        // …and the reverse: a handoff blob under the retired review host is retired, never redeemed
+        val handoffBlobUnderReviewHost = REVIEW_CONTACT_INVITE_URI_PREFIX + collab.encode().removePrefix(COLLAB_URI_PREFIX)
+        assertEquals(IncomingLink.Retired(RetiredFeature.REVIEW), parseIncomingLink(handoffBlobUnderReviewHost))
 
         // a full URI is never re-probed at the other codec's door either
-        assertNull(decodeReviewContactInvite(collab.encode()))
         assertNull(decodeCollaboratorInvite(reviewContact.encode()))
     }
 
     @Test
-    fun aBareReviewBlobStaysAReviewTicketAtThePasteEntry() {
-        val bare = reviewContact.encode().removePrefix(REVIEW_CONTACT_URI_PREFIX)
-        // the prefix is gone, so only the embedded purpose is left — and it still decides
-        assertIs<IncomingLink.ReviewContact>(parseIncomingLink(bare, allowBareBlob = true))
+    fun aBareReviewBlobIsNoTicketAtThePasteEntry() {
+        val bare = reviewContact.encode().removePrefix(REVIEW_CONTACT_INVITE_URI_PREFIX)
+        // the prefix is gone, so only the embedded purpose is left — and the collab door still refuses it
+        assertEquals(IncomingLink.Unknown, parseIncomingLink(bare, allowBareBlob = true))
         assertNull(decodeCollaboratorInvite(bare), "a bare review blob must never redeem as a phone contact")
         // and, like every bare blob, it is not guessed at from a generic deep link
         assertEquals(IncomingLink.Unknown, parseIncomingLink(bare, allowBareBlob = false))
@@ -213,14 +204,18 @@ class IncomingLinkTest {
             """"daemonPub":"${dev.ccpocket.app.TEST_DAEMON_PUB}","ticket":"tkt-9","purpose":"pair_programming"}"""
         val blob = dev.ccpocket.app.util.B64Url.encode(json.encodeToByteArray())
         assertEquals(IncomingLink.Unknown, parseIncomingLink(COLLAB_URI_PREFIX + blob))
-        assertEquals(IncomingLink.Unknown, parseIncomingLink(REVIEW_CONTACT_URI_PREFIX + blob))
+        assertEquals(IncomingLink.Retired(RetiredFeature.REVIEW), parseIncomingLink(REVIEW_CONTACT_INVITE_URI_PREFIX + blob))
         assertEquals(IncomingLink.Unknown, parseIncomingLink(blob, allowBareBlob = true))
     }
 
+    /** ReviewRequest is retired: its host alone decides, so a missing or corrupt fragment is retired too —
+     *  never "invalid link", and never a failed pairing (the repository side is pinned in RetiredReviewTest). */
     @Test
-    fun aReviewLinkWithNoFragmentIsInvalidRatherThanMisrouted() {
-        assertEquals(IncomingLink.Unknown, parseIncomingLink("ccpocket://review-contact"))
-        assertEquals(IncomingLink.Unknown, parseIncomingLink("ccpocket://review-contact#!!!not-base64!!!"))
+    fun aReviewLinkIsRetiredWhateverItsFragment() {
+        val retired = IncomingLink.Retired(RetiredFeature.REVIEW)
+        assertEquals(retired, parseIncomingLink("ccpocket://review-contact"))
+        assertEquals(retired, parseIncomingLink("ccpocket://review-contact#!!!not-base64!!!"))
+        assertEquals(retired, parseIncomingLink(reviewContact.encode(), allowBareBlob = true), "the paste entry agrees")
     }
 
     /**
@@ -240,17 +235,19 @@ class IncomingLinkTest {
     @Test
     fun caseVariantHostsFailClosedAtBothDoors() {
         listOf(
-            "ccpocket://Review-Contact#" to reviewContact,
-            "ccpocket://REVIEW-CONTACT#" to reviewContact,
             "ccpocket://Collab#" to collab,
             "ccpocket://COLLAB#" to collab,
             "CCPOCKET://collab#" to collab,
-            "CCPocket://review-contact#" to reviewContact,
         ).forEach { (host, invite) ->
             val blob = invite.encode().substringAfter('#')
             assertEquals(IncomingLink.Unknown, parseIncomingLink(host + blob), host)
             assertNull(decodeCollaboratorInvite(host + blob), host)
-            assertNull(decodeReviewContactInvite(host + blob), host)
+        }
+        // the retired review host is matched case-insensitively like every host: retired, never redeemed
+        listOf("ccpocket://Review-Contact#", "ccpocket://REVIEW-CONTACT#", "CCPocket://review-contact#").forEach { host ->
+            val blob = reviewContact.encode().substringAfter('#')
+            assertEquals(IncomingLink.Retired(RetiredFeature.REVIEW), parseIncomingLink(host + blob), host)
+            assertNull(decodeCollaboratorInvite(host + blob), host)
         }
     }
 }

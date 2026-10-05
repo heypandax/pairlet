@@ -19,7 +19,7 @@ import dev.ccpocket.protocol.ShareInvite
  * ccpocket://pair?relay=…&acct=…&dpk=…&ticket=…   → Pair      (full pairing link)
  * ccpocket://pair?code=123456                     → Code      (relay-assisted short code)
  * ccpocket://collab#<b64url>                      → Collab    (Collaborator Link — CONFIRM, never redeem)
- * ccpocket://review-contact#<b64url>              → ReviewContact (Review peer link — the DAEMON redeems)
+ * ccpocket://review-contact#<anything>            → Retired   (ReviewRequest contact — feature retired 2026-10)
  * ccpocket://share#<b64url>                       → Share     (folder-share invite)
  * ccpocket://session?wd=…&sid=…                   → Session   (a push/handoff tap routing into a session)
  * ccpocket://handoff?id=…                         → Handoff   (a push tap routing into the offer inbox)
@@ -40,14 +40,12 @@ sealed interface IncomingLink {
     data class Collab(val invite: CollaboratorInvite) : IncomingLink
 
     /**
-     * A ReviewRequest contact ticket (REVIEW-REQUEST.md §13.3) — its own host precisely so an older app,
-     * which reads the trailing `purpose` as its default, cannot redeem it at the Collab door and burn the
-     * single-use ticket a colleague's daemon was waiting for.
-     *
-     * [uri] is carried verbatim because the App never redeems this: it hands the line to its own daemon,
-     * which holds the resulting credential (that is what keeps reviews arriving with the app closed).
+     * A link for a feature this build no longer has. Recognised by its HOST alone — the payload is never
+     * decoded, so a corrupt one is still this — because the user deserves "that feature has been retired"
+     * rather than "invalid link", and because it is not a failed pairing: callers park nothing, redeem
+     * nothing and record no `pair_failed` for it. [feature] says which one, for callers that care.
      */
-    data class ReviewContact(val invite: CollaboratorInvite, val uri: String) : IncomingLink
+    data class Retired(val feature: RetiredFeature) : IncomingLink
 
     /** A folder-share invite. Goes through the guest accept-preview before redeeming. */
     data class Share(val invite: ShareInvite) : IncomingLink
@@ -60,6 +58,12 @@ sealed interface IncomingLink {
 
     /** Not a link this build understands. Callers show their own "invalid link" state. */
     data object Unknown : IncomingLink
+}
+
+/** The features whose links [IncomingLink.Retired] stands for. New values are only ever added. */
+enum class RetiredFeature {
+    /** ReviewRequest contact links (`ccpocket://review-contact#…`). */
+    REVIEW,
 }
 
 private const val SCHEME = "ccpocket://"
@@ -92,10 +96,8 @@ fun parseIncomingLink(raw: String, allowBareBlob: Boolean = false): IncomingLink
         // a collaborator/share blob is invalid rather than "maybe a pair link": we KNOW what it claimed
         // to be, so a truncated fragment or corrupt base64 must fail loudly instead of falling through
         "collab" -> decodeCollaboratorInvite(t)?.let(IncomingLink::Collab) ?: IncomingLink.Unknown
-        // its own lane, so a Review ticket never reaches the Collab confirm screen and the two doors
-        // can't be crossed by putting the other's blob under this host (the codec re-checks `purpose`)
-        "review-contact" -> decodeReviewContactInvite(t)?.let { IncomingLink.ReviewContact(it, t) }
-            ?: IncomingLink.Unknown
+        // ReviewRequest is retired: the host alone decides, whatever the fragment holds
+        "review-contact" -> IncomingLink.Retired(RetiredFeature.REVIEW)
         "share" -> decodeShareInvite(t)?.let(IncomingLink::Share) ?: IncomingLink.Unknown
         "pair" -> {
             val q = queryOf(t)
@@ -115,13 +117,12 @@ fun parseIncomingLink(raw: String, allowBareBlob: Boolean = false): IncomingLink
         "handoff" -> queryOf(t)["id"]?.let(::pctDecode)?.takeIf { it.isNotBlank() }
             ?.let(IncomingLink::Handoff) ?: IncomingLink.Unknown
         // no scheme: only an EXPLICIT paste entry may guess at a bare blob (share first — its codec is the
-        // stricter of the three, and a collaborator blob never satisfies it). The two collaborator codecs
-        // are mutually exclusive on `purpose`, so their order here is cosmetic rather than load-bearing.
+        // stricter of the two, and a collaborator blob never satisfies it). The collaborator codec only
+        // accepts its own `purpose`, so a bare blob of any other purpose falls through to the pair forms.
         "" -> when {
             !allowBareBlob -> legacyPairUrl(t)
             else -> decodeShareInvite(t)?.let(IncomingLink::Share)
                 ?: decodeCollaboratorInvite(t)?.let(IncomingLink::Collab)
-                ?: decodeReviewContactInvite(t)?.let { IncomingLink.ReviewContact(it, t) }
                 ?: legacyPairUrl(t)
         }
         else -> IncomingLink.Unknown

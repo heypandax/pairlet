@@ -20,7 +20,7 @@
     <string name="reconnect_banner">Connection lost — reconnecting…</string>
     <string name="status_disconnected">disconnected</string>
     <string name="status_invalid_link">invalid pairing link</string>
-    <string name="status_review_invite_wrong_door">That\'s a review invite — add it under Review · Contacts, on the computer that should receive the reviews.</string>
+    <string name="status_feature_retired">This feature has been retired</string>
     <string name="status_pairing">pairing…</string>
     <string name="status_pair_failed">pairing failed: %1$s</string>
     <string name="status_connecting">connecting…</string>

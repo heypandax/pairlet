@@ -96,43 +96,6 @@ class ReviewRepoTest {
         artifacts = emptyList(), recommendedPrompt = prompt,
     )
 
-    // ── §13.3: the two invite doors, at the app's front door ──────────────────────────────────────
-
-    private val reviewInvite = dev.ccpocket.protocol.CollaboratorInvite(
-        relay = "wss://relay.test", accountId = "acct-frank", daemonPub = dev.ccpocket.app.TEST_DAEMON_PUB,
-        ticket = "ONE-TIME-TICKET", ownerLabel = "Frank", purpose = CollaboratorPurpose.REVIEW,
-    )
-
-    /**
-     * A review-contact deep link PARKS. It does not redeem, and it does not land in the Session Handoff
-     * confirm screen — that screen redeems into a binding on THIS PHONE, which would burn the one-time
-     * ticket a colleague's daemon is waiting for and leave the owner with a contact that can never answer.
-     */
-    @Test
-    fun aReviewContactLinkParksForTheReviewCenterAndRedeemsNothing() {
-        val r = repo()
-        val uri = reviewInvite.encode()
-
-        val link = r.handleIncomingLink(uri)
-        assertTrue(link is dev.ccpocket.app.pairing.IncomingLink.ReviewContact, "$link")
-        assertEquals(uri, r.pendingReviewInvite.value, "the line is held verbatim — the DAEMON redeems it")
-        assertNull(r.pendingCollabInvite.value, "a review ticket must never reach the phone-binding door")
-        assertFalse(r.reviewJoining.value, "arriving through a link is not consent — nothing was sent")
-    }
-
-    /** …and the Session Handoff door is untouched by the split: an ordinary collab link still parks in
-     *  the fingerprint confirm screen it always did. */
-    @Test
-    fun anOrdinaryCollaboratorLinkStillParksInTheHandoffConfirmScreen() {
-        val r = repo()
-        val handoff = reviewInvite.copy(ticket = "tkt-h", purpose = CollaboratorPurpose.SESSION_HANDOFF)
-
-        val link = r.handleIncomingLink(handoff.encode())
-        assertTrue(link is dev.ccpocket.app.pairing.IncomingLink.Collab, "$link")
-        assertEquals("tkt-h", r.pendingCollabInvite.value?.ticket)
-        assertNull(r.pendingReviewInvite.value)
-    }
-
     // ── §12: a listing is the whole truth, not a delta ────────────────────────────────────────────
 
     @Test
