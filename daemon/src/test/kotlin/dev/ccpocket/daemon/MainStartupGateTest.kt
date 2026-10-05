@@ -1,7 +1,12 @@
 package dev.ccpocket.daemon
 
+import com.github.ajalt.clikt.core.CliktError
+import com.github.ajalt.clikt.core.parse
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -44,4 +49,20 @@ class MainStartupGateTest {
 
     @Test
     fun both_present_starts() = assertNull(missingAgentsMessage(claude, codex, null))
+
+    /** The unencrypted `run --local` mode is gone: the hidden flag must explain that and stop BEFORE the
+     *  single-instance check. The pair port is a socket this test holds, and exit throws, so a regression
+     *  that reached the check would fail here instead of probing or replacing a real daemon. */
+    @Test
+    fun removed_local_flag_refuses_before_the_single_instance_check() {
+        ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { held ->
+            val e = assertFailsWith<CliktError> {
+                RunCmd(exit = { error("reached the single-instance check (exit $it)") })
+                    .parse(listOf("--local", "--pair-port", held.localPort.toString()))
+            }
+            val msg = e.message.orEmpty()
+            assertTrue("has been removed" in msg, msg)
+            assertTrue("--direct-bind 0.0.0.0" in msg, msg)
+        }
+    }
 }
