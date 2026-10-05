@@ -16,8 +16,7 @@ data class LocalError(val ok: Boolean = false, val code: String, val message: St
 
 const val LOCAL_CONTROL_PREFIX = "/v1/local"
 
-/** 128 KiB (the largest encoded review request/result) + 64 KiB of headroom: the value this cap has
- *  always had, pinned as a literal so the gate no longer depends on the review limits. */
+/** 192 KiB: the value this cap has always had, pinned as a literal so it is a decision of its own. */
 internal const val MAX_LOCAL_BODY_BYTES = 196_608
 
 // ---- the three gates, in one place ----------------------------------------

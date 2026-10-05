@@ -2,11 +2,9 @@ package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.daemon.bridge.BridgeSpec
 import dev.ccpocket.daemon.control.LOCAL_CONTROL_PREFIX
-import dev.ccpocket.daemon.control.LocalControlDeps
 import dev.ccpocket.daemon.control.LocalControlToken
 import dev.ccpocket.daemon.control.executionControlDepsOf
 import dev.ccpocket.daemon.control.installExecutionControl
-import dev.ccpocket.daemon.control.installLocalControl
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.CreateBridge
@@ -134,9 +132,8 @@ class PairLoopback(
     private val relayWsBase: String,
     private val daemonPubB64: String,
     private val port: Int,
-    /** The daemon's services, for the TOKEN-AUTHENTICATED local control API (REVIEW-REQUEST.md §6).
-     *  Null keeps only the legacy unauthenticated routes — the shape a caller that predates the review
-     *  plane gets, and what unit tests of the pairing routes construct. */
+    /** The daemon's services, for the TOKEN-AUTHENTICATED local control API. Null keeps only the legacy
+     *  unauthenticated routes — what unit tests of the pairing routes construct. */
     private val core: dev.ccpocket.daemon.DaemonCore? = null,
 ) {
     private val log = logger("PairLoopback")
@@ -377,19 +374,15 @@ class PairLoopback(
                     )
                 }
 
-                // ---- the TOKEN-AUTHENTICATED local control API (REVIEW-REQUEST.md §6) ----
+                // ---- the TOKEN-AUTHENTICATED local control API ----
                 // Deliberately NOT folded into the routes above: those trade on "reaching loopback ==
                 // local-user authority", which is fine for minting a QR the user is looking at and is
-                // NOT fine for a surface carrying a colleague's brief and a reviewer's result. New
-                // prefix, new rules (token + Content-Type + no browser Origin); the legacy routes keep
-                // working byte-for-byte so no shipped `pairlet pair` breaks.
+                // NOT fine for a surface that grants permissions and runs tasks. Own prefix, own rules
+                // (token + Content-Type + no browser Origin); the legacy routes keep working
+                // byte-for-byte so no shipped `pairlet pair` breaks.
                 core?.let { c -> localControlToken?.let { token ->
-                    installLocalControl(
-                        LocalControlDeps({ c.collaboratorControl }, c.reviews, c.peerInbox, c.reviewOwner),
-                        token,
-                    )
-                    // #367: the remote-execution surface. SAME prefix, SAME gate (installExecutionControl
-                    // calls the very same `authorize`), separate deps — creating an execution grant is a new
+                    // #367: the remote-execution surface, behind the shared gate (installExecutionControl
+                    // calls `authorize` in LocalControlGate.kt) — creating an execution grant is a new
                     // permission on this computer, so it must never be reachable from the wire router.
                     // The deps load the execution planes on first authorised use (a machine that had
                     // never used remote execution does not load them at attach — see ExecutionUsage).

@@ -12,15 +12,16 @@ import java.security.SecureRandom
 import java.util.Base64
 
 /**
- * The shared secret that gates the daemon's LOCAL CONTROL API (REVIEW-REQUEST.md §6).
+ * The shared secret that gates the daemon's LOCAL CONTROL API (`/v1/local/…`, today the #367
+ * remote-execution routes).
  *
  * The existing loopback surface (`/pair`, `/share`, `/bridges`) treats "can reach 127.0.0.1" as
  * local-user authority. That is defensible for minting a QR the user is standing in front of. It is
- * NOT defensible for ReviewRequest, which carries a colleague's brief and a reviewer's result: any
- * process on the machine — including a browser tab executing someone else's JavaScript — can reach
- * loopback, and a same-origin-policy exemption for a plain-JSON POST is a well-trodden path.
+ * NOT defensible for a surface that creates permissions or runs tasks: any process on the machine —
+ * including a browser tab executing someone else's JavaScript — can reach loopback, and a
+ * same-origin-policy exemption for a plain-JSON POST is a well-trodden path.
  *
- * So the review/collaborator routes require this token, stored in a file only the OS user can read.
+ * So the local control routes require this token, stored in a file only the OS user can read.
  * A browser can send the request; it cannot read `~/.cc-pocket/local-control-token` to sign it.
  *
  * The legacy routes are deliberately left as they are: bolting a token onto them would break every
