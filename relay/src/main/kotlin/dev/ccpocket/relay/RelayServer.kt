@@ -54,6 +54,7 @@ import dev.ccpocket.relay.auth.DeviceAuthenticator
 import dev.ccpocket.relay.net.RateLimiter
 import dev.ccpocket.relay.net.clientIp
 import dev.ccpocket.relay.net.installRelayForwardedHeaders
+import dev.ccpocket.relay.net.rateLimitSubject
 import dev.ccpocket.relay.pairing.CodeStore
 import dev.ccpocket.relay.pairing.PairingService
 import dev.ccpocket.relay.store.RelayStore
@@ -109,6 +110,9 @@ class RelayServer(
     private val handshakeTimeoutMs: Long = 15_000,
     // relay-wide ceiling on bytes owed to peers (see MAX_RELAY_OUTBOUND_BYTES); injectable for tests
     outboundBudgetBytes: Long = MAX_RELAY_OUTBOUND_BYTES,
+    // relay-wide budget of failed 6-digit pair-code lookups per window (see PAIR_CODE_FAILURE_BUDGET)
+    private val pairCodeFailureBudget: Int = PAIR_CODE_FAILURE_BUDGET,
+    private val pairCodeFailureWindowMs: Long = PAIR_CODE_FAILURE_WINDOW_MS,
 ) {
     // internal: control-plane tests attach their socket first, exactly as handleDevice does
     internal val broker = Broker()
@@ -154,7 +158,8 @@ class RelayServer(
                 get("/healthz") { call.respondText("ok") }
 
                 post("/v1/pair/redeem") {
-                    val ip = call.clientIp()
+                    // an IPv6 caller is counted per /64 — per address it would own 2^64 fresh buckets
+                    val ip = rateLimitSubject(call.clientIp())
                     if (!limiter.check("redeem:ip:$ip", 5, 60_000, lockoutOnBreach = true)) {
                         call.respondError(HttpStatusCode.TooManyRequests, "rate_limited")
                         return@post
@@ -184,8 +189,14 @@ class RelayServer(
                 }
 
                 post("/v1/pair/code") {
-                    val ip = call.clientIp()
+                    val ip = rateLimitSubject(call.clientIp()) // IPv6: per /64, as for redeem
                     if (!limiter.check("paircode:ip:$ip", 10, 60_000, lockoutOnBreach = true)) {
+                        call.respondError(HttpStatusCode.TooManyRequests, "rate_limited")
+                        return@post
+                    }
+                    // relay-wide: the per-address limit bounds ONE source; many sources together must not be able
+                    // to sweep the 900 000-code space. Charged on failure below, enforced before every lookup.
+                    if (limiter.exhausted(PAIR_CODE_FAILURES_KEY, pairCodeFailureBudget, pairCodeFailureWindowMs)) {
                         call.respondError(HttpStatusCode.TooManyRequests, "rate_limited")
                         return@post
                     }
@@ -195,7 +206,12 @@ class RelayServer(
                         return@post
                     }
                     when (val payload = codeStore.take(req.code.trim())) {
-                        null -> call.respondError(HttpStatusCode.BadRequest, "invalid_or_expired")
+                        null -> {
+                            if (!limiter.check(PAIR_CODE_FAILURES_KEY, pairCodeFailureBudget, pairCodeFailureWindowMs)) {
+                                println("[pair] code lookup failure budget exhausted ($pairCodeFailureBudget per ${pairCodeFailureWindowMs / 1000}s)")
+                            }
+                            call.respondError(HttpStatusCode.BadRequest, "invalid_or_expired")
+                        }
                         else -> call.respondText(PocketJson.encodeToString(payload), ContentType.Application.Json)
                     }
                 }
@@ -727,6 +743,19 @@ class RelayServer(
         // reader, almost always), so a healthy device is reached only after every bigger one is gone.
         // ExitOnOutOfMemoryError in the unit stays the last resort.
         const val MAX_RELAY_OUTBOUND_BYTES = 96L * 1024 * 1024
+        // Relay-wide budget of FAILED 6-digit pair-code lookups (/v1/pair/code), per fixed window. Codes are 6
+        // digits (900 000 values) and live 120 s. Per source the lookup is already capped at 10/min with
+        // escalating lockout, but many sources (or, before /64 keying, one IPv6 block) multiply that freely.
+        // 600 per 10 min bounds the whole relay to at most ~1 200 wrong guesses inside any one code's 120 s life
+        // (a full window spent in a burst, plus the next one across the boundary): ≤ 0.13 % per issued code,
+        // against an unbounded share today. The reverse risk — someone burning the budget so nobody can pair by
+        // code — is why it is not lower: one source can spend at most 10/min = 100 per window, so blocking takes
+        // at least six distinct IPv4 addresses or IPv6 /64s kept at their limit, real users' typos stay a
+        // handful per window, the block lifts by itself within the window, and QR pairing (straight to
+        // /v1/pair/redeem) is never affected.
+        const val PAIR_CODE_FAILURE_BUDGET = 600
+        const val PAIR_CODE_FAILURE_WINDOW_MS = 10 * 60_000L
+        const val PAIR_CODE_FAILURES_KEY = "paircode:fail:global"
         // an APNs token is 64 hex chars and an FCM one a few hundred; 4096 is far above any real vendor
         // token and exists so a malformed/hostile registration is refused ("bad_request") instead of
         // being written into the devices row
