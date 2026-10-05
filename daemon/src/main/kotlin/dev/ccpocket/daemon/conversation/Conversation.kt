@@ -476,6 +476,11 @@ class Conversation(
      *  not wait for — see [lifecycleLocked]). */
     private val closeStopDone = AtomicBoolean(false)
 
+    /** Completed once the stop that ends a closed conversation has finished, whoever ran it. [close] waits for
+     *  it (bounded) when a launch held the lock, so close() returning still means "the process is gone" — what
+     *  the registry's close tombstone (S8) promises a waiting re-open. */
+    private val closeStopFinished = CompletableDeferred<Unit>()
+
     /**
      * Run [block] holding [lifecycle]. A holder that lets go of a CLOSED conversation finishes the close's stop
      * itself when [close] could not wait for it (a launch in flight): whoever still holds the lock last after
@@ -498,6 +503,7 @@ class Conversation(
             if (closeStopDone.compareAndSet(false, true) || proc != null) stopProcess()
         } finally {
             lifecycle.unlock()
+            closeStopFinished.complete(Unit)
         }
     }
 
@@ -1087,6 +1093,13 @@ class Conversation(
     /** The id this conversation is resuming while [sessionId] is still null (pre-first-turn) — lets a
      *  reconnect reattach the live process instead of spawning a second one on the same transcript. */
     val resumeAnchor: String? get() = openedResumeId
+
+    /** Lifecycle S8: the registry files the persistent identity before it inserts this conversation (non-
+     *  suspending, inside its single-flight open), so every registry lookup by id sees it from the first moment
+     *  it is visible — not only once [open] has run. [open] then sets the same value. */
+    internal fun presetResumeAnchor(resumeId: String?) {
+        openedResumeId = resumeId
+    }
 
     suspend fun open(
         resumeId: String?,
@@ -3816,9 +3829,15 @@ class Conversation(
                 if (closeStopDone.compareAndSet(false, true) || proc != null) stopProcess()
             } finally {
                 lifecycle.unlock()
+                closeStopFinished.complete(Unit)
             }
         } else {
             log.info("$convoId close during a launch — the launch rolls itself back and its holder finishes the stop")
+            // …and close still returns only once that stop is done (bounded): a caller — the registry lifting its
+            // close tombstone (S8) — reads "close returned" as "the process is gone"
+            if (withTimeoutOrNull(CLOSE_LAUNCH_WAIT_MS) { closeStopFinished.await() } == null) {
+                log.warn("$convoId close: the in-flight launch did not finish its stop within ${CLOSE_LAUNCH_WAIT_MS}ms — returning anyway")
+            }
         }
         promptDiagnostics.close()
         scope.cancel()
@@ -3924,6 +3943,10 @@ class Conversation(
          *  After the shutdown the stdout channel is closed and a retired pump skips lines unparsed, so the bound
          *  is only ever spent on a pump stuck inside one event (a wedged transport emit). */
         const val STOP_DRAIN_TIMEOUT_MS = 2_000L
+
+        /** How long [close] waits for a launch it found holding the lifecycle lock to roll back and stop: one
+         *  shutdown ladder (EOF 3 s + TERM 2 s + KILL 2 s) plus the drain bound, with headroom. */
+        const val CLOSE_LAUNCH_WAIT_MS = 12_000L
         const val OPENCODE_WATCHDOG_PROP = "ccpocket.opencode.watchdogMs"
 
         // a process death this soon after a TurnResult is the SAME failure the turn's push already
