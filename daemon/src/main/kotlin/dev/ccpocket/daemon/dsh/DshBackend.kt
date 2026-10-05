@@ -1,6 +1,11 @@
 package dev.ccpocket.daemon.dsh
 
+import dev.ccpocket.daemon.acp.AcpPrompt
+import dev.ccpocket.daemon.acp.AcpPromptFifo
 import dev.ccpocket.daemon.acp.AcpRpc
+import dev.ccpocket.daemon.acp.acpErrorEvents
+import dev.ccpocket.daemon.acp.acpErrorTurn
+import dev.ccpocket.daemon.acp.acpImageRefusal
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
@@ -151,9 +156,6 @@ class DshBackend(
     @Volatile private var initializeId: Long = -1
     @Volatile private var sessionOpenId: Long = -1
 
-    /** outstanding session/prompt id → the prompt text, replayed as the consumption receipt on settle. */
-    private val promptIds = ConcurrentHashMap<Long, String>()
-
     /** outstanding set_config_option id → what it was trying to do, so its answer can be reported and the
      *  chain continued. */
     private val configIds = ConcurrentHashMap<Long, ConfigWrite>()
@@ -179,27 +181,17 @@ class DshBackend(
         val flushAfter: Boolean,
     )
 
-    /** Guards [sessionId], [pendingPrompts] and [promptQueue] so the opening turn can never be lost to a
-     *  race between "not open yet, buffer it" and "just opened, flush the buffer". */
-    private val bootstrap = Mutex()
-
-    /** Prompts that arrived before the session was ready to take them. */
-    private val pendingPrompts = ArrayDeque<Prompt>()
-
     /**
-     * Closed from launch until the session is open AND its launch-time model/effort have landed.
+     * The one-in-flight prompt FIFO (fact 1), and the outstanding session/prompt ids whose text is replayed as
+     * the consumption receipt on settle (fact 2).
      *
-     * A prompt that slips through the window between `session/new` answering and the config write
+     * Its gate stays closed from launch until the session is open AND its launch-time model/effort have
+     * landed: a prompt that slipped through the window between `session/new` answering and the config write
      * settling would run the opening turn on the model the user did NOT pick — which is what the whole
-     * write-then-flush chain exists to prevent, and which a "buffer only while sessionId is null" gate
-     * misses by exactly the round trip that matters.
+     * write-then-flush chain exists to prevent, and which a "buffer only while sessionId is null" gate misses
+     * by exactly the round trip that matters.
      */
-    @Volatile private var promptGate = false
-
-    /** Prompts that arrived while a turn was in flight (fact 1). */
-    private val promptQueue = ArrayDeque<Prompt>()
-
-    private data class Prompt(val text: String, val images: List<ImageData>)
+    private val prompts = AcpPromptFifo(rpc::nextId)
 
     override val kind: AgentKind = AgentKind.DSH
 
@@ -230,13 +222,12 @@ class DshBackend(
         }
         // reset per-process protocol state (runs on EVERY (re)launch)
         sessionId = null
-        promptGate = false
         openFailure = null
         imagePrompts = false
         options = DshConfigOptions.EMPTY
         catalog.unpublish(this)
-        promptIds.clear(); configIds.clear(); toolCalls.clear(); pendingApprovals.clear()
-        bootstrap.withLock { pendingPrompts.clear(); promptQueue.clear() }
+        configIds.clear(); toolCalls.clear(); pendingApprovals.clear()
+        prompts.reset()
         scope?.let { runCatching { it.cancel() } }
         val fresh = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope = fresh
@@ -305,7 +296,7 @@ class DshBackend(
             SYNTHETIC_NOTICE -> listOf(AgentEvent.AssistantText(root.str("message").orEmpty()))
             // A prompt [sendPrompt] reserved but refused settles here exactly once, like its error response. A
             // stale id (already settled, or reserved by a previous process) says nothing.
-            SYNTHETIC_REFUSAL -> root.long("id")?.let { promptIds.remove(it) }
+            SYNTHETIC_REFUSAL -> root.long("id")?.let { prompts.settle(it) }
                 ?.let { failedPrompt(it, root.str("message").orEmpty()) }.orEmpty()
             else -> null
         }
@@ -320,7 +311,7 @@ class DshBackend(
         }
         if (id == sessionOpenId) return onSessionOpened(result)
         configIds.remove(id)?.let { return onConfigApplied(it, result) }
-        val consumed = promptIds.remove(id) ?: return emptyList()
+        val consumed = prompts.settle(id) ?: return emptyList()
         // Settle → the consumption receipt (fact 2) BEFORE the TurnResult, so the ledger entry is gone by
         // the time the task-grant check runs — then let the next queued prompt out.
         return listOf(AgentEvent.UserReplay(consumed)) + onPromptDone(result) + flushQueuedPrompt()
@@ -339,7 +330,7 @@ class DshBackend(
         if (id != null && id == sessionOpenId) {
             return failStartup(if (resumeId != null) STAGE_RESUME else STAGE_NEW, why)
         }
-        val consumed = id?.let { promptIds.remove(it) }
+        val consumed = id?.let { prompts.settle(it) }
         if (consumed != null) return failedPrompt(consumed, why)
         log.warn("dsh error response id=$id: $why")
         return emptyList()
@@ -386,15 +377,8 @@ class DshBackend(
         val message = "$stage: $why"
         openFailure = message
         log.warn("dsh startup failed — $message")
-        val stranded = drainWaitingPrompts()
-        return if (stranded.isEmpty()) {
-            listOf(
-                AgentEvent.AssistantText("⚠️ $message"),
-                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
-            )
-        } else {
-            stranded.flatMap { errorTurn(it.text, message) }
-        }
+        val stranded = prompts.drain()
+        return if (stranded.isEmpty()) acpErrorEvents(message) else stranded.flatMap { acpErrorTurn(it.text, message) }
     }
 
     /** [failStartup] for callers that are NOT on the parse pump (the handshake watchdog): the same
@@ -403,7 +387,7 @@ class DshBackend(
         val message = "$stage: $why"
         openFailure = message
         log.warn("dsh startup failed — $message")
-        val stranded = drainWaitingPrompts()
+        val stranded = prompts.drain()
         if (stranded.isEmpty()) {
             io?.inject?.invoke(syntheticError(message))
             return
@@ -411,30 +395,16 @@ class DshBackend(
         // Each waiting prompt settles exactly like a refused one: reserve its id, then let the pump turn the
         // refusal into its error turn (UserReplay included, so the ledger entry goes away).
         for (prompt in stranded) {
-            val id = bootstrap.withLock { reservePrompt(prompt.text) }
+            val id = prompts.reserve(prompt.text)
             io?.inject?.invoke(syntheticRefusal(id, message))
         }
-    }
-
-    /** Everything queued on a session that will never take it, removed in arrival order. */
-    private suspend fun drainWaitingPrompts(): List<Prompt> = bootstrap.withLock {
-        val waiting = pendingPrompts.toList() + promptQueue.toList()
-        pendingPrompts.clear()
-        promptQueue.clear()
-        waiting
     }
 
     /** A failed prompt was still CONSUMED — its failure surfaces right here as an error turn. Left unsettled,
      *  Conversation would re-inject it on every relaunch and loop the failure; and it must not stall the FIFO
      *  behind it. */
     private suspend fun failedPrompt(text: String, why: String): List<AgentEvent> =
-        errorTurn(text, why) + flushQueuedPrompt()
-
-    private fun errorTurn(text: String, why: String): List<AgentEvent> = listOf(
-        AgentEvent.UserReplay(text),
-        AgentEvent.AssistantText("⚠️ $why"),
-        AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
-    )
+        acpErrorTurn(text, why) + flushQueuedPrompt()
 
     private suspend fun openSession() {
         val rid = resumeId
@@ -587,110 +557,65 @@ class DshBackend(
     // ---- outbound: prompts ----
 
     override suspend fun sendPrompt(text: String, images: List<ImageData>) {
-        val prompt = Prompt(text, images)
+        val prompt = AcpPrompt(text, images)
         // The session already failed to open (issue #388): buffering this would park it behind a gate that
         // can never open — no terminal state, and a re-run on the next relaunch. Settle it instead, with the
         // stage error that explains why, exactly like a refused prompt.
         openFailure?.let { why ->
-            val id = bootstrap.withLock { reservePrompt(text) }
+            val id = prompts.reserve(text)
             io?.inject?.invoke(syntheticRefusal(id, why))
             return
         }
-        val reserved = bootstrap.withLock {
-            when {
-                sessionId == null || !promptGate -> { pendingPrompts.addLast(prompt); null }
-                // A turn is in flight — dsh refuses a second prompt (fact 1), so FIFO it here and flush
-                // when the in-flight one settles.
-                promptIds.isNotEmpty() -> { promptQueue.addLast(prompt); null }
-                else -> reservePrompt(text)
-            }
-        } ?: return
+        // Gate still closed (session not open, or its launch config not landed), or a turn in flight — dsh
+        // refuses a second prompt (fact 1): FIFO it here, released by the gate / the in-flight settle.
+        val reserved = prompts.admit(prompt) ?: return
         if (acceptable(prompt)) {
             writePrompt(reserved, prompt)
         } else {
             // Refused through the pump, like an error response: the reservation holds everything sent after
             // it until the refusal settles. Waiting for channel room is safe here, off the pump — a refusal
-            // the pump itself finds returns its events instead (see [takeQueuedPrompt]).
+            // the pump itself finds returns its events instead (see [flushQueuedPrompt]).
             io?.inject?.invoke(syntheticRefusal(reserved, refuse(prompt)))
         }
     }
 
-    /** Allocate the request id and mark the prompt in flight — MUST run inside [bootstrap] so a racing
-     *  send/flush can never see "idle" between the decision and the registration (a double send is
-     *  exactly the `-32602 already in flight` the queue exists to prevent). */
-    private fun reservePrompt(text: String): Long = rpc.nextId().also { promptIds[it] = text }
-
-    /** The session just opened (and any launch-time config landed): release what arrived before it. Returns
-     *  the error turns of the prompts refused on the way. */
+    /** The session just opened (and any launch-time config landed): open the gate and release what arrived
+     *  before it. Returns the error turns of the prompts refused on the way. Can also be reached mid-session
+     *  by a user-driven model switch, when the gate is already open: then only an idle FIFO's head goes. */
     private suspend fun flushPendingPrompts(): List<AgentEvent> {
-        val refused = ArrayList<Prompt>()
-        val first = bootstrap.withLock {
-            if (sessionId == null) return emptyList()
-            promptGate = true
-            // Everything moves onto the one FIFO; only its head may go out, and only if no turn is
-            // running (this can be reached mid-session by a user-driven model switch).
-            promptQueue.addAll(pendingPrompts)
-            pendingPrompts.clear()
-            takeQueuedPrompt(refused)
-        }
+        val refused = ArrayList<AcpPrompt>()
+        val first = prompts.open(prepare = { sessionId != null }, ::acceptable, refused)
         first?.let { (id, prompt) -> writePrompt(id, prompt) }
         return refusals(refused)
     }
 
     /** The in-flight prompt settled (any stopReason, error included) — send the oldest queued one. Returns
-     *  the error turns of the prompts refused on the way. */
+     *  the error turns of the prompts refused on the way: its callers run on the pump, so injecting them
+     *  would wait for room on the very channel the pump drains. */
     private suspend fun flushQueuedPrompt(): List<AgentEvent> {
-        val refused = ArrayList<Prompt>()
-        val next = bootstrap.withLock { takeQueuedPrompt(refused) }
+        val refused = ArrayList<AcpPrompt>()
+        val next = prompts.next(::acceptable, refused)
         next?.let { (id, prompt) -> writePrompt(id, prompt) }
         return refusals(refused)
     }
 
-    /**
-     * Reserve the FIFO head when no turn is running — MUST run inside [bootstrap]. A head this session cannot
-     * take moves to [refused] and the next one is tried, so a refusal never stalls the prompts behind it.
-     *
-     * Its callers run on the pump, so they hand the refusals back as events: injecting them would wait for
-     * room on the very channel the pump drains.
-     */
-    private fun takeQueuedPrompt(refused: MutableList<Prompt>): Pair<Long, Prompt>? {
-        if (sessionId == null || promptIds.isNotEmpty()) return null
-        while (true) {
-            val next = promptQueue.removeFirstOrNull() ?: return null
-            if (acceptable(next)) return reservePrompt(next.text) to next
-            refused += next
-        }
-    }
-
-    /** Images ride as ACP image blocks after the text ([ImageData] is already the Base64 + MIME pair a block
-     *  holds); a prompt with images but blank text sends the images alone, never an empty text block. */
-    private suspend fun writePrompt(id: Long, prompt: Prompt) {
+    private suspend fun writePrompt(id: Long, prompt: AcpPrompt) {
         val sid = sessionId ?: return
-        rpc.send(id, "session/prompt", buildJsonObject {
-            put("sessionId", sid)
-            putJsonArray("prompt") {
-                if (prompt.text.isNotBlank() || prompt.images.isEmpty()) {
-                    addJsonObject { put("type", "text"); put("text", prompt.text) }
-                }
-                prompt.images.forEach { image ->
-                    addJsonObject { put("type", "image"); put("data", image.base64); put("mimeType", image.mediaType) }
-                }
-            }
-        })
+        rpc.send(id, "session/prompt", prompt.sessionPromptParams(sid))
     }
 
     /** dsh fails the WHOLE prompt on an image block it did not advertise, and sending the text alone would be
      *  the silent loss issue #377 is about — so a prompt with images needs the capability, or it is refused. */
-    private fun acceptable(prompt: Prompt): Boolean = prompt.images.isEmpty() || imagePrompts
+    private fun acceptable(prompt: AcpPrompt): Boolean = prompt.images.isEmpty() || imagePrompts
 
-    private fun refusals(refused: List<Prompt>): List<AgentEvent> = refused.flatMap { errorTurn(it.text, refuse(it)) }
+    private fun refusals(refused: List<AcpPrompt>): List<AgentEvent> =
+        refused.flatMap { acpErrorTurn(it.text, refuse(it)) }
 
     /** Log a refusal and word it for the chat — counts only: the image bytes reach neither. */
-    private fun refuse(prompt: Prompt): String {
+    private fun refuse(prompt: AcpPrompt): String {
         val n = prompt.images.size
         log.warn("dsh prompt with $n image(s) refused — this session did not advertise image input")
-        return "not sent: DeepSeek Harness did not advertise image input for this session, so nothing reached " +
-            "the agent. Send the message again without the ${if (n == 1) "image" else "$n images"}."
+        return acpImageRefusal("DeepSeek Harness", n)
     }
 
     override suspend fun interrupt() {
