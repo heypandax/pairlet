@@ -919,7 +919,8 @@ interface DesktopModel {
     fun serviceTierOptions(): List<dev.ccpocket.protocol.ModelServiceTier> = emptyList()
     fun effortOptionsFor(agent: AgentKind, model: String?): List<String> = emptyList()
     fun serviceTierOptionsFor(agent: AgentKind, model: String?): List<dev.ccpocket.protocol.ModelServiceTier> = emptyList()
-    fun permissionModeAvailable(id: String): Boolean = false
+    /** Whether [agent]'s daemon advertised the backend-native permission mode [id] (e.g. Claude `auto`). */
+    fun permissionModeAvailable(id: String, agent: AgentKind = AgentKind.CLAUDE): Boolean = false
     /** Agent model lists from the daemon — fetched by [fetchModels]. */
     fun modelsForAgent(agent: AgentKind): List<String> = emptyList()
     /** Why [modelsForAgent] is only a built-in fallback ([dev.ccpocket.app.ui.codexCatalogNote]), or null.

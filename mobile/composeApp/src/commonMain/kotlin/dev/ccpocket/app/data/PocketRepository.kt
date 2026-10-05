@@ -4865,6 +4865,8 @@ class PocketRepository(
         modelId: String? = model.value,
     ) = modelCapabilities(agent, modelId)?.serviceTiers.orEmpty()
 
+    /** Whether [agent]'s daemon advertised the backend-native permission mode [id] (e.g. Claude `auto`).
+     *  An older daemon that omits [ModelsList.permissionModes] reads false — the mode is never offered. */
     fun supportsPermissionMode(id: String, agent: AgentKind = AgentKind.CLAUDE): Boolean =
         id in agentModels[agent]?.permissionModes.orEmpty()
 
@@ -8190,7 +8192,7 @@ class PocketRepository(
 
     private fun thinkingForSession(sessionId: String?, agent: AgentKind): Boolean? =
         sessionParams[sessionId]?.takeIf { it.agent == agent }?.thinking?.takeIf {
-            agent == AgentKind.CLAUDE && agentModels[agent]?.supportsThinkingToggle != false
+            thinkingChoiceCarries(agent, agentModels[agent])
         }
 
     fun switchServiceTier(tier: String?) {

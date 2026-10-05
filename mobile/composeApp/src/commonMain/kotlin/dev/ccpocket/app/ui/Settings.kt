@@ -70,6 +70,7 @@ import dev.ccpocket.app.USER_MANUAL_TROUBLESHOOTING_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.appUpdateRoute
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.data.advertisesFastTier
 import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.data.toggleAgentFilter
 import dev.ccpocket.app.update.VersionStatus
@@ -421,10 +422,11 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
 
     SectionLabel(stringResource(Res.string.default_mode_section))
     Column(Modifier.settingsChoiceContainer()) {
-        val modeOptions = MODES + if (
-            defaultAgent == AgentKind.CLAUDE &&
-            repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)
-        ) listOf(AUTO_MODE) else emptyList()
+        val modeOptions = MODES + if (repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO, defaultAgent)) {
+            listOf(AUTO_MODE)
+        } else {
+            emptyList()
+        }
         modeOptions.forEachIndexed { index, m ->
             if (index > 0) Hairline(Modifier.padding(horizontal = 12.dp))
             val sel = repo.defaultMode.value == m.key && effectivePermissionMode == m.nativeMode
@@ -594,13 +596,14 @@ private fun AgentFilterChoice(label: String, dot: Color?, sel: Boolean, onClick:
 
 /**
  * The ONE owner of "does the selected agent's default model advertise the `priority` tier Fast rides on".
+ * Reads the daemon's per-model `serviceTiers` alone — the same gate as the in-session Fast row; an older
+ * daemon that sends no capabilities hides it, exactly as the former `agent == CODEX &&` prefix did.
  *
  * Read by the Fast switch and by the summary above it. Two copies of this predicate is how a summary
  * starts claiming a control the page is not actually showing.
  */
-private fun fastModeAvailable(repo: PocketRepository, agent: AgentKind): Boolean =
-    agent == AgentKind.CODEX &&
-        repo.serviceTierOptions(agent, repo.defaultModelFor(agent)).any { it.id == "priority" }
+internal fun fastModeAvailable(repo: PocketRepository, agent: AgentKind): Boolean =
+    advertisesFastTier(repo.serviceTierOptions(agent, repo.defaultModelFor(agent)))
 
 /**
  * What a new session would launch with, printed once above the controls that own it (#237 · S3).
@@ -622,7 +625,7 @@ private fun AgentDefaultsSummary(repo: PocketRepository, agent: AgentKind) {
     // the mode group's own option list AND its own selection rule, unchanged: Auto only where it is
     // advertised, and key + native mode must BOTH match — so a stored `auto` is never reported for a
     // backend whose rows cannot offer it, and no row reads selected while the summary claims another
-    val mode = (MODES + if (agent == AgentKind.CLAUDE && repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)) {
+    val mode = (MODES + if (repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO, agent)) {
         listOf(AUTO_MODE)
     } else {
         emptyList()
