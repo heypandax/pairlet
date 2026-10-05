@@ -115,6 +115,7 @@ fun GitPanelScreen(
 
     // one pull on entry; everything after rides GitActionResult.statusAfter — no polling anywhere
     LaunchedEffect(repo.convoId.value) { repo.fetchGitStatus(withBranches = true) }
+    LaunchedEffect(Unit) { repo.useFeature(dev.ccpocket.app.telemetry.ProductFeature.GIT_PANEL) }
 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         GitNavRow(title = repo.chatTitle.value ?: stringResource(Res.string.chat_title), onBack = onBack)
@@ -240,6 +241,7 @@ private fun RepoHeader(
                         status?.branch ?: "…",
                         color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = tightCenter(13.5.sp),
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(14.dp))
@@ -247,13 +249,13 @@ private fun RepoHeader(
                     when {
                         gitInSync(status) -> Text(
                             stringResource(Res.string.git_in_sync),
-                            color = Tok.ok, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                            color = Tok.ok, fontFamily = FontFamily.Monospace, fontSize = 12.sp, style = tightCenter(12.sp),
                         )
                         divergence.isNotEmpty() -> Text(
                             divergence,
                             // amber while the index is unmerged: the numbers are true but acting on them isn't
                             color = if (status?.conflicted?.isNotEmpty() == true) Tok.warn else Tok.tx2,
-                            fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace, fontSize = 12.sp, style = tightCenter(12.sp),
                         )
                     }
                 }
@@ -276,11 +278,11 @@ private fun RepoHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("⎇", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+            Text("⎇", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp))
             val wtCount = status.worktreeCount ?: 1
             Text(
                 if (wtCount > 1) stringResource(Res.string.wt_count, wtCount) else stringResource(Res.string.wt_count_one),
-                color = Tok.tx2, fontSize = 11.5.sp, modifier = Modifier.weight(1f),
+                color = Tok.tx2, fontSize = 11.5.sp, style = tightCenter(11.5.sp), modifier = Modifier.weight(1f),
             )
             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
         }
@@ -301,7 +303,7 @@ private fun CleanTreeState(status: GitStatus) {
             Modifier.size(46.dp).clip(CircleShape).background(Tok.ok.copy(alpha = 0.10f))
                 .border(1.4.dp, Tok.ok.copy(alpha = 0.45f), CircleShape),
             contentAlignment = Alignment.Center,
-        ) { Text("✓", color = Tok.ok, fontSize = 20.sp) }
+        ) { Text("✓", color = Tok.ok, fontSize = 20.sp, style = tightCenter(20.sp)) }
         Text(
             stringResource(Res.string.git_clean_title),
             color = Tok.tx, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, lineHeight = 21.5.sp,
@@ -410,11 +412,12 @@ private fun GitFileRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if ((entry.adds ?: 0) > 0) Text("+${entry.adds}", color = Tok.ok, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                    if ((entry.dels ?: 0) > 0) Text("−${entry.dels}", color = Tok.danger, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    if ((entry.adds ?: 0) > 0) Text("+${entry.adds}", color = Tok.ok, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp))
+                    if ((entry.dels ?: 0) > 0) Text("−${entry.dels}", color = Tok.danger, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp))
                     if (shape != null) Text(
                         "${conflictShapeLabel(shape)} · ${stringResource(Res.string.git_conflict_resolve_hint)}",
                         color = Tok.muted, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = tightCenter(11.5.sp),
                     )
                 }
             }
@@ -618,6 +621,6 @@ private fun GitFetchNoteStrip(note: GitFetchReport, onDismiss: () -> Unit) {
         Box(
             Modifier.size(24.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onDismiss),
             contentAlignment = Alignment.Center,
-        ) { Text("×", color = Tok.muted, fontSize = 14.sp) }
+        ) { Text("×", color = Tok.muted, fontSize = 14.sp, style = tightCenter(14.sp)) }
     }
 }

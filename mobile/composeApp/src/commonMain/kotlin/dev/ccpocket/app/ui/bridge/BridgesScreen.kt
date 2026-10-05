@@ -83,6 +83,7 @@ import org.jetbrains.compose.resources.stringResource
 fun BridgesScreen(repo: PocketRepository, onBack: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     LaunchedEffect(Unit) { if (repo.bridgeControl.value != false) repo.fetchBridges() } // don't fire at a daemon that can't answer
+    LaunchedEffect(Unit) { repo.useFeature(dev.ccpocket.app.telemetry.ProductFeature.BRIDGE_ADMIN) }
     var revokeTarget by remember { mutableStateOf<BridgeInfo?>(null) }
     var editTarget by remember { mutableStateOf<BridgeInfo?>(null) }
 

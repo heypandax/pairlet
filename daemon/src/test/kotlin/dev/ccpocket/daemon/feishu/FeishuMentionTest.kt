@@ -38,4 +38,31 @@ class FeishuMentionTest {
         assertFalse(hit, "mention prefix must not trip the redactor: $scrubbed")
         assertTrue(scrubbed.startsWith("<at user_id=\"ou_1a2b3c\"></at> "), scrubbed)
     }
+
+    // ── 审计 F7：群里「是不是 @ 了机器人」 ──
+
+    @Test
+    fun before_the_bot_knows_its_own_open_id_a_colleague_mention_does_not_trigger_it() {
+        // 「@同事 看下」在 TRUSTED 群里曾被当成发给机器人的请求直接执行
+        val gate = FeishuMention.groupGate(listOf("ou_colleague"), botOpenId = null)
+        assertEquals(FeishuMention.GroupGate.AWAIT_IDENTITY, gate)
+    }
+
+    @Test
+    fun once_the_open_id_is_known_only_a_mention_of_the_bot_itself_triggers() {
+        assertEquals(FeishuMention.GroupGate.ACCEPT, FeishuMention.groupGate(listOf("ou_colleague", "ou_bot"), "ou_bot"))
+        assertEquals(FeishuMention.GroupGate.DROP, FeishuMention.groupGate(listOf("ou_colleague"), "ou_bot"))
+        assertEquals(FeishuMention.GroupGate.DROP, FeishuMention.groupGate(listOf(null), "ou_bot"))
+        assertEquals(FeishuMention.GroupGate.DROP, FeishuMention.groupGate(emptyList(), "ou_bot"))
+        assertEquals(FeishuMention.GroupGate.DROP, FeishuMention.groupGate(emptyList(), null))
+    }
+
+    @Test
+    fun a_failed_identity_fetch_is_retried_with_a_capped_backoff() {
+        val delays = (0 until 10).map { FeishuMention.botIdentityRetryDelayMs(it) }
+        assertTrue(delays.first() > 0, "a failed fetch must not spin: $delays")
+        assertEquals(delays, delays.sorted(), "backoff never shrinks: $delays")
+        assertTrue(delays.last() <= 5 * 60_000L, "capped so a recovered network is noticed within minutes: $delays")
+        assertTrue(delays.last() > delays.first(), "backs off: $delays")
+    }
 }

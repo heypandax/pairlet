@@ -3,6 +3,8 @@ package dev.ccpocket.daemon.git
 import dev.ccpocket.observability.*
 
 import dev.ccpocket.daemon.disk.ProjectPaths
+import dev.ccpocket.daemon.util.ChildOutput
+import dev.ccpocket.daemon.util.ProcessTree
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AddWorktree
@@ -36,9 +38,11 @@ import dev.ccpocket.protocol.RemoveWorktree
 import dev.ccpocket.protocol.WorktreeEntry
 import dev.ccpocket.protocol.WorktreeList
 import dev.ccpocket.protocol.gitStderrHighlight
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Files
@@ -103,6 +107,9 @@ class GitService(
      *  "unknown". Injectable purely so a test on a loaded machine measures the LOGIC and not the box:
      *  the production value is a UX budget, and a wall clock in an assertion is a flake waiting to fire. */
     private val worktreeStatusBudgetMs: Long = WORKTREE_STATUS_BUDGET_MS,
+    /** The bound on a local git process (every read, commit, worktree add/remove). Injectable so a test can
+     *  reach the timeout path without waiting the production 30 s. */
+    private val localTimeoutMs: Long = LOCAL_TIMEOUT_MS,
 ) {
     private val log = logger("Git")
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
@@ -125,12 +132,30 @@ class GitService(
         /** true = the preview already knows the confirm must fail (#281: a session runs in this worktree).
          *  A token is still minted so the client flow is uniform; redeeming it refuses. */
         val blocked: Boolean = false,
-    )
+    ) {
+        /** Every path the confirmed action would lose NOW was listed on the preview the user agreed to. */
+        fun covers(losable: List<String>): Boolean = paths.toSet().containsAll(losable)
+    }
 
     // ------------------------------------------------------------------ reads
 
     /** `git status --porcelain=v2 --branch -z` for the whole repository [workdir] sits in. */
-    suspend fun status(f: FetchGitStatus, workdir: Path): GitStatus = statusAt(f.convoId, f.workdir, workdir, f.withBranches)
+    suspend fun status(f: FetchGitStatus, workdir: Path): GitStatus = neverThrows(
+        { GitStatus(f.convoId, f.workdir, ok = false, error = it) },
+    ) { statusAt(f.convoId, f.workdir, workdir, f.withBranches) }
+
+    /**
+     * The three reads are launched bare by the router, so an exception here means the phone never gets a
+     * reply and spins until its own timeout. Same contract as [act]: a failure is a frame the user can read.
+     */
+    private inline fun <T> neverThrows(fail: (String) -> T, block: () -> T): T = try {
+        block()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        log.warn("git read failed", e)
+        fail(e.message ?: "git failed")
+    }
 
     /**
      * [echo] is the workdir string the CLIENT sent, replayed verbatim; [anchor] is the canonical directory
@@ -160,16 +185,23 @@ class GitService(
     }
 
     /** One file's unified diff, index side ([ReadGitDiff.staged]) or working side. */
-    suspend fun diff(f: ReadGitDiff, workdir: Path): GitDiff {
+    suspend fun diff(f: ReadGitDiff, workdir: Path): GitDiff = neverThrows(
+        { GitDiff(f.convoId, f.workdir, f.path, f.staged, ok = false, error = it) },
+    ) { diffInner(f, workdir) }
+
+    private suspend fun diffInner(f: ReadGitDiff, workdir: Path): GitDiff {
         val fail = { why: String -> GitDiff(f.convoId, f.workdir, f.path, f.staged, ok = false, error = why) }
         val repo = repoOf(workdir) ?: return fail("not a git repository")
         val exe = gitBin() ?: return fail(GIT_NOT_FOUND)
         // `--` terminates option parsing: a file named "--cached" is a file.
         val base = listOf("diff", "--no-color") + (if (f.staged) listOf("--cached") else emptyList()) + listOf("--", f.path)
-        var out = git(exe, repo.root, base, readOnly = true).out
-        if (out.isBlank() && !f.staged) {
+        val first = git(exe, repo.root, base, readOnly = true)
+        var out = first.out
+        if (out.isBlank() && !f.staged && first.code == 0 && isUntracked(exe, repo, f.path)) {
             // untracked: git has no recorded side for it, so diff it against the null device. --no-index
-            // exits 1 when the files differ, which is the normal success path here.
+            // exits 1 when the files differ, which is the normal success path here. --no-index reads ANY
+            // path it is given, so it is reached only for a file git itself lists as untracked — never a
+            // path outside the repository, an ignored file, or a tracked one whose first diff failed.
             val nul = if (isWindows) "NUL" else "/dev/null"
             out = git(exe, repo.root, listOf("diff", "--no-color", "--no-index", "--", nul, f.path), readOnly = true).out
         }
@@ -181,7 +213,11 @@ class GitService(
     }
 
     /** `git worktree list --porcelain`, enriched with per-checkout dirty state and live-session info. */
-    suspend fun listWorktrees(f: ListWorktrees, workdir: Path): WorktreeList {
+    suspend fun listWorktrees(f: ListWorktrees, workdir: Path): WorktreeList = neverThrows(
+        { WorktreeList(f.convoId, f.workdir, ok = false, error = it) },
+    ) { listWorktreesInner(f, workdir) }
+
+    private suspend fun listWorktreesInner(f: ListWorktrees, workdir: Path): WorktreeList {
         val repo = repoOf(workdir)
             ?: return WorktreeList(f.convoId, f.workdir, ok = true, notARepo = true)
         val exe = gitBin()
@@ -279,7 +315,7 @@ class GitService(
                     return err(f.convoId, f.op, "resolve the ${st.conflicted.size} conflicts before committing")
                 }
                 // -m's VALUE: free text can never be read as an option here. No --amend, no --no-verify.
-                done(f, exe, repo, git(exe, repo.root, listOf("commit", "-m", msg), timeoutMs = LOCAL_TIMEOUT_MS))
+                done(f, exe, repo, git(exe, repo.root, listOf("commit", "-m", msg), timeoutMs = localTimeoutMs))
             }
 
             GIT_OP_FETCH -> done(f, exe, repo, git(exe, repo.root, listOf("fetch", "--no-tags"), timeoutMs = NET_TIMEOUT_MS))
@@ -331,14 +367,22 @@ class GitService(
         if (token.isNullOrEmpty()) {
             return preview(f.convoId, f.op, repo, withCounts(exe, repo, losable, staged = false), "dirty-checkout", branch = target)
         }
-        consume(token, f.op, f.convoId, repo, target)
+        val confirm = consume(token, f.op, f.convoId, repo, target)
             ?: return err(f.convoId, f.op, "that confirmation expired — check the changes again")
+        // --force discards whatever is dirty NOW. If that is more than the sheet listed (the agent kept
+        // editing during the confirm window), the user never agreed to lose it.
+        if (!confirm.covers(losable.map { it.path })) return err(f.convoId, f.op, CHANGED_SINCE_PREVIEW)
         return done(f, exe, repo, git(exe, repo.root, listOf("checkout", "--force", target, "--")))
     }
 
     /** Throw away the working-tree changes of specific files. Always two-step; the index is left alone. */
     private suspend fun revert(f: GitAction, exe: Path, repo: Repo, st: GitPorcelain.Status): Frame {
         val paths = f.paths.ifEmpty { return err(f.convoId, f.op, "no files given") }
+        // Only FILES git itself just listed as changed. A directory, "." or ":/" previews as one innocent
+        // row and then restores everything beneath it — work the sheet never named. (Globs are already
+        // inert: every process runs with GIT_LITERAL_PATHSPECS.) Checked on both steps, against fresh status.
+        val listed = (st.staged + st.unstaged + st.conflicted + st.untracked).mapTo(HashSet()) { it.path }
+        paths.firstOrNull { it !in listed }?.let { return err(f.convoId, f.op, "not a changed file: ${it.take(200)}") }
         val token = f.confirmToken
         if (token.isNullOrEmpty()) {
             val touched = (st.unstaged + st.conflicted).filter { it.path in paths.toSet() }
@@ -387,7 +431,7 @@ class GitService(
                 add(target.toString())
                 add(if (f.createBranch) defaultBranch(exe, repo, known) else branch)
             }
-            val r = git(exe, repo.root, argv, timeoutMs = LOCAL_TIMEOUT_MS)
+            val r = git(exe, repo.root, argv, timeoutMs = localTimeoutMs)
             return GitActionResult(
                 f.convoId, op, ok = r.code == 0, exitCode = r.code,
                 stdout = r.out.take(MAX_OUT),
@@ -435,7 +479,7 @@ class GitService(
             if (token.isNullOrEmpty()) {
                 return GitActionPreview(
                     convoId = f.convoId, op = op,
-                    confirmToken = mint(op, f.convoId, repo, emptyList(), null, target, blocked = live != null),
+                    confirmToken = mint(op, f.convoId, repo, losable.map { it.path }, null, target, blocked = live != null),
                     expiresAtMs = nowMs() + GIT_CONFIRM_TTL_MS,
                     files = losable.take(GIT_STATUS_MAX_ENTRIES),
                     summary = if (losable.isEmpty()) "worktree-clean" else "worktree-dirty",
@@ -451,12 +495,15 @@ class GitService(
             if (confirm.blocked || liveIndex()[key] != null) {
                 return err(f.convoId, op, "a session is running in this worktree — stop it first")
             }
+            // --force is decided from the state at THIS moment, so it may only discard what the sheet
+            // showed: a checkout that was clean at preview and got written to since is refused, not forced.
+            if (!confirm.covers(losable.map { it.path })) return err(f.convoId, op, CHANGED_SINCE_PREVIEW)
             val argv = buildList {
                 add("worktree"); add("remove")
                 if (losable.isNotEmpty()) add("--force")
                 add(target)
             }
-            val r = git(exe, repo.root, argv, timeoutMs = LOCAL_TIMEOUT_MS)
+            val r = git(exe, repo.root, argv, timeoutMs = localTimeoutMs)
             return GitActionResult(
                 f.convoId, op, ok = r.code == 0, exitCode = r.code,
                 stdout = r.out.take(MAX_OUT),
@@ -545,6 +592,12 @@ class GitService(
             staged = GitPorcelain.withCounts(st.staged, index),
             unstaged = GitPorcelain.withCounts(st.unstaged, work),
         )
+    }
+
+    /** Exactly [path] is an untracked, non-ignored file — the same set the panel's untracked group shows. */
+    private suspend fun isUntracked(exe: Path, repo: Repo, path: String): Boolean {
+        val r = git(exe, repo.root, listOf("ls-files", "-z", "--others", "--exclude-standard", "--", path), readOnly = true)
+        return r.code == 0 && r.out.split('\u0000').any { it == path }
     }
 
     private suspend fun withCounts(exe: Path, repo: Repo, entries: List<GitFileEntry>, staged: Boolean): List<GitFileEntry> {
@@ -685,9 +738,10 @@ class GitService(
      * Start one git process with an explicit argv — the ONLY place in this file that spawns anything.
      * Output is capped while still being drained (a chatty command must neither blow the relay frame nor
      * block on a full pipe), the wait is bounded, and a grandchild holding the pipe open cannot make us
-     * wait forever for EOF. Same three-part shape as ShellService.execute, minus the shell.
+     * wait forever for EOF — the readers live outside this scope ([ChildOutput]), so after [READ_DRAIN_MS]
+     * we answer with what arrived. Same three-part shape as ShellService.execute, minus the shell.
      */
-    private suspend fun git(exe: Path, dir: Path, args: List<String>, timeoutMs: Long = LOCAL_TIMEOUT_MS, readOnly: Boolean = false): Exec =
+    private suspend fun git(exe: Path, dir: Path, args: List<String>, timeoutMs: Long = localTimeoutMs, readOnly: Boolean = false): Exec =
         withContext(Dispatchers.IO) {
             try {
                 val pb = ProcessBuilder(listOf(exe.toString()) + args).directory(dir.toFile()).redirectErrorStream(false)
@@ -703,17 +757,32 @@ class GitService(
                     put("LANG", "C")
                     // reads must not fight the agent for index.lock
                     if (readOnly) put("GIT_OPTIONAL_LOCKS", "0")
+                    // every path we hand git is a FILE NAME, never a pattern: without this, reverting
+                    // `app/[id]/page.tsx` also matches `app/i/…` and `app/d/…` through the [id] glob
+                    put("GIT_LITERAL_PATHSPECS", "1")
                 }
                 val proc = pb.start()
                 proc.outputStream.close() // no stdin for any verb we run
-                val out = async { drainCapped(proc.inputStream.bufferedReader()) }
-                val err = async { drainCapped(proc.errorStream.bufferedReader()) }
-                val finished = proc.waitFor(timeoutMs.coerceIn(1_000, MAX_TIMEOUT_MS), TimeUnit.MILLISECONDS)
-                if (!finished) proc.destroyForcibly()
-                val stdout = withTimeoutOrNull(READ_DRAIN_MS) { out.await() } ?: ""
-                val stderr = withTimeoutOrNull(READ_DRAIN_MS) { err.await() } ?: ""
+                // readers NOT tied to this scope: see ChildOutput for why an `async` here could wedge forever
+                val out = ChildOutput(proc.inputStream, DIFF_CAP)
+                val err = ChildOutput(proc.errorStream, DIFF_CAP)
+                val bound = timeoutMs.coerceIn(1_000, MAX_TIMEOUT_MS)
+                // A READ is interruptible: a cancelled caller stops waiting at once and takes the process down
+                // with it — the worktree scan's budget cancels its laggards and must not then sit out their
+                // 30 s. A write keeps the old semantics and runs to its own end: a push the user tapped is not
+                // aborted halfway because the request that started it went away.
+                val finished = if (!readOnly) proc.waitFor(bound, TimeUnit.MILLISECONDS) else try {
+                    runInterruptible { proc.waitFor(bound, TimeUnit.MILLISECONDS) }
+                } catch (c: CancellationException) {
+                    ProcessTree.terminateInBackground(proc)
+                    throw c
+                }
+                if (!finished) ProcessTree.terminate(proc) // SIGTERM first: git removes its index.lock
+                val (stdout, stderr) = ChildOutput.both(out, err, READ_DRAIN_MS)
                 if (!finished) Exec(-1, stdout, stderr, timedOut = true, failure = "git took too long and was stopped")
                 else Exec(proc.exitValue(), stdout, stderr)
+            } catch (c: CancellationException) {
+                throw c
             } catch (e: Exception) {
                 Diagnostics.report(ErrorPath.GIT, Stage.SPAWN, ErrorCode.SPAWN_FAILED, e)
                 log.warn("git ${args.firstOrNull()} failed to start", e)
@@ -721,21 +790,9 @@ class GitService(
             }
         }
 
-    private fun drainCapped(reader: java.io.Reader): String = reader.use { r ->
-        val sb = StringBuilder()
-        val buf = CharArray(4096)
-        var total = 0
-        while (true) {
-            val n = r.read(buf)
-            if (n < 0) break
-            if (total < DIFF_CAP) sb.append(buf, 0, minOf(n, DIFF_CAP - total))
-            total += n
-        }
-        sb.toString()
-    }
-
     internal companion object {
         const val GIT_NOT_FOUND = "git is not installed on the computer"
+        const val CHANGED_SINCE_PREVIEW = "files changed since the preview — check the changes again"
         const val MAX_OUT = 4_000 // stdout/stderr echoed back on an action frame
         const val DIFF_CAP = 200_000 // a single diff body; also the hard read cap on any git output
         const val LOCAL_TIMEOUT_MS = 30_000L

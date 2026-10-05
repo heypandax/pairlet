@@ -117,6 +117,9 @@ class SidePaneModelDelegationGuardTest {
      *  class doc's litmus — and every one of them means the same thing in a column as anywhere else. */
     private val WINDOW_DELEGATED = setOf(
         "exposeFeature", "sideContentLayoutToken", "onSideContentLaidOut",
+        // feature_used from window overlays (Git, Worktrees, Skills, Bridges) — an app-level usage count,
+        // never an action on any conversation
+        "useFeature",
         // window chrome (desktop chrome v2): whether the sidebar is collapsed, and the session back/forward
         // history behind ⌘[ / ⌘]. Both describe the WINDOW — one trail per window, not per column — and both
         // are read by the chrome cluster the leftmost column's sub-header adopts while the sidebar is hidden.
@@ -152,7 +155,7 @@ class SidePaneModelDelegationGuardTest {
         "groupCollapsed",
         // the sidebar's per-project fold memory: project header collapse + session "Show more" depth
         "projectCollapsed", "sessionsShown",
-        "archivedSessions", "canArchiveSessions", "archiveSession", "unarchiveSession",
+        "archivedSessions", "canArchiveSessions", "archiveSession", "unarchiveSession", "archiveRefused", "dismissArchiveError",
         "refreshArchived", "browseArchived",
         "canRenameSessions", "renameSession", "renameError", "dismissRenameError",
         // the rewind CONFIRMATION lives in window chrome (the sheet), unlike the banners above
@@ -164,7 +167,7 @@ class SidePaneModelDelegationGuardTest {
         // remote directory browser (issues #218/#214)
         "browseListing", "browseRoots", "browseDirectories", "requestBrowse",
         // fleet
-        "machines", "attention", "watch", "resolveAttention", "jumpMachine",
+        "machines", "attention", "watch", "resolveAttention", "openAttention", "jumpMachine",
         "running", "runningVisible", "runningSessionsIn", "runningRows", "openRunning", "browseRunning",
         // split-pane plumbing itself: these take the pane as an argument, so they are already explicit
         // (splitFocusedSlot is window layout — WHERE the focused chat renders — not conversation state)

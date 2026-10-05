@@ -165,7 +165,7 @@ private fun Bubble(value: String, done: Boolean, doneLabel: String, onAct: () ->
         ) {
             if (done) {
                 Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(14.dp))
-                Text(doneLabel, color = Tok.ok, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(doneLabel, color = Tok.ok, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(11.5.sp))
             } else Icon(Icons.Rounded.ContentCopy, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
         }
     }

@@ -14,7 +14,10 @@ import kotlinx.serialization.json.JsonObject
  * Tracks a conversation's Workflow runs (issue #106) from the CLI's live stream — the
  * orchestration-level sibling of [BackgroundJobRegistry]'s per-job view.
  *
- * NOT thread-safe: the owning [Conversation] drives it from its single stdout pump.
+ * Internally synchronized (lifecycle design S6): the stdout pump is the main writer, but a reattach replays
+ * [snapshots], a process stop or death settles runs ([killRunning]) and the manifest patch runs on its own
+ * coroutine — all on other threads. Every public method holds this instance's monitor for its whole
+ * (non-suspending) body; observable behaviour is unchanged.
  *
  * Wire lifecycle (probed on claude 2.1.206, see scripts/probe-claude-wire.py `workflow`):
  *  - `system/task_started {task_type:"local_workflow", workflow_name}` and/or the tool_result's
@@ -49,7 +52,10 @@ class WorkflowTracker {
 
     /** The Workflow tool_result's launch ack — the only live carrier of the run id. Returns true when
      *  anything visible changed (caller re-emits). Creates the run when the ack outruns task_started. */
-    fun onLaunched(toolUseId: String?, runId: String, taskId: String?, name: String?, now: Long): Boolean {
+    fun onLaunched(toolUseId: String?, runId: String, taskId: String?, name: String?, now: Long): Boolean =
+        synchronized(this) { onLaunchedLocked(toolUseId, runId, taskId, name, now) }
+
+    private fun onLaunchedLocked(toolUseId: String?, runId: String, taskId: String?, name: String?, now: Long): Boolean {
         val existing = byTask(taskId) ?: runs.lastOrNull { it.runId == runId }
         if (existing != null) {
             var changed = false
@@ -64,7 +70,10 @@ class WorkflowTracker {
     }
 
     /** `system/task_started` with task_type=local_workflow. May arrive before OR after [onLaunched]. */
-    fun onTaskStarted(taskId: String, toolUseId: String?, workflowName: String?, now: Long): Boolean {
+    fun onTaskStarted(taskId: String, toolUseId: String?, workflowName: String?, now: Long): Boolean =
+        synchronized(this) { onTaskStartedLocked(taskId, toolUseId, workflowName, now) }
+
+    private fun onTaskStartedLocked(taskId: String, toolUseId: String?, workflowName: String?, now: Long): Boolean {
         val existing = byTask(taskId)
             ?: toolUseId?.let { t -> runs.lastOrNull { it.toolUseId == t } }?.also { it.taskId = taskId }
         if (existing != null) {
@@ -79,7 +88,10 @@ class WorkflowTracker {
 
     /** A cumulative workflow_progress snapshot — replaces phase/agent state wholesale (items are the
      *  CLI's own merged array, keyed by index). Unknown item types are skipped, never fatal. */
-    fun onProgress(taskId: String, toolUseId: String?, items: JsonArray, now: Long): Boolean {
+    fun onProgress(taskId: String, toolUseId: String?, items: JsonArray, now: Long): Boolean =
+        synchronized(this) { onProgressLocked(taskId, toolUseId, items, now) }
+
+    private fun onProgressLocked(taskId: String, toolUseId: String?, items: JsonArray, now: Long): Boolean {
         val run = byTask(taskId) ?: Run(runId = null, taskId = taskId, toolUseId = toolUseId, name = PLACEHOLDER_NAME, startedAt = now)
             .also { runs += it; trim() }
         if (run.toolUseId == null) run.toolUseId = toolUseId
@@ -94,7 +106,10 @@ class WorkflowTracker {
 
     /** `task_updated`/`task_notification` for a tracked run — settles it. Unknown task ids are not
      *  workflows (plain bg shells etc.) and return false. */
-    fun onTaskSettled(taskId: String, status: String?, now: Long): Boolean {
+    fun onTaskSettled(taskId: String, status: String?, now: Long): Boolean =
+        synchronized(this) { onTaskSettledLocked(taskId, status, now) }
+
+    private fun onTaskSettledLocked(taskId: String, status: String?, now: Long): Boolean {
         val run = byTask(taskId) ?: return false
         if (run.status != WorkflowRunStatus.RUNNING) return false
         val next = when (status?.lowercase()) {
@@ -122,7 +137,10 @@ class WorkflowTracker {
     }
 
     /** Patch terminal facts read from the on-disk manifest (final return value, exact duration). */
-    fun onManifest(taskId: String, runId: String?, finalResult: String?, durationMs: Long?, error: String?): Boolean {
+    fun onManifest(taskId: String, runId: String?, finalResult: String?, durationMs: Long?, error: String?): Boolean =
+        synchronized(this) { onManifestLocked(taskId, runId, finalResult, durationMs, error) }
+
+    private fun onManifestLocked(taskId: String, runId: String?, finalResult: String?, durationMs: Long?, error: String?): Boolean {
         val run = byTask(taskId) ?: return false
         var changed = false
         if (runId != null && run.runId == null) { run.runId = runId; changed = true }
@@ -131,19 +149,23 @@ class WorkflowTracker {
         return changed || finalResult != null
     }
 
-    fun snapshotFor(taskId: String): WorkflowRun? = byTask(taskId)?.toWire(null)
+    fun snapshotFor(taskId: String): WorkflowRun? = synchronized(this) { byTask(taskId)?.toWire(null) }
 
     /** Snapshot for re-emit on reattach; [finalResults] lets the caller splice manifest-read returns in. */
-    fun snapshots(): List<WorkflowRun> = runs.map { it.toWire(null) }
+    fun snapshots(): List<WorkflowRun> = synchronized(this) { runs.map { it.toWire(null) } }
 
-    fun snapshotWithFinal(taskId: String, finalResult: String?): WorkflowRun? = byTask(taskId)?.toWire(finalResult)
+    fun snapshotWithFinal(taskId: String, finalResult: String?): WorkflowRun? =
+        synchronized(this) { byTask(taskId)?.toWire(finalResult) }
 
-    fun hasRunning(): Boolean = runs.any { it.status == WorkflowRunStatus.RUNNING }
+    fun hasRunning(): Boolean = synchronized(this) { runs.any { it.status == WorkflowRunStatus.RUNNING } }
 
     /** The agent process died/was stopped — every RUNNING run died with it (workflows run inside the
      *  CLI process). Settle them as KILLED so no card pulses forever; returns the task ids that
      *  flipped (caller emits each). */
-    fun killRunning(now: Long): List<String> {
+    fun killRunning(now: Long): List<String> =
+        synchronized(this) { killRunningLocked(now) }
+
+    private fun killRunningLocked(now: Long): List<String> {
         val flipped = ArrayList<String>()
         for (run in runs) {
             if (run.status == WorkflowRunStatus.RUNNING) {
@@ -153,7 +175,10 @@ class WorkflowTracker {
         return flipped
     }
 
-    fun clear(): Boolean {
+    fun clear(): Boolean =
+        synchronized(this) { clearLocked() }
+
+    private fun clearLocked(): Boolean {
         val had = runs.isNotEmpty()
         runs.clear()
         return had

@@ -33,3 +33,51 @@ fun Application.installRelayForwardedHeaders() {
  * chose for itself.
  */
 fun ApplicationCall.clientIp(): String = request.origin.remoteHost
+
+/**
+ * The subject a per-address limiter should count [ip] under. An IPv6 address collapses to its /64: that is
+ * the block one subscriber is handed (a home line, one phone on a mobile network), and every address inside
+ * it is theirs to use — keyed per address, one client owns 2^64 fresh buckets and no per-IP limit ever trips.
+ * An IPv4-mapped IPv6 address counts as the IPv4 address it carries; IPv4 and anything unparseable are
+ * returned unchanged (a hostname is never resolved here).
+ */
+fun rateLimitSubject(ip: String): String {
+    if (':' !in ip) return ip
+    val literal = ip.trim().removePrefix("[").substringBefore(']').substringBefore('%')
+    val groups = ipv6Groups(literal) ?: return ip
+    if (groups.subList(0, 5).all { it == 0 } && groups[5] == 0xffff) {
+        return "${groups[6] shr 8}.${groups[6] and 0xff}.${groups[7] shr 8}.${groups[7] and 0xff}"
+    }
+    return groups.take(4).joinToString(":") { it.toString(16) } + "::/64"
+}
+
+/** The eight 16-bit groups of an IPv6 literal (`::` compression and a dotted IPv4 tail allowed), or null. */
+private fun ipv6Groups(s: String): List<Int>? {
+    if (s.isEmpty() || s.any { !(it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.') }) return null
+    val halves = s.split("::")
+    if (halves.size > 2) return null
+    val head = ipv6Fields(halves[0], dottedTailAllowed = halves.size == 1) ?: return null
+    if (halves.size == 1) return head.takeIf { it.size == 8 }
+    val tail = ipv6Fields(halves[1], dottedTailAllowed = true) ?: return null
+    if (head.size + tail.size > 7) return null
+    return head + List(8 - head.size - tail.size) { 0 } + tail
+}
+
+/** The groups of one `::`-free run of an IPv6 literal; a dotted IPv4 last field counts as two groups. */
+private fun ipv6Fields(part: String, dottedTailAllowed: Boolean): List<Int>? {
+    if (part.isEmpty()) return emptyList()
+    val out = ArrayList<Int>()
+    val fields = part.split(':')
+    for ((i, f) in fields.withIndex()) {
+        if (dottedTailAllowed && i == fields.lastIndex && '.' in f) {
+            val octets = f.split('.').map { o -> o.toIntOrNull()?.takeIf { o.length in 1..3 && it in 0..255 } ?: return null }
+            if (octets.size != 4) return null
+            out += (octets[0] shl 8) or octets[1]
+            out += (octets[2] shl 8) or octets[3]
+        } else {
+            if (f.length !in 1..4 || '.' in f) return null
+            out += f.toInt(16)
+        }
+    }
+    return out
+}

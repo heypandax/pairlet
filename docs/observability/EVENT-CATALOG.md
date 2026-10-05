@@ -41,7 +41,7 @@
 | pair_started / paired / pair_failed | 配对尝试 / 当前流程成功 / 当前流程失败 | 后续连接或会话能够使用；多次尝试不是多个人 |
 | connected / disconnected | 当前逻辑的连接就绪 / 主动断开入口 | 所有断开均已覆盖；历史首屏可见 |
 | conn_phase / conn_failed | 连接阶段变化 / 一次连接尝试失败 | 用户操作最终失败；直连回退成功不计两次失败 |
-| session_opened | 发出 OpenSession 之前记录打开意图 | SessionLive、历史完成或实际布局成功 |
+| session_opened | 发出 OpenSession 之前记录打开意图；`resume`=0 为新会话，`backend` 为本次打开选用的 Agent 后端枚举（claude/codex/opencode/kimi/zcode/dsh，2026-10-04 起） | SessionLive、历史完成或实际布局成功；`backend` 是客户端打开时的选择，SessionLive 可能更正 |
 | session_open_timeout | 打开确认超时提示出现，含 link/retried | 完整历史加载超时或根因已确认 |
 | prompt_sent | 发提示或运行终端命令前的意图 | 已写到 Agent、已收到响应或任务完成；当前还混含终端命令 |
 | prompt_turn_stalled / prompt_turn_queued | 看门狗无输出提示 / 已知排队 | 长任务失败；排队不是内部错误 |
@@ -64,7 +64,7 @@
 | turn_result | 对应 turn 的终态 | 协议完成不等于 AI 正确解决需求；没有终态且无退出证据为 unknown |
 | approval_apply_result | 对应裁决被 Agent 实际应用或确认失败 | 点击/发送/应用分别观察，用户拒绝是正常业务结果，等待不算内部故障 |
 | connection_recovery_result | 本轮恢复操作达到可继续使用的状态，或失败/取消/未知 | 直连→relay 是同一恢复；后台挂起、切电脑、旧代际回包不能污染本次结果 |
-| feature_exposed / feature_used | 固定五功能实际可用且呈现 / 用户主动使用 | 按实际曝光会话去重，不按 Compose 重组计数；完成复用对应业务结果 |
+| feature_exposed / feature_used | 固定五功能实际可用且呈现 / 用户主动使用；第二批功能只有 feature_used，见第 7 节 | 按实际曝光会话去重，不按 Compose 重组计数；完成复用对应业务结果 |
 | value_reached | 用户主动操作成功看到内容、收到真实 Agent 响应或完成已应用审批 | 每种成功动作一次；排除 demo/internal、后台心跳、自动重连、无人查看的后台任务 |
 | first_value_observed | 首次观测到 value_reached 后，独立持久标记认领成功 | 每个 Analytics 身份/环境/own 或 shared 分支一次；升级、重开 App、换功能不重置。是本版开始后的首次观测，不宣称首次安装或历史首次使用 |
 
@@ -113,3 +113,25 @@ Analytics 结果字段为 result、reason、coverage、duration_ms 与固定 pla
 value_reached 目前由会话内容布局、提示输出实际可见、文件可渲染内容布局产生。后台收到数据、自动恢复、纯 ACK、审批裁决返回或成功派发都不能替代它。文件失败卡本身不算有效使用。
 
 结果分布必须同时展示 success/failure/timeout/cancelled/waiting/unknown。完成率仅在定义明确的可判定结果内计算，并同时列该分母占所有主结果的比例。不要通过剔除 unknown 后只显示一个看似很高的成功率。每个 operation 的 ProductOutcome 只发一个主结果；session_open_recovered 是独立恢复事件。
+
+## 7. 第二批功能使用（2026-10-04，去留评估）
+
+用途：给去留待定的功能补使用数据。沿用 `feature_used` 与 `feature` 参数，不新增事件名或参数键；`feature` 取 `ProductFeature` 小写名。只有使用事件，没有 feature_exposed 曝光分母，也不派生 value_reached。参数只有 `feature` 和仓库公共维度（`usage_mode`、`backend`、`demo`），不带路径、文件名、会话/设备 ID、标签或输入内容；与其他事件一样受“共享使用与诊断数据”开关控制。
+
+| feature | 触发点（一次用户操作一条） | 平台 |
+|---|---|---|
+| review_request | 发出评审请求，或收件方对评审执行动作（`sendReview` / `actOnReview`） | 手机、桌面 |
+| session_handoff | 发起交接或接受交接（`createHandoff` / `acceptHandoff`） | 手机、桌面 |
+| collaborator_invite | 生成协作联系人连接票据；兑换方已由 `paired`/`pair_failed` 的 `source=collaborator` 覆盖 | 手机、桌面 |
+| folder_share | 创建文件夹共享邀请；加入方已由 `pair_*` 的 `source=share` 覆盖 | 手机、桌面 |
+| workflow_run | 打开 Workflow 运行详情（`openWorkflow`） | 手机、桌面 |
+| voice_memo | 打开语音备忘页（`openMemos`，实验开关打开时） | 手机 |
+| git_panel / worktree | Git 面板 / Worktree 页进入组合（每次打开一条） | 手机、桌面 |
+| session_rewind / session_fork | 在确认页确认回退 / 分叉（`confirmRewind`，按 mode 区分） | 手机、桌面 |
+| skill_browse | 打开技能浏览浮层 | 桌面 |
+| split_pane | 会话放入分屏列 | 桌面 |
+| embedded_terminal | 打开内嵌终端；已打开时重新聚焦不计。`usage_mode` 固定 own（本机 shell） | 桌面 |
+| html_preview | HTML 渲染预览实际呈现（切到源码不计）。无仓库上下文，`usage_mode` 为 unknown | 桌面 |
+| bridge_admin | 打开 IM 桥接管理页 | 手机、桌面 |
+
+定时任务创建沿用既有 `background_task`。daemon 没有产品分析通道，命令行直接触发的功能（如 `pairlet agent`、IM 桥接消息本身）不在此列。页面类触发点每次进入各记一条，事件量不等于独立使用次数，按安装去重读数。

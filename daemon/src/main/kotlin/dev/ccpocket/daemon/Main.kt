@@ -152,7 +152,11 @@ private fun installLabel(kind: dev.ccpocket.daemon.update.UpdateService.InstallK
     dev.ccpocket.daemon.update.UpdateService.InstallKind.UNKNOWN -> "unrecognized (dev build or manual copy)"
 }
 
-private class RunCmd : CliktCommand(name = "run") {
+/** [exit] ends the process when another daemon already runs — injectable only so a test can watch a
+ *  rejected second start without losing its JVM (see SecondInstanceNoSideEffectsTest). */
+internal class RunCmd(
+    private val exit: (Int) -> Nothing = { kotlin.system.exitProcess(it) },
+) : CliktCommand(name = "run") {
     private val host by option().default("127.0.0.1")
     private val port by option().int().default(8765)
     private val claudeBin by option("--claude-bin", help = "claude executable (default: auto-detect the installed Claude Code)")
@@ -178,7 +182,15 @@ private class RunCmd : CliktCommand(name = "run") {
     ).flag()
 
     override fun run() {
-        // Loaded FIRST because the agent probes below already need it: `config --dsh-bin` is the pinned
+        // A daemon is a singleton (owns the pair port + one relay identity). If another instance is
+        // already up — the cask's KeepAlive LaunchAgent, or a stray dev run — exit cleanly (or --takeover
+        // to replace it) BEFORE doing anything else (audit H1). Everything below touches state the running
+        // daemon owns: it empties the voice-memo scratch, fires due schedules (whose agents a refused
+        // instance would orphan), dials peer inboxes, writes identity/claude-home, binds the direct port.
+        // A refused start must leave no trace — launchd replays it every ThrottleInterval. LAN-only
+        // `--local` keeps its old behaviour: no pair port, no check.
+        val tookOver = !local && SingleInstance.ensureSolo(pairPort, takeover, exit) { echo(it) }
+        // Loaded before the agent probes because they already need it: `config --dsh-bin` is the pinned
         // path a service-managed daemon carries across restarts (issue #365), so it has to be in hand
         // before the first resolveExecutable call, not after.
         val prefs = DaemonPrefs.load()
@@ -279,7 +291,11 @@ private class RunCmd : CliktCommand(name = "run") {
                     firstContactPending = relayClient::deviceFirstContactPending,
                     restrictedCredential = relayClient::deviceIsRestrictedCredential, // #367
                 )
-                runCatching { DaemonServer(core, directBind, port, gate).run(wait = false) }
+                // after --takeover the old daemon frees its ports from parallel shutdown hooks, so the
+                // direct port can lag the pair port the check waited on: retry briefly instead of
+                // settling for relay-only for this instance's whole life
+                val bindDirect = { DaemonServer(core, directBind, port, gate).run(wait = false) }
+                runCatching { if (tookOver) SingleInstance.retryBind(bind = bindDirect) else bindDirect() }
                     .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
                     .onFailure {
                         dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.STARTUP,
@@ -298,10 +314,7 @@ private class RunCmd : CliktCommand(name = "run") {
                     zcodeBin?.let { add("--zcode-bin"); add(it) }
                 },
             )?.let { echo(it) }
-            // A daemon is a singleton (owns the pair port + one relay identity). If another instance is
-            // already up — the cask's KeepAlive LaunchAgent, or a stray dev run — don't bind/attach a
-            // duplicate that fights it on the relay; exit cleanly (or --takeover to replace it).
-            SingleInstance.ensureSolo(pairPort, takeover) { echo(it) }
+            // the single-instance check ran first thing in run(); claim the pair port it probed
             PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort, core).start()
             // daily new-version check: log + one phone push per version, and — for installer-managed
             // installs — a hot-swap to the new version. On by default (issue #244); --auto-update / the
@@ -311,7 +324,9 @@ private class RunCmd : CliktCommand(name = "run") {
                 env = System.getenv("CC_POCKET_AUTO_UPDATE"),
                 pref = prefs.autoUpdate,
             )
-            dev.ccpocket.daemon.update.UpdateChecker.start(relayClient, auto)
+            dev.ccpocket.daemon.update.UpdateChecker.start(relayClient, auto) {
+                runBlocking { core.hasActiveWork() }
+            }
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }
         } else {

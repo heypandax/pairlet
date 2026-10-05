@@ -273,7 +273,7 @@ fun OpenCodeQuestionCard(questions: List<AskQuestion>) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             QBadge(26.dp)
-            Text(stringResource(Res.string.opencode_question_header), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(Res.string.opencode_question_header), color = Tok.tx2, fontSize = 13.sp, style = tightCenter(13.sp), modifier = Modifier.weight(1f))
         }
         questions.forEachIndexed { i, q ->
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -287,7 +287,7 @@ fun OpenCodeQuestionCard(questions: List<AskQuestion>) {
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(Modifier.size(4.dp).clip(CircleShape).background(Tok.muted))
-            Text(stringResource(Res.string.opencode_question_readonly), color = Tok.muted, fontSize = 12.sp)
+            Text(stringResource(Res.string.opencode_question_readonly), color = Tok.muted, fontSize = 12.sp, style = tightCenter(12.sp))
         }
     }
 }
@@ -322,7 +322,7 @@ private fun toggle(current: Set<String>, label: String, multi: Boolean): Set<Str
 @Composable
 internal fun QBadge(size: androidx.compose.ui.unit.Dp) {
     Box(Modifier.size(size).clip(CircleShape).background(A12), contentAlignment = Alignment.Center) {
-        Text("?", color = Tok.accent, fontSize = (size.value * 0.56f).sp, fontWeight = FontWeight.Bold, style = TightCenter)
+        Text("?", color = Tok.accent, fontSize = (size.value * 0.56f).sp, fontWeight = FontWeight.Bold, style = tightCenter((size.value * 0.56f).sp))
     }
 }
 
@@ -340,7 +340,7 @@ private fun ChipTab(label: String, active: Boolean, done: Boolean, onClick: () -
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         if (done) Icon(Icons.Rounded.Check, null, tint = Tok.accent, modifier = Modifier.size(11.dp))
-        Text(label, color = col, fontSize = 12.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
+        Text(label, color = col, fontSize = 12.sp, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium, style = tightCenter(12.sp), maxLines = 1)
     }
 }
 
@@ -390,7 +390,7 @@ private fun OtherRow(
             SelectControl(multi, selected)
             Text(
                 stringResource(Res.string.question_other),
-                color = if (selected) Tok.tx else Tok.tx2, fontSize = 14.5.sp, fontWeight = FontWeight.Medium,
+                color = if (selected) Tok.tx else Tok.tx2, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, style = tightCenter(14.5.sp),
             )
         }
         if (selected) {
@@ -447,7 +447,7 @@ private fun ReplyLink(back: Boolean, onClick: () -> Unit) {
         )
         Text(
             stringResource(if (back) Res.string.question_freeform_back else Res.string.question_freeform_link),
-            color = Tok.tx2, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            color = Tok.tx2, fontSize = 13.sp, fontWeight = FontWeight.Medium, style = tightCenter(13.sp),
         )
     }
 }
@@ -466,7 +466,7 @@ fun QuestionsAnsweredRow(items: List<Pair<String, String>>) {
             QBadge(22.dp)
             Text(
                 stringResource(if (items.size == 1) Res.string.questions_answered_one else Res.string.questions_answered_many, items.size),
-                color = Tok.tx2, fontSize = 13.sp,
+                color = Tok.tx2, fontSize = 13.sp, style = tightCenter(13.sp),
             )
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 items.take(2).forEach { (_, a) -> TinyChip(a) }
@@ -485,7 +485,7 @@ fun QuestionsAnsweredRow(items: List<Pair<String, String>>) {
                         if (q.isNotBlank()) Text(q, color = Tok.muted, fontSize = 11.5.sp, modifier = Modifier.padding(bottom = 3.dp))
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             Icon(Icons.Rounded.Check, null, tint = Tok.accent, modifier = Modifier.size(12.dp))
-                            Text(a, color = Tok.tx, fontSize = 13.5.sp)
+                            Text(a, color = Tok.tx, fontSize = 13.5.sp, style = tightCenter(13.5.sp))
                         }
                     }
                     if (i < items.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -498,7 +498,7 @@ fun QuestionsAnsweredRow(items: List<Pair<String, String>>) {
 @Composable
 private fun TinyChip(text: String, muted: Boolean = false) {
     Text(
-        text, color = if (muted) Tok.muted else Tok.tx2, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+        text, color = if (muted) Tok.muted else Tok.tx2, fontSize = 11.sp, fontWeight = FontWeight.Medium, style = tightCenter(11.sp),
         maxLines = 1, overflow = TextOverflow.Ellipsis,
         modifier = Modifier.widthIn(max = 118.dp).clip(RoundedCornerShape(6.dp))
             .background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(6.dp))
@@ -586,6 +586,6 @@ fun QuestionsWithdrawnRow() {
         horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         Box(Modifier.size(6.dp).clip(CircleShape).background(Tok.muted))
-        Text(stringResource(Res.string.questions_withdrawn), color = Tok.muted, fontSize = 13.sp)
+        Text(stringResource(Res.string.questions_withdrawn), color = Tok.muted, fontSize = 13.sp, style = tightCenter(13.sp))
     }
 }

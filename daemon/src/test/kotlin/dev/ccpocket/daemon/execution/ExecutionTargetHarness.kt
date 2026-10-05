@@ -73,7 +73,6 @@ internal class ExecutionTargetHarness(
         }
         store = ExecutionGrantStore.load(grantsFile, identity.e2ePubB64)
         refusals = ExecutionRefusals()
-        val linkPubOf: (String) -> String? = { id -> bridges.pubOf(id)?.let { b64.encodeToString(it) } }
         target = ExecutionTarget(
             identity = identity,
             relayUrl = relayUrl,
@@ -91,10 +90,16 @@ internal class ExecutionTargetHarness(
             refusals = refusals,
         )
         core.executionControl = target
+        wirePlane()
+        relay.target = this
+    }
+
+    /** Install the transport gate + the REAL run plane over the current store, exactly as [restart] does. */
+    fun wirePlane() {
+        val linkPubOf: (String) -> String? = { id -> bridges.pubOf(id)?.let { b64.encodeToString(it) } }
         core.router.executionGuard = ExecutionGuard(store, bridges::executionGrantIdOf, linkPubOf, now, refusals)
         // the REAL run plane, exactly as production installs it — there is no test-only plane any more
         core.router.executionPlane = RunService(store, core.executionRuns, core.registry, core.scope, now)
-        relay.target = this
     }
 
     /** Drop the execution plane + guard + bind hook, leaving the credential chain intact (fail-closed test). */

@@ -80,9 +80,12 @@ class RunServiceTest {
     private var stages: List<Path> = emptyList()
     private var thenExit: Boolean = false
 
+    /** Every [AgentSpec] a process was actually spawned with — what the CLI's argv is built from. */
+    private val launched = java.util.concurrent.CopyOnWriteArrayList<AgentSpec>()
+
     private val registry = SessionRegistry(
         scope,
-        backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { ScriptedBackend(stages, thenExit) }),
+        backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { ScriptedBackend(stages, thenExit, launched) }),
         approvals = approvals,
     )
     private val service = RunService(store, journal, registry, scope) { clock }
@@ -105,10 +108,15 @@ class RunServiceTest {
         """{"type":"control_request","request_id":"ask-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"make test"}}}"""
 
     /** Same shape as ConversationPushTest's: one script file per prompt, gated on a `read`. */
-    private class ScriptedBackend(private val stages: List<Path>, private val thenExit: Boolean) : AgentBackend {
+    private class ScriptedBackend(
+        private val stages: List<Path>,
+        private val thenExit: Boolean,
+        private val launched: MutableList<AgentSpec>,
+    ) : AgentBackend {
         override val kind = AgentKind.CLAUDE
         private var io: AgentIo? = null
         override fun processBuilder(spec: AgentSpec): ProcessBuilder {
+            launched += spec
             val cats = stages.joinToString("; ") { "read go; cat '${it.absolutePathString()}'" }
             return ProcessBuilder("sh", "-c", if (thenExit) cats else "$cats; sleep 30")
         }
@@ -431,6 +439,40 @@ class RunServiceTest {
         val accepted = assertIs<ExecutionRunAccepted>(submit(grant, mode = PermissionMode.BYPASS_PERMISSIONS))
         val run = await(accepted.runId, ExecutionRunState.RUNNING, ExecutionRunState.COMPLETED)
         assertEquals(PermissionMode.PLAN, run.mode)
+    }
+
+    @Test
+    fun `an acceptEdits run is LAUNCHED in DEFAULT through the real lazy first-prompt spawn`() = runBlocking {
+        if (skipOnWindows()) return@runBlocking
+        // #367 HIGH-1 on the path a run actually takes: RunService opens with takeOver = false (no spawn),
+        // then the first sendPrompt spawns lazily. ExecutionAcceptEditsWallTest pins the RULE; this pins
+        // that the rule is applied to the spec the process is really built from. Native acceptEdits here
+        // would let in-workspace edits skip the ControlRequest — and with it every ExecutionSandbox wall.
+        stages = listOf(script("hang", initLine))
+        val grant = install(grantRow(ceiling = PermissionMode.ACCEPT_EDITS))
+        val accepted = assertIs<ExecutionRunAccepted>(submit(grant, mode = PermissionMode.ACCEPT_EDITS))
+        val run = await(accepted.runId, ExecutionRunState.RUNNING)
+        // the run's AUTHORITY is still acceptEdits (the bridge re-creates it behind the walls)…
+        assertEquals(PermissionMode.ACCEPT_EDITS, run.mode)
+        val spawned = withTimeoutOrNull(10_000) { while (launched.isEmpty()) delay(20); launched.toList() }
+        val specs = assertNotNull(spawned, "the first prompt must have spawned the agent")
+        // …but no process of it is ever started in the CLI's native acceptEdits mode
+        for (spec in specs) {
+            assertEquals(PermissionMode.DEFAULT, spec.mode, "a remote run's CLI must launch in DEFAULT: $spec")
+            assertNull(spec.permissionMode, "a raw --permission-mode would override the DEFAULT launch")
+        }
+    }
+
+    @Test
+    fun `a LOCAL acceptEdits session still launches natively on its lazy first prompt`() = runBlocking {
+        if (skipOnWindows()) return@runBlocking
+        // the control for the test above: the launch-mode bend is a remote-execution rule only
+        stages = listOf(script("hang", initLine))
+        val sink = dev.ccpocket.daemon.conversation.OutboundSink { }
+        val convoId = registry.open(dev.ccpocket.protocol.OpenSession(workdir = wsDir.path, mode = PermissionMode.ACCEPT_EDITS), sink)
+        assertTrue(registry.sendPrompt(dev.ccpocket.protocol.SendPrompt(convoId, "hi", promptId = "p-local")))
+        val spawned = withTimeoutOrNull(10_000) { while (launched.isEmpty()) delay(20); launched.toList() }
+        assertEquals(PermissionMode.ACCEPT_EDITS, assertNotNull(spawned).single().mode)
     }
 
     @Test

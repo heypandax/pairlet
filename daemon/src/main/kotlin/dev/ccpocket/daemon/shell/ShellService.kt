@@ -6,6 +6,8 @@ import dev.ccpocket.daemon.approval.ApprovalCoordinator
 import dev.ccpocket.daemon.approval.ApprovalGrantStore
 import dev.ccpocket.daemon.approval.ApprovalOutcome
 import dev.ccpocket.daemon.approval.ApprovalSource
+import dev.ccpocket.daemon.util.ChildOutput
+import dev.ccpocket.daemon.util.ProcessTree
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AuthorizedActionRecorded
 import dev.ccpocket.protocol.Decision
@@ -18,9 +20,7 @@ import dev.ccpocket.protocol.ShellResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
@@ -84,7 +84,8 @@ class ShellService(
                     coordinator.recordAuto(ApprovalSource.SHELL, cmd.convoId, "Bash", meta.rule, "bypass-permissions")
                     true
                 }
-                allowRules[cmd.convoId]?.contains(meta.rule) == true -> {
+                // same gate as the agent's Bash: a chained/redirected line never rides a session rule (audit M3)
+                meta.sessionRuleMatchable && allowRules[cmd.convoId]?.contains(meta.rule) == true -> {
                     coordinator.recordAuto(ApprovalSource.SHELL, cmd.convoId, "Bash", meta.rule, "remembered-rule")
                     emit(autorunChip(cmd.convoId, taskId, meta.rule, "session-rule", grantId = null))
                     true
@@ -189,35 +190,23 @@ class ShellService(
                 .redirectErrorStream(false)
                 .start()
             proc.outputStream.close() // no stdin for a one-off command
-            val out = async { drainCapped(proc.inputStream.bufferedReader()) }
-            val err = async { drainCapped(proc.errorStream.bufferedReader()) }
+            // Readers NOT tied to this scope (see ChildOutput): `npm run dev &` exits the shell at once while
+            // the job keeps our pipe open, and a structured `async` reader would hold this call — and the
+            // session's one-command slot — until that job died.
+            val out = ChildOutput(proc.inputStream, MAX_OUT)
+            val err = ChildOutput(proc.errorStream, MAX_OUT)
             val finished = proc.waitFor(cmd.timeoutMs.coerceIn(1_000, MAX_TIMEOUT_MS), TimeUnit.MILLISECONDS)
-            if (!finished) proc.destroyForcibly()
-            // bound the read: a grandchild that inherited the pipe can keep it open after the child is killed, so
+            // the whole tree, politely first: `make` / `npm test` children otherwise outlive the shell
+            if (!finished) ProcessTree.terminate(proc)
+            // bound the read: a grandchild that inherited the pipe can keep it open after the child is gone, so
             // never block forever waiting for EOF — emit what we have.
-            val stdout = withTimeoutOrNull(READ_DRAIN_MS) { out.await() } ?: ""
-            val stderr = withTimeoutOrNull(READ_DRAIN_MS) { err.await() } ?: ""
+            val (stdout, stderr) = ChildOutput.both(out, err, READ_DRAIN_MS)
             if (!finished) ShellResult(cmd.convoId, cmd.command, exitCode = -1, stdout = stdout, stderr = stderr, timedOut = true)
             else ShellResult(cmd.convoId, cmd.command, exitCode = proc.exitValue(), stdout = stdout, stderr = stderr)
         } catch (e: Exception) {
             log.warn("shell command failed: ${cmd.command}", e)
             ShellResult(cmd.convoId, cmd.command, exitCode = -1, error = e.message ?: "failed to run command")
         }
-    }
-
-    /** Read a stream keeping at most [MAX_OUT] chars but draining the rest, so a chatty command neither blows the
-     *  relay frame / daemon heap nor blocks on a full pipe. */
-    private fun drainCapped(reader: java.io.Reader): String = reader.use { r ->
-        val sb = StringBuilder()
-        val buf = CharArray(4096)
-        var total = 0
-        while (true) {
-            val n = r.read(buf)
-            if (n < 0) break
-            if (total < MAX_OUT) sb.append(buf, 0, minOf(n, MAX_OUT - total))
-            total += n
-        }
-        sb.toString()
     }
 
     private companion object {

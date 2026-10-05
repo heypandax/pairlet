@@ -47,3 +47,24 @@ object DesktopNotify {
 
     internal fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"").take(180)
 }
+
+/**
+ * What an approval banner carries back on click (audit H1): the machine and conversation that asked — ids only,
+ * like the push contract. The click seam hands back one opaque string (a turn-finished banner's sessionId), so an
+ * approval target is marked by a prefix no session id carries. Resolved at CLICK time against the live attention
+ * list: by then the account-wide list has usually named the asking session, which the arrival often could not.
+ */
+internal object ApprovalNotifyTarget {
+    private const val PREFIX = "approval\u001F"
+    private const val SEP = '\u001F'
+
+    fun encode(accountId: String, convoId: String): String = "$PREFIX$accountId$SEP$convoId"
+
+    /** (accountId, convoId), or null when [target] is not an approval banner's. */
+    fun decode(target: String?): Pair<String, String>? {
+        val body = target?.removePrefix(PREFIX)?.takeIf { it != target } ?: return null
+        val i = body.indexOf(SEP)
+        if (i <= 0 || i == body.lastIndex) return null
+        return body.substring(0, i) to body.substring(i + 1)
+    }
+}

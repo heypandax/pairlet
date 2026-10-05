@@ -152,6 +152,11 @@ class SchedulerService(
         return fired
     }
 
+    /** A fire is due within [lookaheadMs], or due and not yet run (firing now / next tick). Read by the
+     *  auto-update idle gate, so a restart does not land on a fire. A fire too late to run is not work. */
+    fun hasImminentWork(now: Long = clock(), lookaheadMs: Long = IMMINENT_MS): Boolean =
+        store.all().any { e -> e.nextRunAtMs?.let { due -> due - now <= lookaheadMs && now - due <= missedGraceMs } == true }
+
     /** The entry's next future fire strictly after [now] (anchored to its planned cadence, so a late
      *  tick doesn't drift the schedule), or null for a one-shot (it just settled). */
     private fun nextOccurrence(entry: ScheduleEntry, now: Long): Long? {
@@ -195,6 +200,8 @@ class SchedulerService(
 
     companion object {
         const val TICK_MS = 15_000L
+        /** [hasImminentWork]'s lookahead: two ticks — covers a restart without pinning on a short repeat. */
+        const val IMMINENT_MS = 2 * TICK_MS
         /** How late a fire may still run. Past this it's marked missed / skipped forward instead. */
         const val MISSED_GRACE_MS = 10 * 60 * 1000L
         const val MAX_SCHEDULES = 50

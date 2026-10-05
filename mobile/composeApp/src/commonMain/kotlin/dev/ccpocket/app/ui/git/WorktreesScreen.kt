@@ -106,6 +106,7 @@ fun WorktreesScreen(repo: PocketRepository, onOpenSessionHere: (String) -> Unit,
     }
 
     LaunchedEffect(repo.convoId.value) { repo.fetchWorktrees() }
+    LaunchedEffect(Unit) { repo.useFeature(dev.ccpocket.app.telemetry.ProductFeature.WORKTREE) }
 
     Box(Modifier.fillMaxSize().background(Tok.base)) {
         Column(Modifier.fillMaxSize()) {
@@ -267,8 +268,8 @@ private fun NewWorktreeRow(onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {
-            Text("＋", color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 15.sp)
-            Text(stringResource(Res.string.wt_new), color = Tok.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text("＋", color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 15.sp, style = tightCenter(15.sp))
+            Text(stringResource(Res.string.wt_new), color = Tok.accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(15.sp), modifier = Modifier.weight(1f))
             Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.accent.copy(alpha = 0.6f), modifier = Modifier.size(15.dp))
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -293,7 +294,7 @@ private fun WorktreeCreatedSheet(note: WorktreeCreated, onOpen: (String) -> Unit
                 Modifier.size(44.dp).clip(CircleShape).background(Tok.ok.copy(alpha = 0.10f))
                     .border(1.4.dp, Tok.ok.copy(alpha = 0.45f), CircleShape),
                 contentAlignment = Alignment.Center,
-            ) { Text("✓", color = Tok.ok, fontSize = 19.sp) }
+            ) { Text("✓", color = Tok.ok, fontSize = 19.sp, style = tightCenter(19.sp)) }
             Text(
                 stringResource(Res.string.wt_created_title), color = Tok.tx, fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp),
@@ -338,7 +339,7 @@ private fun WorktreePendingRow(creating: Boolean) {
         CircularProgressIndicator(Modifier.size(13.dp), color = Tok.accent, strokeWidth = 1.6.dp)
         Text(
             stringResource(if (creating) Res.string.wt_creating else Res.string.wt_removing),
-            color = Tok.tx2, fontSize = 12.5.sp,
+            color = Tok.tx2, fontSize = 12.5.sp, style = tightCenter(12.5.sp),
         )
     }
 }
@@ -361,19 +362,19 @@ private fun WorktreeCard(w: WorktreeEntry, onMenu: () -> Unit) {
             Text(
                 w.branch ?: w.head?.take(8) ?: "?",
                 color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, fontWeight = FontWeight.Medium,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(13.5.sp), modifier = Modifier.weight(1f),
             )
             if (w.isMain) Text(
                 stringResource(Res.string.wt_main_badge).uppercase(),
                 color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp, fontWeight = FontWeight.Medium,
-                letterSpacing = 0.9.sp,
+                letterSpacing = 0.9.sp, style = tightCenter(9.5.sp),
                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Tok.tx.copy(alpha = 0.08f))
                     .padding(horizontal = 6.dp, vertical = 4.dp),
             )
             Box(
                 Modifier.size(38.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onMenu),
                 contentAlignment = Alignment.Center,
-            ) { Text("⋯", color = Tok.tx2, fontSize = 19.sp, fontWeight = FontWeight.Medium) }
+            ) { Text("⋯", color = Tok.tx2, fontSize = 19.sp, fontWeight = FontWeight.Medium, style = tightCenter(19.sp)) }
         }
         GitPathText(w.path, max = 42, color = Tok.muted, fontSize = 11.5.sp, modifier = Modifier.padding(end = 6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -397,7 +398,7 @@ private fun StatusPill(label: String, hue: Color) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(Modifier.size(6.dp).clip(CircleShape).background(hue))
-        Text(label, color = hue, fontSize = 11.5.sp, maxLines = 1)
+        Text(label, color = hue, fontSize = 11.5.sp, maxLines = 1, style = tightCenter(11.5.sp))
     }
 }
 
@@ -485,6 +486,7 @@ fun NewWorktreeSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                     Text(
                         label, color = if (on) Tok.tx else Tok.tx2, fontSize = 13.5.sp,
                         fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                        style = tightCenter(13.5.sp),
                     )
                 }
             }
@@ -595,7 +597,7 @@ private fun BranchPickRow(b: GitBranchInfo, selected: Boolean, onPick: () -> Uni
             horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {
             Box(Modifier.size(15.dp), contentAlignment = Alignment.Center) {
-                if (selected && !inUse) Text("✓", color = Tok.accent, fontSize = 13.sp)
+                if (selected && !inUse) Text("✓", color = Tok.accent, fontSize = 13.sp, style = tightCenter(13.sp))
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(

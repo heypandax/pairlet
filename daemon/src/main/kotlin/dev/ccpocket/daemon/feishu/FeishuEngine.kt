@@ -70,6 +70,76 @@ internal suspend fun revokeAfterHandlerDrain(
     }
 }
 
+// Reply-slot bookkeeping for one ask() (audit F3). A conversation has ONE slot, but a request that outlived
+// ask()'s wait leaves its slot armed for the late result while the chat lock is already free — so the next
+// request on the same conversation installs over it. When that next request never reaches the agent (the
+// long turn still holds the conversation busy), the earlier slot is handed back instead of being dropped.
+// Callers hold the engine mutex.
+
+/** Install [mine] as [convoId]'s reply slot. Returns the slot it displaced when that one still owes a reply. */
+internal fun installReplySlot(
+    slots: MutableMap<String, FeishuEngine.ReplySlot>,
+    convoId: String,
+    mine: FeishuEngine.ReplySlot,
+): FeishuEngine.ReplySlot? = slots.put(convoId, mine)?.takeIf { !it.done }
+
+/** [mine]'s request never reached the agent: give the slot back to the request it displaced, if any. */
+internal fun restoreDisplacedReplySlot(
+    slots: MutableMap<String, FeishuEngine.ReplySlot>,
+    convoId: String,
+    mine: FeishuEngine.ReplySlot,
+    displaced: FeishuEngine.ReplySlot?,
+) {
+    if (slots[convoId] === mine && displaced != null && !displaced.done) slots[convoId] = displaced
+}
+
+/** ask()'s exit for [mine]: keep it while its sent request still owes a late reply, otherwise drop it — or,
+ *  when its request was never sent, restore the displaced one. Never touches a slot that isn't [mine]. */
+internal fun releaseReplySlot(
+    slots: MutableMap<String, FeishuEngine.ReplySlot>,
+    convoId: String,
+    mine: FeishuEngine.ReplySlot,
+    preserveLateReply: Boolean,
+    displaced: FeishuEngine.ReplySlot?,
+) {
+    if (slots[convoId] !== mine) return
+    when {
+        preserveLateReply && !mine.done -> {}
+        !preserveLateReply -> {
+            restoreDisplacedReplySlot(slots, convoId, mine, displaced)
+            if (slots[convoId] === mine) slots.remove(convoId)
+        }
+        else -> slots.remove(convoId)
+    }
+}
+
+/**
+ * The Feishu event long-connection as the engine drives it — a seam so a test can stand in a link whose
+ * [start] never returns, which is exactly what the SDK does while Feishu is unreachable.
+ */
+internal interface FeishuEventLink {
+    /** Connect. Returns once the first connection is up; throws on a credential/config rejection. On any
+     *  other failure (network, proxy, Feishu busy) the SDK retries IN THIS CALL, forever (oapi-sdk 2.4.19:
+     *  `ws.Client.start()` → `reconnect()` with reconnectCount=-1, ~0-30s jitter then every 120s). */
+    fun start()
+
+    /** Best-effort: drop the connection and switch off the SDK's own reconnect. */
+    fun putDown()
+}
+
+/** The production link: the official SDK client. stop()'s reflection lives here — the SDK exposes no
+ *  public stop, only protected disconnect() and an autoReconnect flag; the version is PINNED in the catalog. */
+internal fun sdkEventLink(appId: String, appSecret: String, dispatcher: EventDispatcher): FeishuEventLink {
+    val c = com.lark.oapi.ws.Client.Builder(appId, appSecret).eventHandler(dispatcher).build()
+    return object : FeishuEventLink {
+        override fun start() = c.start()
+        override fun putDown() {
+            c.javaClass.getDeclaredField("autoReconnect").apply { isAccessible = true }.set(c, false)
+            c.javaClass.getDeclaredMethod("disconnect").apply { isAccessible = true }.invoke(c)
+        }
+    }
+}
+
 /**
  * The BUILT-IN Feishu bridge (issue #91 follow-up): the daemon itself holds the Feishu event
  * long-connection and drives sessions in-process — no python, no pip, no script path. The owner fills
@@ -86,7 +156,7 @@ internal suspend fun revokeAfterHandlerDrain(
  * One engine per managed built-in bridge, owned by BridgeRunners (start/stop/restart/state map 1:1 onto
  * the same runner surface the desktop and phone already render).
  */
-class FeishuEngine(
+class FeishuEngine internal constructor(
     private val name: String,
     private val spec: BridgeSpec,
     env: Map<String, String>,
@@ -94,6 +164,9 @@ class FeishuEngine(
     stateDir: File,
     /** log lines flow here — the runner's ring buffer, i.e. the bridge card's "adapter log". */
     private val logLine: (String) -> Unit,
+    private val eventLinkFactory: (String, String, EventDispatcher) -> FeishuEventLink = ::sdkEventLink,
+    /** How long [start] waits for the first connection before handing it to the background (see there). */
+    private val connectWaitMs: Long = CONNECT_WAIT_MS,
 ) : InProcessBridgeEngine {
     private val log = logger("FeishuEngine")
     private val appId = env["FEISHU_APP_ID"].orEmpty()
@@ -152,7 +225,10 @@ class FeishuEngine(
 
     private val handlerJob = SupervisorJob()
     private val scope = CoroutineScope(handlerJob + Dispatchers.IO)
-    private var ws: com.lark.oapi.ws.Client? = null
+    // the current event link; written under [linkLock] so a late first-connect can tell whether it is still
+    // the engine's link or one that stop()/restart already abandoned
+    private var ws: FeishuEventLink? = null
+    private val linkLock = Any()
     // One bounded SDK HTTP client for this engine's whole lifetime. A managed stop/start retains it; bridge
     // removal/reconfigure calls revokeAndShutdown(), which drains handlers and closes its connection pool.
     private var api: FeishuApiClient? = null
@@ -188,7 +264,7 @@ class FeishuEngine(
      *  归属门放行一切（等价旧行为）；非 null 时，只有拿到该 prompt 消费凭证之后的终态帧才允许结算它。
      *  [atUser]（#284）：群聊里这一轮的发起人 open_id，只在**完成回报**那一帖被拼成 @ 前缀；单聊为 null。
      *  存在槽位里而不是现算，是因为回报可能由分钟级之后的 late TurnDone 发出，那时 ask() 的栈早没了。 */
-    private data class ReplySlot(
+    internal data class ReplySlot(
         val target: FeishuReplyTarget,
         var done: Boolean = false,
         val promptId: String? = null,
@@ -258,9 +334,12 @@ class FeishuEngine(
     // /untrust and /bind must land immediately while it is thinking, then defeat the final claim. This closes
     // the revoke/rebind window between ReviewedPreflight's async revalidation and arming a broad turn grant.
     private val policyGate = FeishuPolicyGate()
-    // the bot's own open_id (fetched at start) — the mention filter's ground truth. Null until fetched;
-    // fallback then is "any mention", the pre-fix behaviour, so a slow fetch degrades soft.
+    // the bot's own open_id (fetched once the link is up, retried with backoff until it lands) — the mention
+    // filter's ground truth. Until it is known a group @ can't be attributed, so it waits for it (bounded)
+    // instead of answering ANY mention (audit F7: "@colleague 看下" used to run in a TRUSTED group).
     @Volatile private var botOpenId: String? = null
+    private val botIdentity = CompletableDeferred<String>()
+    @Volatile private var botIdentityJob: Job? = null
     // Feishu delivers events AT-LEAST-ONCE; this bounded LRU of message ids drops a redelivered duplicate so
     // one message never fires the same prompt twice. Guarded by its own monitor — onMessage runs on the lark
     // SDK's dispatcher threads (not a coroutine), so the engine's suspend mutex can't cover it.
@@ -330,18 +409,37 @@ class FeishuEngine(
                     override fun handle(event: P2CardActionTrigger): P2CardActionTriggerResponse = onCardAction(event)
                 })
                 .build()
-            // start() is non-blocking; the SDK reconnects on its own. Building a fresh client per start is
-            // how restart works — see stop() for how the old one is put down.
-            ws = com.lark.oapi.ws.Client.Builder(appId, appSecret).eventHandler(dispatcher).build()
-            ws!!.start()
-            running = true
-            lastError = null
-            // A managed-runner restart deliberately preserves live conversations for continuity. Re-arm their
-            // idle release jobs so stop/start cannot turn a previously settled chat into a permanent slot leak.
-            ownedConvoIds().forEach(::scheduleRelease)
-            fetchBotIdentity()
-            logLine("[engine] built-in feishu bridge \"$name\" connected (projects: ${spec.workdirs.joinToString { FeishuRoutes.projectName(it) }})")
-            log.info("feishu engine \"$name\" started")
+            // Building a fresh client per start is how restart works — see stop() for how the old one is put
+            // down. The SDK's start() is NOT bounded (audit F1): on any non-credential failure it retries on
+            // the calling thread, forever. So it runs on its own thread and we wait a bounded time for the
+            // first outcome: a healthy connect or a credential rejection still answers this call exactly as
+            // before; anything slower is left to the SDK's retry in the background, never to our caller
+            // (the daemon's startup, the owner's start button, the runner's lifecycle lock).
+            val link = eventLinkFactory(appId, appSecret, dispatcher)
+            synchronized(linkLock) { ws = link }
+            val first = java.util.concurrent.CompletableFuture<Any>()
+            kotlin.concurrent.thread(isDaemon = true, name = "feishu-connect-$name") {
+                val outcome: Any = runCatching { link.start() }.exceptionOrNull() ?: LINK_UP
+                if (!first.complete(outcome)) onLateLinkOutcome(link, outcome as? Throwable)
+            }
+            runCatching { first.get(connectWaitMs, java.util.concurrent.TimeUnit.MILLISECONDS) }
+            val stillConnecting = synchronized(linkLock) {
+                // under linkLock so a late outcome (which checks `running`) cannot slip in between
+                first.complete(STILL_CONNECTING).also { if (it) beginServing() }
+            }
+            if (stillConnecting) {
+                lastError = "飞书长连接暂未建立，正在后台自动重试（网络、代理或飞书服务暂时不可用）"
+                logLine("[engine] feishu not reachable yet — the SDK keeps retrying in the background (about every 2 min)")
+                log.warn("feishu engine \"$name\": first connect still pending after ${connectWaitMs}ms; retrying in the background")
+                return@runCatching null
+            }
+            when (val outcome = first.join()) {
+                is Throwable -> throw outcome
+                else -> {
+                    beginServing()
+                    onLinkUp()
+                }
+            }
             null
         }.getOrElse { e ->
             lastError = "couldn't start: ${e.message}"
@@ -350,20 +448,59 @@ class FeishuEngine(
         }
     }
 
+    /** The engine is serving from here on: running, and live conversations' idle release re-armed. Feishu
+     *  may still be reconnecting underneath — the same state as the SDK's own runtime reconnect. */
+    private fun beginServing() {
+        running = true
+        // A managed-runner restart deliberately preserves live conversations for continuity. Re-arm their
+        // idle release jobs so stop/start cannot turn a previously settled chat into a permanent slot leak.
+        ownedConvoIds().forEach(::scheduleRelease)
+    }
+
+    /** The first Feishu connection is up (inline in [start], or later from the background attempt). */
+    private fun onLinkUp() {
+        lastError = null
+        fetchBotIdentity()
+        logLine("[engine] built-in feishu bridge \"$name\" connected (projects: ${spec.workdirs.joinToString { FeishuRoutes.projectName(it) }})")
+        log.info("feishu engine \"$name\" started")
+    }
+
+    /** The first-connect attempt settled after [start] stopped waiting for it. */
+    private fun onLateLinkOutcome(link: FeishuEventLink, error: Throwable?) {
+        val current = synchronized(linkLock) { ws === link && running }
+        if (!current) {
+            // stopped or restarted while the SDK was still retrying: nobody owns this connection any more,
+            // and a stray one would take a share of the app's events into an engine that drops them
+            runCatching { link.putDown() }
+                .onFailure { log.warn("feishu ws disconnect of an abandoned link failed (${it.message})") }
+            return
+        }
+        if (error == null) {
+            onLinkUp()
+            return
+        }
+        // the network came back and Feishu then rejected the app — the same outcome start() reports inline
+        logLine("[engine] start failed: ${error.message}")
+        stop()
+        lastError = "couldn't start: ${error.message}"
+    }
+
     override fun stop() {
-        running = false
+        val link = synchronized(linkLock) {
+            running = false
+            ws.also { ws = null }
+        }
         releaseJobs.values.forEach { it.cancel() }
         releaseJobs.clear()
         // The SDK's ws.Client exposes no public stop — only protected disconnect() and an autoReconnect
         // flag. Reflection is regrettable but contained: the version is PINNED in the catalog, and the
-        // failure mode of a drifted SDK is an orphaned (but harmless) reconnect loop we log about.
-        ws?.let { c ->
+        // failure mode of a drifted SDK is an orphaned (but harmless) reconnect loop we log about. A link
+        // still inside its first-connect retry is put down again once it connects (onLateLinkOutcome).
+        link?.let { c ->
             runCatching {
-                c.javaClass.getDeclaredField("autoReconnect").apply { isAccessible = true }.set(c, false)
-                c.javaClass.getDeclaredMethod("disconnect").apply { isAccessible = true }.invoke(c)
+                c.putDown()
             }.onFailure { log.warn("feishu ws disconnect via reflection failed (${it.message}) — the SDK may keep a reconnect loop") }
         }
-        ws = null
         api?.snapshot()?.takeIf { it.calls > 0 }?.let { s ->
             logLine(
                 "[http] calls=${s.calls} failed=${s.failures} timed-out=${s.timeouts} " +
@@ -407,16 +544,44 @@ class FeishuEngine(
      * The bot's own open_id, from GET /bot/v3/info — what makes the mention filter PRECISE: without it,
      * "@some colleague check this" in a chat the bot sits in would count as addressing the bot (any-mention
      * was the reference adapter's behaviour, and it misfires whenever the app receives all group messages).
-     * Best-effort async: until (or unless) it lands, the filter falls back to any-mention and says so once.
+     * Async, and retried with a capped backoff while the engine runs (audit F7): until it lands, group
+     * mentions wait for it ([deferUntilBotIdentity]) rather than being attributed to the bot by guesswork.
+     * Fetched once per engine — the bot's open_id is fixed for an app, and a restart keeps the same app.
      */
     private fun fetchBotIdentity() {
+        synchronized(linkLock) {
+            if (botOpenId != null || botIdentityJob?.isActive == true) return
+            botIdentityJob = scope.launch {
+                var attempt = 0
+                while (running && botOpenId == null) {
+                    runCatching {
+                        api?.botOpenId() ?: error("Feishu API client unavailable")
+                    }.onSuccess { openId ->
+                        botOpenId = openId
+                        botIdentity.complete(openId)
+                        log.info("feishu bot identity: ${openId.take(12)}…")
+                    }.onFailure {
+                        val wait = FeishuMention.botIdentityRetryDelayMs(attempt++)
+                        logLine(
+                            "[engine] couldn't fetch the bot's own open_id (${it.message}) — group @mentions are held " +
+                                "until it is known; retrying in ${wait / 1_000}s",
+                        )
+                        delay(wait)
+                    }
+                }
+            }
+        }
+    }
+
+    /** A group message with mentions arrived before the bot knows its own open_id: re-run it through
+     *  [onMessage] once the identity lands, or drop it (with a log line) after [BOT_IDENTITY_WAIT_MS]. A held
+     *  message has not been marked seen yet, so a Feishu redelivery is still deduplicated on the re-run. */
+    private fun deferUntilBotIdentity(event: P2MessageReceiveV1, chatId: String?) {
         scope.launch {
-            runCatching {
-                val openId = api?.botOpenId() ?: error("Feishu API client unavailable")
-                botOpenId = openId
-                log.info("feishu bot identity: ${openId.take(12)}…")
-            }.onFailure {
-                logLine("[engine] couldn't fetch the bot's own open_id (${it.message}) — falling back to answering ANY @mention")
+            if (withTimeoutOrNull(BOT_IDENTITY_WAIT_MS) { botIdentity.await() } != null) {
+                onMessage(event)
+            } else {
+                logLine("[drop] $chatId: 还没取到机器人自己的 open_id，无法确认这条是否 @ 了机器人，已忽略")
             }
         }
     }
@@ -509,11 +674,16 @@ class FeishuEngine(
         // every chat the app subscribes to.
         val mentions = msg.mentions?.toList().orEmpty()
         if (isGroup) {
-            if (mentions.isEmpty()) return
-            // precise when we know who we are: the BOT must be among the mentioned, or the message isn't for
-            // us — "@colleague look at this" in our chat must stay none of our business
-            val self = botOpenId
-            if (self != null && mentions.none { it.id?.openId == self }) return
+            // the BOT must be among the mentioned, or the message isn't for us — "@colleague look at this" in
+            // our chat must stay none of our business
+            when (FeishuMention.groupGate(mentions.map { it.id?.openId }, botOpenId)) {
+                FeishuMention.GroupGate.ACCEPT -> {}
+                FeishuMention.GroupGate.DROP -> return
+                FeishuMention.GroupGate.AWAIT_IDENTITY -> {
+                    deferUntilBotIdentity(event, msg.chatId)
+                    return
+                }
+            }
         }
         val chatId = msg.chatId ?: return
         // requirement 2: when this message REPLIES to an earlier one, parentId is the quoted message and
@@ -1179,6 +1349,8 @@ class FeishuEngine(
         var awaitingTerminalFrame = false
         var waiterInstalled = false
         var preserveLateReply = false
+        var mySlot: ReplySlot? = null
+        var displacedSlot: ReplySlot? = null
         try {
             // issue #285：为这条请求铸一个 promptId。它随 SendPrompt 进入会话的 prompt 账本，回复槽记住它，
             // 归属门（onFrame 的 TurnDone 分支）凭消费凭证把「遗留轮次的终态帧」和「这条请求的结果」分开。
@@ -1253,9 +1425,11 @@ class FeishuEngine(
             val done = CompletableDeferred<TurnDone>()
             // #284: 只有群聊才需要 @ 定向（单聊本来就只发给他一个人），且 open_id 必须真的有值。
             val atUser = senderOpenId.takeIf { isGroup && it.isNotBlank() }
+            val slot = ReplySlot(replyTo, promptId = promptId, atUser = atUser)
+            mySlot = slot
             mutex.withLock {
                 turnWaiters[convoId] = done
-                replySlots[convoId] = ReplySlot(replyTo, promptId = promptId, atUser = atUser)
+                displacedSlot = installReplySlot(replySlots, convoId, slot)
             }
             // issue #285 的另一半窗口：遗留结算轮的终态帧若赶在槽位安装**之前**到达，上面的归属门看不到它
             // （expected==null 走了正常回收路径），释放任务已被武装——1 秒轮询的 closeIfIdle 会在我们的
@@ -1311,6 +1485,10 @@ class FeishuEngine(
                 // the grant was minted but the hand-off lost a race (the conversation went busy) — the request
                 // is NOT running, and its permit/grant was consumed, so the requester must send it again.
                 // A reviewed pass is single-shot by the same rule: it may not be retried onto a later prompt.
+                // Audit F3: the turn keeping it busy may be an EARLIER request whose ask() gave up waiting
+                // (NUDGE_MS + TURN_TIMEOUT_MS) and left its slot armed for the late result — hand that slot
+                // back before anything else, or its result never reaches the chat.
+                mutex.withLock { restoreDisplacedReplySlot(replySlots, convoId, slot, displacedSlot) }
                 reply(
                     replyTo,
                     when {
@@ -1343,7 +1521,7 @@ class FeishuEngine(
                     turnWaiters.remove(convoId)
                     // Once sent, preserve the slot for a late terminal frame unless it already posted. Before
                     // send, no late reply can arrive and the slot is discarded with the idle conversation.
-                    if (!preserveLateReply || replySlots[convoId]?.done == true) replySlots.remove(convoId)
+                    mySlot?.let { releaseReplySlot(replySlots, convoId, it, preserveLateReply, displacedSlot) }
                 }
             }
             if (!awaitingTerminalFrame) scheduleRelease(convoId)
@@ -1564,6 +1742,15 @@ class FeishuEngine(
         const val NUDGE_MS = 25_000L        // no reply yet after this + an approval pending → nudge the group
         const val TURN_TIMEOUT_MS = 300_000L
         const val OPEN_TIMEOUT_MS = 30_000L
+        // start()'s bounded wait for the FIRST Feishu connection. Long enough for a healthy connect and for a
+        // credential rejection to come back synchronously as before; a blackholed host (the SDK's OkHttp
+        // connect timeout is 10s) falls past it into the background retry instead of holding the caller.
+        const val CONNECT_WAIT_MS = 10_000L
+        // how long a group mention may wait for the bot's own open_id (see deferUntilBotIdentity): spans the
+        // first few retries of a failed fetch, short enough that a held message isn't answered absurdly late
+        const val BOT_IDENTITY_WAIT_MS = 30_000L
+        val LINK_UP = Any()          // first-connect outcome markers (see start)
+        val STILL_CONNECTING = Any()
         const val CHAT_NAME_WAIT_MS = 1_500L // bounded wait for a first group-name fetch (see chatNameOrNull)
         const val RELEASE_RETRY_MS = 1_000L
         const val MAX_REPLY_CHARS = 20_000 // feishu text-message ceiling with headroom

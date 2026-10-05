@@ -48,6 +48,16 @@ import kotlin.random.Random
 import io.ktor.websocket.Frame as WsFrame
 
 /**
+ * Start the autostart-marked managed adapters without holding up the relay loop (audit F1). An adapter's
+ * start() is blocking code — the Feishu SDK's one can sit in its reconnect loop until Feishu is reachable —
+ * and [RelayClient.run] lives on Main's single `runBlocking` thread, so a plain sibling `launch` would still
+ * freeze connectOnce(). Off that thread, a stuck adapter delays only itself.
+ */
+internal fun kotlinx.coroutines.CoroutineScope.launchBridgeAutostart(
+    runners: dev.ccpocket.daemon.bridge.BridgeRunners,
+): kotlinx.coroutines.Job = launch(kotlinx.coroutines.Dispatchers.IO) { runners.startAutostarted() }
+
+/**
  * The daemon's outbound connection to the cloud relay. Authenticates by signing the relay's challenge
  * with its Ed25519 static key, then runs end-to-end-encrypted [DeviceSessions] over the opaque BINARY
  * data plane (the relay only routes ciphertext) and a small TEXT control plane for pairing.
@@ -144,8 +154,10 @@ class RelayClient(
     }
 
     /**
-     * Build and install the #367 execution planes (issue #367 G1). Called from the relay attach path, so a
-     * LAN-only `serve` leaves every one of them null and the transport fails closed.
+     * Build and install the #367 execution planes (issue #367 G1). Registered from the relay attach path
+     * as the core's execution installer ([DaemonCore.offerExecution]) and run at most once per process —
+     * at attach when the machine has used execution, otherwise on first use. A LAN-only `serve` never
+     * registers it, so every plane stays null and the transport fails closed.
      *
      * Three wiring details that are load-bearing rather than incidental:
      *
@@ -277,9 +289,13 @@ class RelayClient(
         // minting a request addressed to a contact nobody has verified.
         core.reviews.collaborators = collaboratorService
         // #367: the execution planes, on exactly the same relay-only footing as the three planes above —
-        // approving a grant mints a connect ticket, and the source half dials the relay. installExecution
-        // is idempotent, so a reconnect re-points the store/target without stacking a second RunService.
-        installExecutionPlanes()
+        // approving a grant mints a connect ticket, and the source half dials the relay. They load HERE
+        // only on a machine with evidence of use (grants, an execution credential, a run journal, source
+        // links/runs — see ExecutionUsage); anywhere else they load on first use (local control API, or an
+        // execution frame on the transport), through the same installer, once per process.
+        core.offerExecution(::installExecutionPlanes) {
+            dev.ccpocket.daemon.execution.ExecutionUsage.defaults(core.executionRunRoot).reason(sessions.bridges)
+        }
         // §3.4: the content-free, device-TARGETED offer nudge for an offline contact. The whole payload is
         // built by PushPolicy from two opaque ids — nothing about the work rides the alert.
         //
@@ -306,22 +322,43 @@ class RelayClient(
         }
         // Managed adapters come up only once the relay link exists: an external adapter started earlier
         // would just burn its redeem attempts against a daemon that can't yet carry its handshake.
-        bridgeRunners.startAutostarted()
+        launchBridgeAutostart(bridgeRunners)
         launch { reaperLoop() } // reclaim sessions abandoned while the phone is offline
         launch { guestExpiryLoop() } // cut + purge folder shares the instant they expire (issue #115 §6)
-        var backoff = 1_000L
+        val reconnect = ReconnectBackoff()
         while (true) {
-            try {
+            linkAttachedAt = 0L
+            linkCloseReason = null
+            val clean = try {
                 connectOnce()
-                backoff = 1_000L
+                true
             } catch (t: Throwable) {
-                log.warn("relay connection lost (${t.message}); retry in ${backoff}ms")
+                log.warn("relay connection lost (${t.message})")
+                false
             }
+            val attachedFor = linkAttachedAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }
+            val end = ReconnectBackoff.LinkEnd(clean, attachedFor, linkCloseReason)
+            if (end.superseded) {
+                log.warn("relay SUPERSEDED this daemon: another daemon attached with the same account " +
+                    "(account=${identity.accountId}). Two daemons are fighting over one account — stop the extra " +
+                    "one; this daemon waits ${ReconnectBackoff.SUPERSEDED_MS / 1000}s before reconnecting.")
+                dev.ccpocket.observability.Diagnostics.report(
+                    dev.ccpocket.observability.ErrorPath.RELAY, dev.ccpocket.observability.Stage.CONNECT,
+                    dev.ccpocket.observability.ErrorCode.SUPERSEDED, isError = true,
+                )
+            }
+            val backoff = reconnect.next(end)
             val jittered = backoff / 2 + Random.nextLong(backoff / 2 + 1) // equal jitter: 50–100% of backoff, decorrelates herd reconnects
+            log.info("relay reconnect in ${jittered}ms (backoff ${backoff}ms, link ${attachedFor?.let { "attached ${it / 1000}s" } ?: "never attached"})")
             delay(jittered)
-            backoff = (backoff * 2).coerceAtMost(30_000L)
         }
     }
+
+    /** When the current link reached Attached (0 = not yet) — how [run] tells a stable link from a flap. */
+    @Volatile private var linkAttachedAt = 0L
+
+    /** The relay's close-frame reason for the current link, when it ended with one (e.g. "superseded"). */
+    @Volatile private var linkCloseReason: String? = null
 
     /**
      * Reclaim conversations idle longer than [IDLE_REAP_MS] that no client OCCUPIES. Reaping stops the
@@ -337,8 +374,7 @@ class RelayClient(
      * pending-ask / handoff shields; everything else is released on the same 90s clock as before.
      */
     private suspend fun reaperLoop() {
-        while (true) {
-            delay(REAP_SCAN_MS)
+        residentLoop(REAP_SCAN_MS, onFailure = { log.error("idle reaper pass failed — next pass in ${REAP_SCAN_MS}ms", it) }) {
             val n = core.registry.reapIdle(IDLE_REAP_MS, relayPeerOnline = peerOnline)
             if (n > 0) log.info("reaped $n unoccupied idle session(s) — transcripts unhidden for desktop resume")
         }
@@ -349,8 +385,7 @@ class RelayClient(
      *  locally NOW (its handshake dies) and best-effort tells the relay to force-close its socket, so the
      *  guest is severed and its credential can't be reused. */
     private suspend fun guestExpiryLoop() {
-        while (true) {
-            delay(GUEST_EXPIRY_SCAN_MS)
+        residentLoop(GUEST_EXPIRY_SCAN_MS, onFailure = { log.error("guest expiry sweep failed — next sweep in ${GUEST_EXPIRY_SCAN_MS}ms", it) }) {
             for (id in sessions.bridges.expiredGuestIds()) {
                 log.info("folder share ${id.take(8)}… expired — revoking")
                 runCatching { revokeBridge(id, reason = dev.ccpocket.protocol.ShareEnded.REASON_EXPIRED) }
@@ -400,6 +435,7 @@ class RelayClient(
                 // authenticate() — not just the message loop. A throw from the setup below (attach replay,
                 // channel/coroutine wiring) would otherwise leave a dead link's protoV standing for the whole
                 // reconnect backoff, and offers created in that window would queue a targeted push.
+                linkAttachedAt = System.currentTimeMillis()
                 try {
                     log.info("attached to relay as daemon (account=${identity.accountId})")
                     // The relay re-announces every non-revoked device right after attach and then sends an
@@ -469,6 +505,9 @@ class RelayClient(
                             is WsFrame.Text -> onControl(runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull())
                             else -> {}
                         }
+                        // incoming ended without a throw: the relay closed the link — keep its reason (a
+                        // "superseded" close means another daemon took this account; see ReconnectBackoff)
+                        linkCloseReason = withTimeoutOrNull(1_000) { closeReason.await() }?.message
                     } finally {
                         dataOut = null
                         outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel()

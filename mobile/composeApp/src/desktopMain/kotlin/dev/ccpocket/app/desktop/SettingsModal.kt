@@ -150,7 +150,7 @@ fun SettingsModal(model: DesktopModel, initialTab: SettingsTab = SettingsTab.GEN
         Modifier.width(700.dp).height(500.dp).shadow(30.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp)).background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(16.dp)),
     ) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(Res.string.settings_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(stringResource(Res.string.settings_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.Bold, style = tightCenter(16.sp), modifier = Modifier.weight(1f))
             Icon(Icons.Rounded.Close, stringResource(Res.string.close), tint = Tok.tx2, modifier = Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onDismiss).padding(2.dp))
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -278,7 +278,7 @@ private fun HelpActionRow(icon: ImageVector, title: String, onClick: () -> Unit)
         Icon(icon, null, tint = Tok.accent, modifier = Modifier.size(16.dp))
         Text(
             title, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
+            fontWeight = FontWeight.Medium, style = tightCenter(12.5.sp), modifier = Modifier.weight(1f),
         )
         Icon(Icons.Rounded.ChevronRight, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
     }
@@ -297,7 +297,7 @@ private fun HelpButton(label: String, icon: ImageVector, primary: Boolean, onCli
         Icon(icon, null, tint = if (primary) Tok.base else Tok.tx2, modifier = Modifier.size(14.dp))
         Text(
             label, color = if (primary) Tok.base else Tok.tx2,
-            fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(12.sp),
         )
     }
 }
@@ -306,7 +306,7 @@ private fun HelpButton(label: String, icon: ImageVector, primary: Boolean, onCli
 private fun RailItem(tab: SettingsTab, selected: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().selectableRow(selected).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(tab.icon, null, tint = if (selected) Tok.accent else Tok.tx2, modifier = Modifier.size(16.dp))
-        Text(stringResource(tab.label), color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        Text(stringResource(tab.label), color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, style = tightCenter(13.sp))
     }
 }
 
@@ -405,10 +405,8 @@ private fun GeneralPane(model: DesktopModel) {
                 }
             }
         }
-        if (
-            defaultAgent == AgentKind.CODEX &&
-            model.serviceTierOptionsFor(defaultAgent, defaultModel).any { it.id == "priority" }
-        ) {
+        // the daemon's per-model service tiers alone decide (an older daemon sends none → hidden)
+        if (dev.ccpocket.app.data.advertisesFastTier(model.serviceTierOptionsFor(defaultAgent, defaultModel))) {
             Group(stringResource(Res.string.fast_mode), stringResource(Res.string.fast_mode_detail)) {
                 PrefRow(
                     stringResource(Res.string.value_off),
@@ -425,8 +423,7 @@ private fun GeneralPane(model: DesktopModel) {
         Group(stringResource(Res.string.settings_default_mode), stringResource(Res.string.settings_default_mode_sub)) {
             val modes = desktopModeChoices(
                 defaultAgent,
-                defaultAgent == AgentKind.CLAUDE &&
-                    model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO, defaultAgent),
             )
             modes.forEach { m ->
                 ModeRow(
@@ -532,7 +529,7 @@ private fun AppearanceRow(model: DesktopModel) {
             ) {
                 Text(
                     label, color = if (sel) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
-                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, style = tightCenter(12.5.sp),
                 )
             }
         }
@@ -563,7 +560,7 @@ private fun AccentRow(model: DesktopModel) {
             ) {
                 Text(
                     label, color = if (sel) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
-                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, style = tightCenter(12.5.sp),
                 )
             }
         }
@@ -593,7 +590,7 @@ private fun ChatAlignRow(model: DesktopModel) {
             ) {
                 Text(
                     label, color = if (sel) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
-                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, style = tightCenter(12.5.sp),
                 )
             }
         }
@@ -610,9 +607,9 @@ private fun ToggleRow(label: String, on: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Dot(if (on) Tok.ok else Tok.muted, 8.dp)
-        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp))
         Spacer(Modifier.weight(1f))
-        Text(stringResource(if (on) Res.string.toggle_on else Res.string.toggle_off), color = if (on) Tok.ok else Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+        Text(stringResource(if (on) Res.string.toggle_on else Res.string.toggle_off), color = if (on) Tok.ok else Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp))
     }
 }
 
@@ -632,10 +629,10 @@ private fun TerminalRow(t: TerminalApp, selected: Boolean, onClick: () -> Unit) 
             .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(">_", color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp)
-        Text(terminalAppLabel(t), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(">_", color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp))
+        Text(terminalAppLabel(t), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp))
         Spacer(Modifier.weight(1f))
-        Text(t.id, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+        Text(t.id, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp))
     }
 }
 
@@ -653,7 +650,7 @@ private fun AgentCardRow(agent: AgentKind, selected: Boolean, modifier: Modifier
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         AgentGlyph(agent, size = 18)
-        Text(agentName(agent), color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(agentName(agent), color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(14.sp))
     }
 }
 
@@ -668,9 +665,9 @@ private fun PrefRow(label: String, trailing: String, selected: Boolean, onClick:
             .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp))
         Spacer(Modifier.weight(1f))
-        Text(trailing, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+        Text(trailing, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp))
     }
 }
 
@@ -691,7 +688,7 @@ private fun ContextWindowRows(model: DesktopModel) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(stringResource(Res.string.context_window_custom), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(stringResource(Res.string.context_window_custom), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp))
         Spacer(Modifier.weight(1f))
         Box(
             Modifier.width(108.dp).clip(RoundedCornerShape(7.dp)).background(Tok.base)
@@ -720,10 +717,10 @@ private fun ModeRow(m: DkMode, selected: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Dot(m.dot, 8.dp)
-        Text(stringResource(m.label), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(stringResource(m.label), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp))
         if (m.danger) Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
         Spacer(Modifier.weight(1f))
-        Text(m.token, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+        Text(m.token, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp))
     }
 }
 
@@ -890,7 +887,7 @@ private fun AccountPane(model: DesktopModel) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) {
                             Text(
                                 url, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(10.5.sp), modifier = Modifier.weight(1f),
                             )
                             TextBtn(stringResource(Res.string.settings_login_open_here), Tok.accent) { runCatching { uriHandler.openUri(url) } }
                             TextBtn(stringResource(Res.string.path_copy), Tok.tx2) { clipboard.setText(AnnotatedString(url)) }
@@ -940,6 +937,7 @@ private fun AccountPane(model: DesktopModel) {
                             // managed provider is a credential but not an API key, so it gets a neutral one
                             stringResource(if (flavor == CredentialFlavor.EnvKey) Res.string.settings_api_key else Res.string.settings_credential),
                             color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                            style = tightCenter(13.sp),
                         )
                         Spacer(Modifier.weight(1f))
                         MonoPill(envVar?.let { "env · $it" } ?: stringResource(Res.string.settings_credential_managed), accent = false)
@@ -1000,7 +998,7 @@ private fun AccountPane(model: DesktopModel) {
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Rounded.Lock, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
-                        Text(stringResource(Res.string.settings_no_auth_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(Res.string.settings_no_auth_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.sp))
                         Spacer(Modifier.weight(1f))
                         MonoPill("unconfigured", accent = false)
                     }
@@ -1069,7 +1067,7 @@ private fun PresetAuthCard(p: PresetSummary, onDeactivate: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Icons.Rounded.Lock, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
-            Text(stringResource(Res.string.settings_api_key), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.settings_api_key), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(13.sp))
             Spacer(Modifier.weight(1f))
             MonoPill("preset · ${p.name}", accent = true)
         }
@@ -1154,7 +1152,7 @@ private fun PresetsSection(
         ) {
             Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
             Spacer(Modifier.width(7.dp))
-            Text(stringResource(Res.string.settings_preset_new), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(Res.string.settings_preset_new), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, style = tightCenter(12.5.sp))
         }
         if (ps.activeId != null) Text(
             stringResource(Res.string.settings_presets_active_note, computerName ?: stringResource(Res.string.this_computer)),
@@ -1205,16 +1203,16 @@ private fun PresetRow(
         Text(
             p.name, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp,
             fontWeight = if (active && !dimmedActive) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(13.sp),
         )
         Text(
             presetHost(p.baseUrl), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(11.sp), modifier = Modifier.weight(1f),
         )
         when {
             activating -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 CircularProgressIndicator(Modifier.size(11.dp), color = Tok.accent, strokeWidth = 1.5.dp)
-                Text(stringResource(Res.string.settings_preset_activating), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                Text(stringResource(Res.string.settings_preset_activating), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
             }
             active -> Text(
                 stringResource(Res.string.settings_preset_active), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp,
@@ -1307,7 +1305,7 @@ private fun PresetForm(
         if (urlError == null) HelperLine(PresetEnv.BASE_URL, stringResource(Res.string.settings_helper_baseurl))
 
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp)) {
-            Text("Auth token", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Text("Auth token", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium, style = tightCenter(12.sp))
             Spacer(Modifier.weight(1f))
             // which env var carries the secret — AUTH_TOKEN (forwarding proxies) vs API_KEY (direct keys)
             Row(
@@ -1342,10 +1340,10 @@ private fun PresetForm(
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(if (routingOpen) Icons.Rounded.ExpandMore else Icons.Rounded.ChevronRight, null, tint = Tok.muted, modifier = Modifier.size(14.dp))
-            Text(stringResource(Res.string.settings_model_routing), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
+            Text(stringResource(Res.string.settings_model_routing), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp))
             Text(
                 stringResource(if (routeModel.isBlank() && routeFast.isBlank()) Res.string.settings_optional else Res.string.settings_set),
-                color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp),
             )
         }
         if (routingOpen) {
@@ -1401,7 +1399,7 @@ private fun WorkingBlockersCard(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
-            Text(stringResource(Res.string.settings_blockers_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.settings_blockers_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(12.5.sp))
         }
         blockers.forEach { b ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
@@ -1603,7 +1601,7 @@ private fun ComputersPane(model: DesktopModel) {
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
-            Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium, style = tightCenter(13.sp))
         }
     }
     removing?.let { computer ->
@@ -1688,10 +1686,10 @@ private fun SchedulesPane(model: DesktopModel) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 s.label ?: s.prompt, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(13.sp),
                             )
                             if (s.repeat != null) {
-                                Text("  ·  " + stringResource(Res.string.schedule_repeats), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                                Text("  ·  " + stringResource(Res.string.schedule_repeats), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                             }
                         }
                         Text(
@@ -1864,7 +1862,7 @@ private fun ShortcutsPane() {
         Text(stringResource(Res.string.settings_shortcuts_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 14.dp))
         rows.forEachIndexed { i, row ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(row.first, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text(row.first, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), modifier = Modifier.weight(1f))
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { row.second.forEach { Key(it) } }
             }
             if (i < rows.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -1880,7 +1878,7 @@ private fun AboutPane(model: DesktopModel) {
                 Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center,
             ) { AgentGlyph(AgentKind.CLAUDE, size = 20) }
-            Text(stringResource(Res.string.brand_former_name), color = Tok.tx, fontFamily = Dk.ui, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(Res.string.brand_former_name), color = Tok.tx, fontFamily = Dk.ui, fontSize = 18.sp, fontWeight = FontWeight.Bold, style = tightCenter(18.sp))
         }
         Text(
             stringResource(Res.string.about_desktop_blurb),
@@ -1967,7 +1965,7 @@ private fun UpdatesSection(model: DesktopModel) {
                     // can't tell how this was installed (dev run / unusual layout) — hand off to the web
                     DkInstallSource.UNKNOWN -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextBtn(stringResource(Res.string.update_view_release), Tok.accent) { runCatching { uriHandler.openUri(model.updateReleasesUrl) } }
-                        Text(stringResource(Res.string.update_open_releases), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                        Text(stringResource(Res.string.update_open_releases), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, style = tightCenter(11.5.sp))
                     }
                 }
             }
@@ -1989,7 +1987,7 @@ private fun UpdatesSection(model: DesktopModel) {
 @Composable
 private fun UpdateActionRow(label: String, action: String, actionColor: Color, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), modifier = Modifier.weight(1f))
         TextBtn(action, actionColor, onClick = onAction)
     }
 }
@@ -1998,7 +1996,7 @@ private fun UpdateActionRow(label: String, action: String, actionColor: Color, o
 private fun UpdateBusy(label: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.5.dp)
-        Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp)
+        Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp))
     }
 }
 
@@ -2010,7 +2008,7 @@ private fun CommandBox(cmd: String, clipboard: androidx.compose.ui.platform.Clip
             .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(cmd, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(cmd, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(11.5.sp), modifier = Modifier.weight(1f))
         TextBtn(stringResource(Res.string.path_copy), Tok.accent) { clipboard.setText(AnnotatedString(cmd)) }
     }
 }
@@ -2018,7 +2016,7 @@ private fun CommandBox(cmd: String, clipboard: androidx.compose.ui.platform.Clip
 @Composable
 private fun InfoRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        Text(value, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), modifier = Modifier.weight(1f))
+        Text(value, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(12.sp))
     }
 }

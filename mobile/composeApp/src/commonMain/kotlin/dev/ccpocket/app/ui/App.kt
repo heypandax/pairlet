@@ -560,17 +560,19 @@ fun App(scope: CoroutineScope) {
                     } == true,
                     timedOutSignal = repo.askTimedOut(ask), // issue #100 (composite-matched, P1-3)
                 )
+                // every verdict names the ask THIS sheet was composed with: in a burst the next card appears
+                // in the same place, and a second tap must not approve a command nobody read (audit H1)
                 dev.ccpocket.app.ui.approval.SecureApprovalSheet(
                     approvalUi,
-                    onDeny = { repo.resolve(Decision.DENY) },
-                    onAllowOnce = { repo.resolve(Decision.ALLOW) },
-                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task") },
+                    onDeny = { repo.resolve(Decision.DENY, ask = ask) },
+                    onAllowOnce = { repo.resolve(Decision.ALLOW, ask = ask) },
+                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task", ask = ask) },
                     // legacy "Always allow" and the V2 session scope are the same effect: remember for old
                     // daemons, the M2 session grant for new ones
-                    onAllowSession = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
-                    onAlwaysAllow = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
-                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints) },
-                    onDismiss = { repo.dismissAsk() },
+                    onAllowSession = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session", ask = ask) },
+                    onAlwaysAllow = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session", ask = ask) },
+                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints, ask = ask) },
+                    onDismiss = { repo.dismissAsk(ask) },
                 )
             }
         }
@@ -722,6 +724,7 @@ private fun DemoConnectScreen(onDone: () -> Unit) {
                 stringResource(if (secured) Res.string.preview_encrypted else Res.string.preview_connecting),
                 color = if (secured) Tok.ok else Tok.tx2,
                 fontSize = 15.sp, fontWeight = if (secured) FontWeight.SemiBold else FontWeight.Normal,
+                style = tightCenter(15.sp),
             )
         }
     }
@@ -1078,12 +1081,12 @@ private fun OverflowMenuRow(label: String, note: String? = null, onClick: () -> 
             .padding(horizontal = Metric.gapL, vertical = Metric.gapS),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Tok.tx, style = TypeRole.body, modifier = Modifier.weight(1f))
+        Text(label, color = Tok.tx, style = TypeRole.body.merge(tightCenter(TypeRole.body.fontSize)), modifier = Modifier.weight(1f))
         if (note != null) {
             Spacer(Modifier.width(Metric.gapS))
             Box(Modifier.size(7.dp).clip(CircleShape).background(Tok.accent))
             Spacer(Modifier.width(6.dp))
-            Text(note, color = Tok.tx2, style = TypeRole.caption)
+            Text(note, color = Tok.tx2, style = TypeRole.caption.merge(tightCenter(TypeRole.caption.fontSize)))
         }
     }
 }
@@ -2114,6 +2117,7 @@ private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onSha
                 Text(
                     stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project),
                     color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium,
+                    style = tightCenter(14.5.sp),
                 )
             }
             // Share this folder… — owners only; a guest's shared row (sharedBy set) can't re-share the owner's machine.
@@ -2124,7 +2128,7 @@ private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onSha
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Icon(Icons.Rounded.Share, null, tint = Tok.accent, modifier = Modifier.size(18.dp))
-                    Text(stringResource(Res.string.share_this_folder), color = Tok.accent, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+                    Text(stringResource(Res.string.share_this_folder), color = Tok.accent, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, style = tightCenter(14.5.sp))
                 }
             }
         }
@@ -2141,7 +2145,7 @@ private fun PinGlyph() = Icon(Icons.Filled.PushPin, null, tint = Tok.accent, mod
 internal fun HistoryBadge(onClick: (() -> Unit)? = null) {
     val base = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f))
     Text(
-        stringResource(Res.string.history_badge), color = Tok.accent, fontSize = 10.5.sp,
+        stringResource(Res.string.history_badge), color = Tok.accent, fontSize = 10.5.sp, style = tightCenter(10.5.sp),
         modifier = (if (onClick != null) base.clickable(onClick = onClick) else base).padding(horizontal = 8.dp, vertical = 3.dp),
     )
 }
@@ -2196,15 +2200,16 @@ internal fun Breadcrumb(segs: List<String>, onUp: () -> Unit, onSegment: (Int) -
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Text("‹", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(onClick = onUp).padding(end = 2.dp))
+        Text("‹", color = Tok.tx2, fontSize = 18.sp, style = tightCenter(18.sp), modifier = Modifier.clickable(onClick = onUp).padding(end = 2.dp))
         segs.forEachIndexed { i, s ->
             val last = i == segs.lastIndex
             Text(
                 s, color = if (last) Tok.tx else Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
                 fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+                style = tightCenter(12.sp),
                 modifier = Modifier.clickable(enabled = !last) { onSegment(i) },
             )
-            if (!last) Text("›", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+            if (!last) Text("›", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, style = tightCenter(12.sp))
         }
     }
 }
@@ -2230,13 +2235,13 @@ private fun FolderRow(
     ) {
         Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
-        Text(name, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(name, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(13.5.sp), modifier = Modifier.weight(1f))
         if (pinned) { PinGlyph(); Spacer(Modifier.width(8.dp)) }
         if (project != null) {
             if (project.open || project.busy) {
                 PulseDot(Tok.accent, size = 6.dp)
                 Spacer(Modifier.width(4.dp))
-                Text(stringResource(Res.string.running), color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp)
+                Text(stringResource(Res.string.running), color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                 Spacer(Modifier.width(8.dp))
             } else {
                 HistoryBadge()
@@ -2255,17 +2260,17 @@ private fun LeafRow(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit
             .padding(start = 4.dp, end = if (onNewSession != null) 0.dp else 4.dp, top = 13.dp, bottom = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("⑂", color = Tok.accent, fontSize = 14.sp, modifier = Modifier.padding(end = 9.dp)) // project marker
-        Text(e.name.ifBlank { e.path }, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text("⑂", color = Tok.accent, fontSize = 14.sp, style = tightCenter(14.sp), modifier = Modifier.padding(end = 9.dp)) // project marker
+        Text(e.name.ifBlank { e.path }, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(13.5.sp), modifier = Modifier.weight(1f))
         if (pinned) { PinGlyph(); Spacer(Modifier.width(8.dp)) }
         if (e.open || e.busy) {
             PulseDot(Tok.accent, size = 6.dp)
             Spacer(Modifier.width(4.dp))
-            Text(stringResource(Res.string.running), color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp)
+            Text(stringResource(Res.string.running), color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
             Spacer(Modifier.width(8.dp))
         }
         e.gitBranch?.let {
-            Text(it, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1)
+            Text(it, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1, style = tightCenter(11.5.sp))
             Spacer(Modifier.width(8.dp))
         }
         if (e.hasSessions) HistoryBadge()
@@ -2323,7 +2328,7 @@ private fun LiveProjectCell(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 e.activeSessionTitle ?: stringResource(Res.string.session_fallback), color = Tok.tx, fontWeight = FontWeight.Medium,
-                fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(14.sp), modifier = Modifier.weight(1f),
             )
             if (pinned) { Spacer(Modifier.width(6.dp)); PinGlyph() }
             if (onBrowse != null && e.hasSessions) { Spacer(Modifier.width(8.dp)); HistoryBadge(onClick = onBrowse) }
@@ -2336,6 +2341,7 @@ private fun LiveProjectCell(
             Text(
                 stringResource(if (active) Res.string.running else Res.string.idle),
                 color = if (active) Tok.accent else Tok.muted, fontSize = 11.sp,
+                style = tightCenter(11.sp),
             )
             // a running project still gets the ＋: "another session in here", not "resume that one"
             onNewSession?.let { Spacer(Modifier.width(2.dp)); NewSessionGlyph(it) }
@@ -2390,9 +2396,9 @@ private fun AgentFilterChip(filter: Set<AgentKind>, onClear: () -> Unit) {
     ) {
         Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(color))
         Spacer(Modifier.width(7.dp))
-        Text(label, color = color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Text(label, color = color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(12.5.sp), modifier = Modifier.weight(1f, fill = false))
         Spacer(Modifier.width(6.dp))
-        Text("✕", color = color, fontSize = 12.sp)
+        Text("✕", color = color, fontSize = 12.sp, style = tightCenter(12.sp))
     }
 }
 
@@ -2654,7 +2660,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                             Spacer(Modifier.width(4.dp))
                             Text(
                                 stringResource(Res.string.rewind_group_rewound, lineage.rewound.size),
-                                color = Tok.tx2, fontSize = 13.sp,
+                                color = Tok.tx2, fontSize = 13.sp, style = tightCenter(13.sp),
                             )
                         }
                     }
@@ -3394,7 +3400,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             when {
                                 undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                     PulseDot(Tok.warn, size = 5.dp)
-                                    Text(stringResource(Res.string.msg_pending_undelivered), color = Tok.warn, fontSize = 11.sp)
+                                    Text(stringResource(Res.string.msg_pending_undelivered), color = Tok.warn, fontSize = 11.sp, style = tightCenter(11.sp))
                                 }
                                 // link is up but the daemon hasn't receipted yet (issue #66): quiet "sending…"
                                 // after a short grace so a normal instant ack never flashes it
@@ -3403,7 +3409,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                     LaunchedEffect(m) { delay(1200); slow = true }
                                     if (slow) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                         PulseDot(Tok.muted, size = 5.dp)
-                                        Text(stringResource(Res.string.msg_sending), color = Tok.muted, fontSize = 11.sp)
+                                        Text(stringResource(Res.string.msg_sending), color = Tok.muted, fontSize = 11.sp, style = tightCenter(11.sp))
                                     }
                                 }
                                 // receipted (issue #66) — shows until the reply starts streaming (this bubble
@@ -3493,8 +3499,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 val skipMessage = stringResource(Res.string.question_skip_message)
                 QuestionCard(
                     ask,
-                    onAnswer = { answers, response -> repo.answerQuestions(answers, response) },
-                    onSkip = { repo.resolve(Decision.DENY, message = skipMessage) },
+                    onAnswer = { answers, response -> repo.answerQuestions(answers, response, ask = ask) },
+                    onSkip = { repo.resolve(Decision.DENY, message = skipMessage, ask = ask) },
                     onOwnsInput = { cardOwnsInput = it },
                 )
             }
@@ -3538,6 +3544,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 val hasReady = repo.hasReadyImages()
                 val hasLanded = repo.hasLandedFiles()      // files already in the workspace inbox (issue #90)
                 val uploadsBusy = repo.uploadsBusy()       // uploads still moving → send waits
+                val compressing = repo.imagesCompressing() // a photo still downscaling → send waits too
                 val voiceState = repo.voice.value
                 // the timer stays visible (frozen) through S3, after Recording stopped carrying it
                 var recElapsed by remember { mutableStateOf(0L) }
@@ -3675,6 +3682,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                         repo.pendingFiles.size,
                                     ),
                                 )
+                                compressing -> ComposerNote(stringResource(Res.string.composer_compressing))
                                 repo.streaming.value -> ComposerNote(stringResource(Res.string.message_queued_hint))
                             }
                             val stagedContent = input.isNotBlank() || hasReady || hasLanded
@@ -3716,10 +3724,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 // @-references exist. Staged content earns Send even mid-turn, because Claude's
                                 // stream-json input queues a mid-turn user message and weaves it into the
                                 // running turn at the next tool boundary (verified on 2.1.201).
-                                val showSend = stagedContent && !uploadsBusy
+                                // a compressing photo holds the send the same way (sendPrompt refuses it): the
+                                // status slot stands in Send's place instead of a Send that does nothing
+                                val sendWaits = uploadsBusy || (compressing && stagedContent)
+                                val showSend = stagedContent && !sendWaits
                                 val showStop = repo.streaming.value
                                 ComposerAccessoryLane(
-                                    actionCount = (if (showStop) 1 else 0) + (if (uploadsBusy || showSend) 1 else 0),
+                                    actionCount = (if (showStop) 1 else 0) + (if (sendWaits || showSend) 1 else 0),
                                     leading = {
                                         val attachInteraction = remember { MutableInteractionSource() }
                                         val attachPressed by attachInteraction.collectIsPressedAsState()
@@ -3779,6 +3790,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                                 ),
                                                 modifier = actionModifier,
                                             )
+                                        } else if (sendWaits) {
+                                            UploadStatusSlot(stringResource(Res.string.composer_compressing), modifier = actionModifier)
                                         } else if (showSend) {
                                             val sendLabel = stringResource(Res.string.send)
                                             ComposerLaneActionButton(
@@ -3967,9 +3980,10 @@ private fun SlashCommandMenu(commands: List<SlashCommand>, onPick: (SlashCommand
                     Text(
                         "/${cmd.name}", color = Tok.accent, fontFamily = FontFamily.Monospace,
                         fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        style = tightCenter(13.sp),
                     )
                     cmd.argumentHint?.let {
-                        Text(" $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1)
+                        Text(" $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1, style = tightCenter(12.sp))
                     }
                     Spacer(Modifier.weight(1f))
                     Text(
@@ -3982,6 +3996,7 @@ private fun SlashCommandMenu(commands: List<SlashCommand>, onPick: (SlashCommand
                             },
                         ),
                         color = Tok.muted, fontSize = 10.sp,
+                        style = tightCenter(10.sp),
                     )
                 }
                 if (cmd.description.isNotBlank()) {
@@ -4314,7 +4329,7 @@ private fun OpenablePathChip(path: String, modifier: Modifier = Modifier, onOpen
     ) {
         Text(
             path, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(12.sp), modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(7.dp))
         Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, tint = Tok.accent, modifier = Modifier.size(13.dp))
@@ -4448,7 +4463,7 @@ private fun WorkingRow() {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         PulseDot(Tok.muted)
-        Text(stringResource(Res.string.thinking_streaming), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
+        Text(stringResource(Res.string.thinking_streaming), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic, style = tightCenter(12.5.sp))
     }
 }
 
@@ -4463,7 +4478,7 @@ private fun QueuedRow() {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         PulseDot(Tok.muted, size = 5.dp)
-        Text(stringResource(Res.string.msg_queued), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
+        Text(stringResource(Res.string.msg_queued), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic, style = tightCenter(12.5.sp))
     }
 }
 
@@ -4477,7 +4492,7 @@ private fun NoResponseRow(onResend: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         PulseDot(Tok.warn, size = 5.dp)
-        Text(stringResource(Res.string.msg_no_response), color = Tok.warn, fontSize = 12.5.sp)
+        Text(stringResource(Res.string.msg_no_response), color = Tok.warn, fontSize = 12.5.sp, style = tightCenter(12.5.sp))
     }
 }
 
@@ -4490,10 +4505,11 @@ private fun ThinkingRow(m: ChatItem.Thinking) {
             Modifier.clip(RoundedCornerShape(6.dp)).clickable { expanded = !expanded }.padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(if (expanded) "▾ " else "▸ ", color = Tok.muted, fontSize = 11.sp)
+            Text(if (expanded) "▾ " else "▸ ", color = Tok.muted, fontSize = 11.sp, style = tightCenter(11.sp))
             Text(
                 m.seconds?.let { stringResource(Res.string.thought_for, it) } ?: stringResource(Res.string.thinking_streaming),
                 color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic,
+                style = tightCenter(12.5.sp),
             )
         }
         if (expanded && m.text.isNotBlank()) {
@@ -4533,7 +4549,7 @@ private fun JumpToLatestPill(modifier: Modifier, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
-        Text(stringResource(Res.string.jump_to_latest), color = Tok.tx2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+        Text(stringResource(Res.string.jump_to_latest), color = Tok.tx2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, style = tightCenter(12.5.sp))
     }
 }
 

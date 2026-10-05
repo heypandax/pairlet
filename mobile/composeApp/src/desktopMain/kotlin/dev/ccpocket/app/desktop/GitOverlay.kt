@@ -122,6 +122,7 @@ fun GitPill(model: DesktopModel) {
 
 @Composable
 fun GitOverlay(model: DesktopModel, onDismiss: () -> Unit) {
+    LaunchedEffect(Unit) { model.useFeature(dev.ccpocket.app.telemetry.ProductFeature.GIT_PANEL) }
     val status = model.gitStatus
     var message by remember(model.selectedSessionId) { mutableStateOf("") }
     var branchesOpen by remember { mutableStateOf(false) }
@@ -424,7 +425,7 @@ private fun GitFooter(model: DesktopModel, message: String, onMessage: (String) 
                 Text(
                     stringResource(Res.string.git_commit),
                     color = if (on) Tok.base else Tok.tx.copy(alpha = 0.34f),
-                    fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                    fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp), fontWeight = FontWeight.SemiBold,
                 )
             }
             FooterVerb(stringResource(if (busy == GIT_OP_FETCH) Res.string.git_fetching else Res.string.git_fetch), null, busy == GIT_OP_FETCH) { model.gitAct(GIT_OP_FETCH) }
@@ -461,8 +462,8 @@ private fun FooterVerb(label: String, tail: String?, spinning: Boolean, onClick:
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(label, color = if (spinning) Tok.tx2 else Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, maxLines = 1)
-        if (tail != null) Text(tail, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1)
+        Text(label, color = if (spinning) Tok.tx2 else Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp), maxLines = 1)
+        if (tail != null) Text(tail, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp), maxLines = 1)
         if (spinning) CircularProgressIndicator(Modifier.size(11.dp), color = Tok.accent, strokeWidth = 1.5.dp)
     }
 }
@@ -487,8 +488,8 @@ private fun BranchPopover(model: DesktopModel, branches: List<GitBranchInfo>, cu
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("＋", color = Tok.accent, fontFamily = Dk.mono, fontSize = 12.sp)
-            Text(stringResource(Res.string.git_new_branch), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp)
+            Text("＋", color = Tok.accent, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp))
+            Text(stringResource(Res.string.git_new_branch), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp))
         } else Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text(
                 stringResource(Res.string.git_new_branch_from, current ?: "HEAD"),
@@ -531,13 +532,13 @@ private fun BranchPopover(model: DesktopModel, branches: List<GitBranchInfo>, cu
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Box(Modifier.size(12.dp), contentAlignment = Alignment.Center) {
-                        if (isCurrent) Text("✓", color = Tok.ok, fontSize = 11.sp)
+                        if (isCurrent) Text("✓", color = Tok.ok, fontSize = 11.sp, style = tightCenter(11.sp))
                     }
                     Text(
-                        b.name, color = if (isCurrent) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
+                        b.name, color = if (isCurrent) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp),
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
-                    if (isCurrent) Text(stringResource(Res.string.git_branch_current), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp)
+                    if (isCurrent) Text(stringResource(Res.string.git_branch_current), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                 }
             }
         }
@@ -567,7 +568,7 @@ private fun GitConfirmDialog(model: DesktopModel, preview: GitActionPreview) {
                     .background(if (blocked) Tok.tx.copy(alpha = 0.06f) else Tok.danger.copy(alpha = 0.13f))
                     .border(1.3.dp, if (blocked) Tok.hair else Tok.danger.copy(alpha = 0.42f), CircleShape),
                 contentAlignment = Alignment.Center,
-            ) { Text(if (blocked) "i" else "!", color = if (blocked) Tok.tx2 else Tok.danger, fontFamily = Dk.mono, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
+            ) { Text(if (blocked) "i" else "!", color = if (blocked) Tok.tx2 else Tok.danger, fontFamily = Dk.mono, fontSize = 15.sp, style = tightCenter(15.sp), fontWeight = FontWeight.SemiBold) }
             Text(
                 when {
                     worktree -> stringResource(Res.string.wt_remove_title, preview.branch ?: preview.path.orEmpty())
@@ -590,8 +591,8 @@ private fun GitConfirmDialog(model: DesktopModel, preview: GitActionPreview) {
                         horizontalArrangement = Arrangement.spacedBy(9.dp),
                     ) {
                         GitPathText(f.path, max = 42, color = Tok.tx2, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
-                        if ((f.adds ?: 0) > 0) Text("+${f.adds}", color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp)
-                        if ((f.dels ?: 0) > 0) Text("−${f.dels}", color = Tok.danger, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                        if ((f.adds ?: 0) > 0) Text("+${f.adds}", color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
+                        if ((f.dels ?: 0) > 0) Text("−${f.dels}", color = Tok.danger, fontFamily = Dk.mono, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
                     }
                 }
             }
@@ -608,7 +609,7 @@ private fun GitConfirmDialog(model: DesktopModel, preview: GitActionPreview) {
                     Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(9.dp))
                         .border(1.dp, Tok.hair, RoundedCornerShape(9.dp)).clickable { model.dismissGitConfirm() },
                     contentAlignment = Alignment.Center,
-                ) { Text(stringResource(Res.string.cancel), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp) }
+                ) { Text(stringResource(Res.string.cancel), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp)) }
                 Box(
                     Modifier.weight(1.15f).height(38.dp).clip(RoundedCornerShape(9.dp))
                         .background(if (blocked) Tok.danger.copy(alpha = 0.16f) else Tok.danger)
@@ -618,7 +619,7 @@ private fun GitConfirmDialog(model: DesktopModel, preview: GitActionPreview) {
                     Text(
                         if (worktree) stringResource(Res.string.wt_remove) else stringResource(Res.string.git_discard_confirm),
                         color = if (blocked) Tok.tx.copy(alpha = 0.34f) else Tok.base,
-                        fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
@@ -630,6 +631,7 @@ private fun GitConfirmDialog(model: DesktopModel, preview: GitActionPreview) {
 
 @Composable
 fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
+    LaunchedEffect(Unit) { model.useFeature(dev.ccpocket.app.telemetry.ProductFeature.WORKTREE) }
     val list = model.worktrees
     // newest linked checkout first, main pinned on top (#294 真机反馈) — same order as mobile
     val trees = remember(list) { dev.ccpocket.app.data.worktreeDisplayOrder(list?.worktrees.orEmpty()) }
@@ -653,12 +655,12 @@ fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(stringResource(Res.string.wt_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                list?.repoRoot?.let { Text(repoBasename(it), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp) }
+                Text(stringResource(Res.string.wt_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, style = tightCenter(15.sp), fontWeight = FontWeight.SemiBold)
+                list?.repoRoot?.let { Text(repoBasename(it), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, style = tightCenter(11.5.sp)) }
                 Box(Modifier.weight(1f))
                 if (trees.isNotEmpty()) Text(
                     if (trees.size == 1) stringResource(Res.string.wt_count_one) else stringResource(Res.string.wt_count, trees.size),
-                    color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp,
+                    color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, style = tightCenter(11.sp),
                 )
                 Icon(
                     Icons.Rounded.Refresh, stringResource(Res.string.wt_rescan), tint = Tok.tx2,
@@ -713,8 +715,8 @@ fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(9.dp),
                         ) {
-                            Text("＋", color = Tok.accent, fontFamily = Dk.mono, fontSize = 13.sp)
-                            Text(stringResource(Res.string.wt_new), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text("＋", color = Tok.accent, fontFamily = Dk.mono, fontSize = 13.sp, style = tightCenter(13.sp))
+                            Text(stringResource(Res.string.wt_new), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), fontWeight = FontWeight.SemiBold)
                         }
                     }
                     // #294: the in-flight receipt — the 1–2s void between Create and the list reply
@@ -729,7 +731,7 @@ fun WorktreesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                                 CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.6.dp)
                                 Text(
                                     stringResource(if (op == GIT_OP_WORKTREE_ADD) Res.string.wt_creating else Res.string.wt_removing),
-                                    color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                                    color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, style = tightCenter(11.5.sp),
                                 )
                             }
                         }
@@ -778,7 +780,7 @@ private fun WorktreeCreatedDialog(model: DesktopModel, note: dev.ccpocket.app.da
                 Modifier.size(38.dp).clip(CircleShape).background(Tok.ok.copy(alpha = 0.10f))
                     .border(1.4.dp, Tok.ok.copy(alpha = 0.45f), CircleShape),
                 contentAlignment = Alignment.Center,
-            ) { Text("✓", color = Tok.ok, fontSize = 16.sp) }
+            ) { Text("✓", color = Tok.ok, fontSize = 16.sp, style = tightCenter(16.sp)) }
             Text(
                 stringResource(Res.string.wt_created_title), color = Tok.tx, fontFamily = Dk.ui,
                 fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 10.dp),
@@ -803,7 +805,7 @@ private fun WorktreeCreatedDialog(model: DesktopModel, note: dev.ccpocket.app.da
                 ) {
                     Text(
                         stringResource(Res.string.wt_menu_open), color = Tok.base, fontFamily = Dk.ui,
-                        fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.5.sp, style = tightCenter(12.5.sp), fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
@@ -811,7 +813,7 @@ private fun WorktreeCreatedDialog(model: DesktopModel, note: dev.ccpocket.app.da
                 Modifier.fillMaxWidth().padding(top = 8.dp).height(34.dp).clip(RoundedCornerShape(9.dp))
                     .border(1.dp, Tok.hair, RoundedCornerShape(9.dp)).clickable { model.dismissWorktreeCreated() },
                 contentAlignment = Alignment.Center,
-            ) { Text(stringResource(Res.string.wt_created_later), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp) }
+            ) { Text(stringResource(Res.string.wt_created_later), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp)) }
         }
     }
 }
@@ -866,7 +868,7 @@ private fun DesktopPill(label: String, hue: Color) {
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Box(Modifier.size(5.dp).clip(CircleShape).background(hue))
-        Text(label, color = hue, fontFamily = Dk.ui, fontSize = 11.sp)
+        Text(label, color = hue, fontFamily = Dk.ui, fontSize = 11.sp, style = tightCenter(11.sp))
     }
 }
 
@@ -902,7 +904,7 @@ private fun NewWorktreeDialog(model: DesktopModel, onDismiss: () -> Unit) {
                             .background(if (on) Tok.surface else Color.Transparent)
                             .clickable(enabled = !on) { newBranch = isNew },
                         contentAlignment = Alignment.Center,
-                    ) { Text(label, color = if (on) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp) }
+                    ) { Text(label, color = if (on) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp)) }
                 }
                 seg(stringResource(Res.string.wt_seg_existing), isNew = false)
                 seg(stringResource(Res.string.wt_seg_new), isNew = true)
@@ -918,16 +920,16 @@ private fun NewWorktreeDialog(model: DesktopModel, onDismiss: () -> Unit) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Box(Modifier.size(12.dp), contentAlignment = Alignment.Center) {
-                            if (picked == b.name && !inUse) Text("✓", color = Tok.accent, fontSize = 11.sp)
+                            if (picked == b.name && !inUse) Text("✓", color = Tok.accent, fontSize = 11.sp, style = tightCenter(11.sp))
                         }
                         Text(
-                            b.name, color = if (inUse) Tok.muted else Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp,
+                            b.name, color = if (inUse) Tok.muted else Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, style = tightCenter(12.sp),
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                         )
                         // already checked out elsewhere: dimmed and NAMED, never a tap that fails
                         if (inUse) Text(
                             stringResource(Res.string.wt_in_use, midTruncatePath(b.checkedOutAt ?: "", 26)),
-                            color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp, maxLines = 1,
+                            color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp, style = tightCenter(10.5.sp), maxLines = 1,
                         )
                     }
                 }
@@ -968,7 +970,7 @@ private fun NewWorktreeDialog(model: DesktopModel, onDismiss: () -> Unit) {
                 Text(
                     stringResource(Res.string.wt_create),
                     color = if (on) Tok.base else Tok.tx.copy(alpha = 0.34f),
-                    fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), fontWeight = FontWeight.SemiBold,
                 )
             }
         }

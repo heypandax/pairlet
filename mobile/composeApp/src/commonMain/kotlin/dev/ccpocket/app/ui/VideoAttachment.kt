@@ -33,6 +33,7 @@ import dev.ccpocket.app.resources.video_play
 import dev.ccpocket.app.resources.video_workspace_hint
 import dev.ccpocket.app.resources.video_workspace_note
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import org.jetbrains.compose.resources.stringResource
 
 // ============================================================================================
@@ -47,6 +48,8 @@ import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun VideoPlayerOverlay(file: SentFile, onClose: () -> Unit) {
+    // Android back closes the player only, not the chat underneath (same rule as ImageViewer)
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onClose() }
     val openLocal = rememberLocalVideoOpener()
     val canPlayHere = file.localUri != null
     Box(Modifier.fillMaxSize().background(Color(0xFF060708))) {
@@ -88,7 +91,7 @@ fun VideoPlayerOverlay(file: SentFile, onClose: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Icon(PlayTriangleGlyph, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                    Text(stringResource(Res.string.video_play), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(Res.string.video_play), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, style = tightCenter(14.sp))
                 }
             } else {
                 Text(

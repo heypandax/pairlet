@@ -269,6 +269,9 @@ private fun BoxScope.UndecodableFill(fontSize: TextUnit) {
 @Composable
 fun ImageViewer(images: List<ByteArray>, startIndex: Int, onClose: () -> Unit) {
     if (images.isEmpty()) return
+    // Android back closes the viewer only. Registered after the root chat handler (LIFO), so without it
+    // back fell through to backToBrowse() and closed the whole chat.
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onClose() }
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, images.size - 1)) { images.size }
     var dragY by remember { mutableStateOf(0f) }
     // swipe-down-to-dismiss belongs to the ZOOMED-OUT state only: while zoomed, a vertical drag is a

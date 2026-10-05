@@ -278,7 +278,8 @@ class PermissionBridge(
         // no task/session scope may ever form for it, whatever a (possibly modified) client claims.
         val handoffOneOff = handoffAccess != null && ev.toolName == "Bash"
         val neverRemember = meta.neverRemember || forceNeverRemember || handoffOneOff
-        if (!neverRemember && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
+        // a chained/redirected Bash line only shares its FIRST command's rule — never let it ride (audit M3)
+        if (!neverRemember && meta.sessionRuleMatchable && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
             coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "remembered-rule")
             emit(autorunChip(meta.rule, "session-rule", grantId = null, tool = ev.toolName))
             respond(ev.requestId, true, false, ev.input, null, null)

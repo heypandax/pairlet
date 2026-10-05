@@ -101,7 +101,7 @@ private fun WaitDial(ask: PermissionAsk, diameter: Dp, stroke: Dp, color: Color)
         Modifier.size(diameter).clip(CircleShape).border(1.dp, Tok.hair, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Text("∞", color = Tok.muted, fontFamily = Dk.ui, fontSize = (diameter.value * 0.44f).sp, fontWeight = FontWeight.SemiBold)
+        Text("∞", color = Tok.muted, fontFamily = Dk.ui, fontSize = (diameter.value * 0.44f).sp, fontWeight = FontWeight.SemiBold, style = tightCenter((diameter.value * 0.44f).sp))
     }
 }
 
@@ -130,6 +130,17 @@ private fun RememberCheck(label: String, checked: Boolean, onToggle: () -> Unit)
     }
 }
 
+/**
+ * Is [shown] — the ask a card was COMPOSED with — still the one the model is waiting on? (audit 2026-10-04 M4)
+ *
+ * The model's verdict verbs decide "whatever is pending now". In a burst the next card renders in the same
+ * place with the same buttons, and a second click delivered before the card recomposes still reaches the
+ * first card's callbacks — so every card verb checks this first and a stale click does nothing at all.
+ * Matched on (convoId, askId): a re-emitted frame refreshing the card in place is still the same request.
+ */
+internal fun DesktopModel.isStillAsking(shown: PermissionAsk): Boolean =
+    ask?.let { it.convoId == shown.convoId && it.askId == shown.askId } == true
+
 /** Whether "remember" is offered at all: needs a rule to remember, and one-off decisions (plan
  *  approval, questions) never offer it — [oneOff] carries the daemon's ToolMeta policy. */
 private fun canRemember(ask: PermissionAsk): Boolean = ask.rule != null && !ask.oneOff
@@ -145,15 +156,16 @@ private fun DenyButton(big: Boolean = false, onClick: () -> Unit) {
     )
 }
 
+// No ⌘⏎ keycap on Allow / Allow for task (audit 2026-10-04 M1): nothing binds that key to an approval — the
+// composer keeps focus while a card is up and sends its draft on ⌘⏎. A keycap appears only where it is wired.
 @Composable
-private fun AllowButton(big: Boolean = false, key: Boolean = true, onClick: () -> Unit) {
+private fun AllowButton(big: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier.clip(RoundedCornerShape(if (big) 10.dp else 9.dp)).background(Tok.accent).clickable(onClick = onClick)
             .padding(horizontal = if (big) 18.dp else 16.dp, vertical = if (big) 10.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Text(stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(if (big) 13.5.sp else 13.sp))
-        if (key) Key("⌘⏎")
     }
 }
 
@@ -168,7 +180,7 @@ private fun OnceButton(onClick: () -> Unit) {
     )
 }
 
-/** M2 "允许本任务" — the recommended action (design `.btn.rec`): accent fill + ⌘⏎. */
+/** M2 "允许本任务" — the recommended action (design `.btn.rec`): accent fill. */
 @Composable
 private fun TaskAllowButton(onClick: () -> Unit) {
     Row(
@@ -177,7 +189,6 @@ private fun TaskAllowButton(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Text(stringResource(Res.string.allow_for_task), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold, style = tightCenter(13.sp))
-        Key("⌘⏎")
     }
 }
 
@@ -326,7 +337,7 @@ fun InlinePermCard(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(
                             stringResource(if (isDiff) Res.string.agent_wants_edit else Res.string.agent_needs_permission, agentName(agent)),
-                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, style = tightCenter(12.sp),
                         )
                         AgentBadge(agent)
                         risk?.let { dev.ccpocket.app.ui.RiskBadge(it) } // M3 advisory (shape-distinct four states)
@@ -403,7 +414,7 @@ fun InlinePermCard(
                         Spacer(Modifier.weight(1f))
                         WaitDial(ask, 26.dp, 2.2.dp, color)
                         DenyButton(onClick = onDeny)
-                        AllowButton(key = !isDiff, onClick = { onAllow(rememberRule) })
+                        AllowButton(onClick = { onAllow(rememberRule) })
                     }
                 }
             }

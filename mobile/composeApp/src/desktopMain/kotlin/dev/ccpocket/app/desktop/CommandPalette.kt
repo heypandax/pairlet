@@ -63,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.archive_toast_restore_failed
 import dev.ccpocket.app.resources.archive_unarchive
 import dev.ccpocket.app.resources.palette_archived_placeholder
 import dev.ccpocket.app.resources.dir_no_matches
@@ -114,6 +115,7 @@ private data class PaletteL10n(
     val onMachine: String,  // "%1$s" template
     val approveOn: String,  // "%1$s" template
     val unarchive: String,  // issue #202
+    val restoreFailed: String, // the daemon refused a restore (archive_failed) — shown on that archived row
 )
 
 /** Minimal "%1$s" fill-in for templates resolved outside a composable (mirrors compose-resources' own token). */
@@ -155,7 +157,10 @@ private fun buildItems(model: DesktopModel, scope: CoroutineScope, l10n: Palette
         model.archivedSessions.forEach { sess ->
             add(
                 PItem(
-                    PKind.SESSION, sess.title, tilde(sess.cwd), Icons.Outlined.Inventory2,
+                    // a refused restore states itself on the row that asked (the sidebar's inline-refusal grammar)
+                    PKind.SESSION, sess.title,
+                    if (model.archiveRefused(sess.sessionId) == false) l10n.restoreFailed else tilde(sess.cwd),
+                    Icons.Outlined.Inventory2,
                     agent = sess.agent, id = sess.sessionId,
                     secondary = { model.unarchiveSession(sess) }, secondaryLabel = l10n.unarchive,
                 ) { model.selectSession(sess) },
@@ -193,7 +198,8 @@ private fun buildItems(model: DesktopModel, scope: CoroutineScope, l10n: Palette
         add(
             PItem(
                 PKind.ACTION, fmt(l10n.approveOn, a.machine), "${a.tool} · ${a.preview}", Icons.Outlined.Shield,
-                hint = a.seconds?.let(::fmtMmSs), accent = true, id = "ask:${a.id}",
+                // composite (audit H1): the fleet-wide list can hold two sessions' "3" — a lazy-list key must stay unique
+                hint = a.seconds?.let(::fmtMmSs), accent = true, id = "ask:${a.accountId}:${a.convoId}:${a.id}",
             ) { model.showAttention = true },
         )
     }
@@ -236,8 +242,11 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
         onMachine = stringResource(Res.string.palette_on_machine),
         approveOn = stringResource(Res.string.palette_approve_on),
         unarchive = stringResource(Res.string.archive_unarchive),
+        restoreFailed = stringResource(Res.string.archive_toast_restore_failed),
     )
-    val all = remember(model.machines, model.attention, model.projects, model.sessions, model.archivedSessions, model.palette, l10n) { buildItems(model, paletteScope, l10n) }
+    // the refused restore is a key too: it lands after the click, on a list whose rows have not changed
+    val refusedRestore = model.archivedSessions.firstOrNull { model.archiveRefused(it.sessionId) == false }?.sessionId
+    val all = remember(model.machines, model.attention, model.projects, model.sessions, model.archivedSessions, model.palette, l10n, refusedRestore) { buildItems(model, paletteScope, l10n) }
     val items = remember(all, query) {
         if (query.isBlank()) all.take(60) // blank query keeps source order — skip the score/sort/strip pass
         else all.mapNotNull { it.score(query).takeIf { s -> s > 0 }?.let { s -> it to s } }
@@ -354,7 +363,7 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
             Text(
                 highlight(item.label, query),
                 color = if (item.accent) Tok.accent else Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, style = tightCenter(13.5.sp), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 // cap the (unweighted) label so a long title can't swallow the whole row and hide the weighted detail (#179)
                 modifier = Modifier.widthIn(max = 280.dp),
             )

@@ -5,6 +5,7 @@ import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.ConvoHistoryPage
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.FileContent
+import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
@@ -144,6 +145,24 @@ class FrameFitterTest {
         val got = decode(out) as FileContent
         assertTrue(got.truncated)
         assertTrue(got.text!!.length in 1 until 1_200_000)
+    }
+
+    @Test
+    fun a_diff_over_the_cap_is_clipped_on_a_line_boundary_and_marked() {
+        // audit 2026-10-04 D: FileDiff was not shrinkable, so an escape-heavy diff went out as is and dropped the link
+        val line = "+" + "\u001b[0m".repeat(50) + "\n"
+        // 202 characters per line, 453 bytes once JSON-escaped: 4000 lines ≈ 0.8M chars but 1.8 MB on the wire
+        val fd = FileDiff("/w", "s", "a.log", diff = line.repeat(4_000), adds = 4_000)
+        val reports = mutableListOf<String>()
+        val out = FrameFitter.encodeWithin(env(fd), legacy) { reports += it }
+        assertTrue(sealed(out) <= legacy, "sealed ${sealed(out)} B")
+        val got = decode(out) as FileDiff
+        assertTrue(got.ok)
+        assertTrue(got.truncated)
+        assertTrue(got.diff!!.isNotEmpty() && got.diff!!.endsWith("\n"))
+        assertTrue(fd.diff!!.startsWith(got.diff!!))
+        assertEquals(4_000, got.adds)
+        assertTrue("shrunk" in reports.single(), reports.single())
     }
 
     /** A project listing over the cap used to be sent as it was: the link dropped on every tap of that

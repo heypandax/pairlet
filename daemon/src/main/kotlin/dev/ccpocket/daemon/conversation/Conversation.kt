@@ -48,16 +48,19 @@ import dev.ccpocket.protocol.ToolPhase
 import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.WorkflowAgentDetail
 import dev.ccpocket.protocol.WorkflowUpdate
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.isSubagentTool
 import dev.ccpocket.protocol.isWorkflowTool
@@ -263,6 +266,15 @@ class Conversation(
     @Volatile
     private var model: String? = null
 
+    /** The user picked a model that no launched process has baked in yet (lifecycle design S3(d) / audit M7).
+     *  [model] holds two things: the user's request (what the next launch bakes) and, once a process reports
+     *  it, the CLI's resolved id. While a pick is pending, an init from a process launched BEFORE it still
+     *  names the OLD model; adopting that report would silently undo the pick (badge snaps back, the next
+     *  relaunch bakes the old model). So the report is adopted only when no pick is pending. Set by
+     *  [switchModel], cleared by every launch (it bakes the current [model]). */
+    @Volatile
+    private var modelPickPending = false
+
     /** Transcript/index truth for the chat header. Null only for a genuinely unnamed fresh session. */
     @Volatile
     private var sessionTitle: String? = null
@@ -321,6 +333,36 @@ class Conversation(
     internal fun interface FanOutProbe {
         /** [to] = the [sinkKey]s [frame] was delivered to, snapshotted as the fan-out ran. */
         fun dispatched(frame: Frame, to: Set<Any>)
+    }
+
+    /**
+     * Test seam (lifecycle design S0): a suspension point at each process-lifecycle transition whose
+     * check-then-act window is a known race (design-conversation-lifecycle §1 D1–D12). A test parks the
+     * transition here on a gate, drives the competing call, then releases it — a deterministic interleaving
+     * instead of a sleep. Same family as [beforeFullControlExpiryCommit] and the registry's
+     * `beforeLiveReattachClaim`.
+     *
+     * Null in production — nothing installs one, so every site costs one volatile read and a null check.
+     */
+    @Volatile
+    internal var lifecycleProbe: (suspend (LifecyclePoint) -> Unit)? = null
+
+    /** Where [lifecycleProbe] fires. Each names the window it opens, not a behaviour. */
+    internal enum class LifecyclePoint {
+        /** sendPrompt's lazy start: `proc == null` was observed and the spec is built; the spawn has not happened. */
+        AFTER_SPAWN_DECISION,
+        /** launchProcess: the OS process is started; `proc` is not published yet and the backend not attached. */
+        LAUNCH_AFTER_START,
+        /** The pump's unexpected-death branch, right after `awaitExit` returned. */
+        DEATH_AFTER_AWAIT_EXIT,
+        /** The clean one-shot exit branch, right after the dead handle was dropped (`proc = null`). */
+        ONE_SHOT_AFTER_NULL,
+        /** stopProcess, right after the process shutdown returned and before the handle is dropped. */
+        STOP_AFTER_SHUTDOWN,
+        /** The OpenCode startup watchdog, after it killed its process and `awaitExit` returned. */
+        WATCHDOG_AFTER_EXIT,
+        /** pumpCrashed, after its process shutdown returned. */
+        PUMP_CRASHED_AFTER_SHUTDOWN,
     }
 
     // every existing emit site goes through this fan-out; one failing transport must not break the rest
@@ -400,18 +442,22 @@ class Conversation(
     private val seq = AtomicLong(0)
 
     // background work (bg shells / sub-agents / monitors) tracked from the tool stream; drives the in-chat
-    // jobs indicator and keeps the session "busy" (un-reapable) while anything is still running
+    // jobs indicator and keeps the session "busy" (un-reapable) while anything is still running.
+    // Written mostly by the pump but also by the panel's stop, the reaper and stopProcess — internally
+    // synchronized (lifecycle design S6).
     private val jobs = BackgroundJobRegistry()
 
     // Workflow orchestration runs (issue #106) tracked from the same stream — the fan-out container
-    // the phone renders as a run card + progress tree. Pump-only, like `jobs` (no locking).
+    // the phone renders as a run card + progress tree. Same threads as `jobs`; internally synchronized too.
     private val workflows = WorkflowTracker()
 
     // in-flight top-level sub-agent (Task/Agent) calls, keyed by tool_use id (issue #77). Drives the
     // phone's Task card: START on the tool_use, RESULT with the report on completion. `background`
     // (run_in_background) flips the completion source: a foreground run's tool_result IS the report;
     // a background run's tool_result is only the launch ack — task_notification carries the outcome.
-    // Only touched from the single stdout pump (like `jobs`), so no locking. Bounded by MAX_SUBAGENTS.
+    // Mostly the stdout pump, but stopProcess settles it from the stopping thread while an old pump may still
+    // be draining (lifecycle design D4) — so every access holds its monitor (S6), never across a suspension:
+    // the card frames are emitted after the lock is released. Bounded by MAX_SUBAGENTS.
     private data class SubagentRun(val tool: String, val background: Boolean)
     private val subagentRuns = LinkedHashMap<String, SubagentRun>()
 
@@ -450,6 +496,11 @@ class Conversation(
 
     @Volatile
     private var intentionalStop = false
+
+    /** Set first thing in [close] and never cleared (lifecycle design S3(b) / D5). close() cancels [scope], so
+     *  any process started after it gets no IO pumps and no stdout pump — a leaked CLI nobody reads or stops —
+     *  while the caller would ack a prompt nobody runs. [launchProcess] refuses once this is set. */
+    private val closed = AtomicBoolean(false)
 
     // last time an approval push fired for this conversation (bridge #91 / owner session #138) —
     // coalesces a burst of asks into one alert. Stamped on the single permission-bridge emit path;
@@ -591,6 +642,22 @@ class Conversation(
     // red failure row — the user cancelled it themselves. Cleared when the result lands.
     @Volatile
     private var interruptRequested = false
+
+    /**
+     * Per-turn scratch is consumed by the turn's own result. A process that dies (or is stopped / replaced)
+     * before that result leaves it armed, and the NEXT process's first turn then inherits it: a pending ■
+     * repaints a genuine failure as the user's own cancel (no error row, no failure push, no degraded count),
+     * and a stale placeholder or per-call usage is attributed to the wrong turn (lifecycle design S3(e) /
+     * audit L1). Every launch starts a fresh turn context, so [launchProcess] resets it — the one boundary
+     * every new process crosses.
+     */
+    private fun resetTurnScratch() {
+        interruptRequested = false
+        sawSyntheticThisTurn = false
+        lastSyntheticText = null
+        lastCallUsage = null
+        awaitingPostCompactUsage = false
+    }
 
     // UNCONSUMED-PROMPT LEDGER (issue #122). A prompt is only PROVEN delivered when the CLI echoes it
     // back on stdout (`--replay-user-messages` replays a user message once it is actually consumed) —
@@ -993,9 +1060,8 @@ class Conversation(
             // eager launch below is still a no-op for OpenCode (argv needs a prompt; the guard in
             // launchProcess defers to the first sendPrompt, which anchors on sessionId ?: openedResumeId).
             launchProcess(
-                AgentSpec(
-                    workdir, resumeId, model, launchMode(), effort = this.effort, thinking = this.thinking, agentPreset = this.agentPreset,
-                    permissionMode = launchPermissionMode(), serviceTier = this.serviceTier, forkSession = fork,
+                launchSpec(
+                    resumeId = resumeId, forkSession = fork,
                     // ONLY here: this is the one launch the user asked for by tapping "Continue here".
                     // Codex names the branch it forks for this take-over after it (issue #347); a later
                     // relaunch resumes the branch in place and must not rename anything again.
@@ -1401,11 +1467,7 @@ class Conversation(
         stopProcess(preservePendingBridgeGrantToken = initialSend?.bridgeGrantToken)
         val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
-            AgentSpec(
-                workdir, resumeId = resumeId, model = model, mode = launchMode(), effort = effort, thinking = thinking, agentPreset = agentPreset,
-                permissionMode = launchPermissionMode(), serviceTier = serviceTier,
-                forkSession = fork, initialPrompt = initialSend?.text,
-            ),
+            launchSpec(resumeId = resumeId, forkSession = fork, initialPrompt = initialSend?.text),
             armExecuting = armExecuting,
             initialSend = initialSend,
         )
@@ -1516,6 +1578,7 @@ class Conversation(
      *  effect on the next turn (Claude relaunches then, Codex applies it in that turn's params). */
     suspend fun switchModel(newModel: String?) {
         model = newModel
+        modelPickPending = true
         backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
         val normalizedEffort = backend.normalizeEffort(newModel, effort)
         val effortChanged = normalizedEffort != effort
@@ -1665,7 +1728,37 @@ class Conversation(
     /** The raw `--permission-mode` string overrides [launchMode], so a remote run never carries one. */
     private fun launchPermissionMode(): String? = if (remoteExecution) null else permissionMode
 
+    /**
+     * The ONE place a launch's [AgentSpec] is assembled from the conversation's live knobs (lifecycle design S1).
+     * Every launch point used to build its own, and they drifted (design §4.1 / audit H1, L2). The defaults are
+     * the common case: resume the live id, else the opened one; fork only pre-first-turn and only if open()
+     * decided to. Each call site passes just what differs. Mode is always [launchMode]: launchProcess
+     * re-applies the remote-execution downgrade at its choke point anyway (idempotent), plus the bridge
+     * preamble, clean room and rewind truncation, which stay there.
+     *
+     * The [model] / [thinking] / [agentPreset] overrides exist only to keep two sites byte-for-byte as they
+     * were (the control-plane cold start, switchDirectory) until those differences are ruled on.
+     * Build it immediately before [launchProcess]: it snapshots the knobs at call time.
+     */
+    private fun launchSpec(
+        resumeId: String? = sessionId ?: openedResumeId,
+        forkSession: Boolean = if (sessionId == null) openedWithFork else false,
+        initialPrompt: String? = null,
+        takeOver: Boolean = false,
+        model: String? = this.model,
+        thinking: Boolean? = this.thinking,
+        agentPreset: String? = this.agentPreset,
+    ): AgentSpec = AgentSpec(
+        workdir, resumeId = resumeId, model = model, mode = launchMode(), effort = effort, thinking = thinking,
+        agentPreset = agentPreset, permissionMode = launchPermissionMode(), serviceTier = serviceTier,
+        forkSession = forkSession, takeOver = takeOver, initialPrompt = initialPrompt,
+    )
+
     private suspend fun launchProcess(rawSpec: AgentSpec, armExecuting: Boolean = false, initialSend: InitialSend? = null) {
+        // A closed conversation never spawns again (D5): a sender that still held this conversation when the
+        // reaper / closeIfIdle closed it lands here. Failing the launch routes every caller through its existing
+        // "agent failed to start" path (lazy start / relaunch: PocketError, no ack, promptId forgotten).
+        if (closed.get()) throw IllegalStateException("conversation $convoId is closed")
         // OpenCode requires a message argument — can't launch without one (opencode run exits with error).
         // Defer to sendPrompt() which always provides initialPrompt.
         if (backend.kind == AgentKind.OPENCODE && rawSpec.initialPrompt == null) {
@@ -1683,7 +1776,21 @@ class Conversation(
         } else {
             rawSpec
         }
-        val cleanSpec = if (cleanRoom) securedSpec.copy(cleanRoom = true) else securedSpec
+        // #367 HIGH-1, at the ONE choke point: a remote run's CLI is never launched in a mode that applies
+        // edits without a ControlRequest. Enforced here rather than per call site, because the call sites
+        // (lazy first prompt, one-shot drains, lock heal, /clear, directory switch, …) build their own
+        // AgentSpec and the lazy first-prompt spawn — the one a run actually takes — used to pass the raw
+        // ceiling straight through. Idempotent for callers that already pass [launchMode]; a local
+        // conversation is untouched.
+        val modeSpec = if (remoteExecution) {
+            securedSpec.copy(
+                mode = dev.ccpocket.daemon.execution.ExecutionSandbox.launchMode(securedSpec.mode, remoteExecution = true),
+                permissionMode = null,
+            )
+        } else {
+            securedSpec
+        }
+        val cleanSpec = if (cleanRoom) modeSpec.copy(cleanRoom = true) else modeSpec
         // REWIND/FORK truncation (issue #282), applied at the ONE choke point every launch path funnels
         // through so no caller can forget it — and gated on `sessionId == null`, which is what makes it
         // fire exactly once. Only the FIRST launch is the branching one; after the CLI reports the forked
@@ -1696,6 +1803,8 @@ class Conversation(
             ?: cleanSpec
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
+        modelPickPending = false // …including a model pick: this process's own init may now report the resolved id
+        resetTurnScratch()
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val launchGeneration = processGeneration
         val backendLabel = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name } ?: AgentBackendLabel.UNKNOWN
@@ -1710,6 +1819,33 @@ class Conversation(
         // so a new backend gets it without a per-launcher edit.
         if (remoteExecution) dev.ccpocket.daemon.execution.ExecutionSandbox.stripChildEnv(builder.environment())
         val p = AgentProcess.start(builder, scope)
+        // From here on an OS process exists. ANY failure before its pump runs — attach throwing, the
+        // conversation closing mid-launch, a redelivery write failing, the caller being cancelled — used to
+        // leave `proc` pointing at a live process nobody reads: the next prompt was queued into it and never
+        // ran, `executing` stuck true (lifecycle design D5 / S3(c)). Roll the handle back and stop the process.
+        try {
+            launchStarted(p, spec, launchGeneration, backendLabel, armExecuting, initialSend)
+        } catch (error: Throwable) {
+            if (proc === p) {
+                proc = null
+                bridge = null // published together with `proc`; its pump never ran, so it holds no ask
+            }
+            withContext(NonCancellable) { runCatching { p.shutdown() } }
+            throw error
+        }
+    }
+
+    /** [launchProcess] once its OS process [p] exists: publish it, attach the backend, re-inject the ledger,
+     *  record the launch's own prompt and start the pump. Throwing here rolls [p] back (see the caller). */
+    private suspend fun launchStarted(
+        p: AgentProcess,
+        spec: AgentSpec,
+        launchGeneration: Long,
+        backendLabel: AgentBackendLabel,
+        armExecuting: Boolean,
+        initialSend: InitialSend?,
+    ) {
+        lifecycleProbe?.invoke(LifecyclePoint.LAUNCH_AFTER_START)
         val io = AgentIo(
             writeLine = p::writeLine,
             emit = { sink.emit(it) }, // read sink dynamically (reattach)
@@ -1842,6 +1978,10 @@ class Conversation(
                 SafeMetrics(backend = backendLabel))
             throw error
         }
+        // close() may have landed while this launch was in flight: it found no handle to stop (or stopped one
+        // this launch then replaced), and cancelled the scope this process's pumps run on. Do not hand it a
+        // prompt — fail, and let the rollback stop it (D5).
+        failIfClosedDuringLaunch()
         // RE-INJECTION (issue #122 ③): whatever the LAST process took to its grave — prompts written to
         // its stdin (or its internal mid-turn queue) that never produced a consumption replay — is
         // re-handed to this fresh process, oldest first, before anything else rides it. This is the old
@@ -1879,6 +2019,7 @@ class Conversation(
         // with zero stdout for OPENCODE_STARTUP_TIMEOUT_MS, kill it and surface an error — the pump
         // would otherwise block on `for (line in p.stdout)` forever (issue: opencode run with an
         // invalid --model on a resumed session exits neither stdout nor stderr, just hangs).
+        failIfClosedDuringLaunch() // the redelivery writes above suspend — re-check before anything goes live
         if (backend.kind == AgentKind.OPENCODE) {
             scope.launch(CoroutineName("opencode-watchdog-$convoId")) {
                 val windowMs = System.getProperty(OPENCODE_WATCHDOG_PROP)?.toLongOrNull() ?: OPENCODE_STARTUP_TIMEOUT_MS
@@ -1893,6 +2034,14 @@ class Conversation(
                     revokeAllBridgeGrants()
                     p.shutdown(eofGraceMs = 1_000, termGraceMs = 1_000, forceGraceMs = 1_000)
                     p.awaitExit()
+                    lifecycleProbe?.invoke(LifecyclePoint.WATCHDOG_AFTER_EXIT)
+                    // Same-process check AGAIN after the kill: shutdown + awaitExit suspend for seconds, and a
+                    // /clear or directory switch plus the next prompt may have replaced this process meanwhile.
+                    // Nulling `proc` / clearing the turn now would orphan that replacement (lifecycle design D3').
+                    if (proc !== p) {
+                        log.info("$convoId OpenCode watchdog: process ${p.pid} was replaced while it was being killed — leaving the new one alone")
+                        return@launch
+                    }
                     // Null proc + clear state so the next sendPrompt triggers a fresh relaunch
                     // (without this, subsequent prompts would write into the dead stdin and be lost)
                     proc = null
@@ -1911,8 +2060,62 @@ class Conversation(
             }
         }
         scope.launch(CoroutineName("pump-$convoId")) {
-            pump(p, b, launchGeneration)
+            try {
+                pump(p, b, launchGeneration)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                pumpCrashed(p, b, e)
+            }
         }
+    }
+
+    private fun failIfClosedDuringLaunch() {
+        if (closed.get()) throw IllegalStateException("conversation $convoId was closed during the launch")
+    }
+
+    /** One line or event the pump could not handle — logged and reported, then skipped (see [pump]). */
+    private fun pumpEventFailed(what: String, e: Exception) {
+        log.error("$convoId pump: failed to handle $what — skipped", e)
+        Diagnostics.report(ErrorPath.AGENT_PROTOCOL, Stage.APPLY, ErrorCode.UNEXPECTED, e,
+            SafeMetrics(backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }))
+    }
+
+    /**
+     * The pump escaped its per-event isolation (its exit/death handling threw). Without this the coroutine
+     * failed into the SupervisorJob with no trace on the wire and the session wedged. Give it a terminal
+     * state the way an unexpected death does: stop the process this pump served, drop the handle so the
+     * next prompt respawns, clear the turn and tell the client. A newer launch that already owns the
+     * conversation, or a deliberate stop, is left alone — including one that appears WHILE this process is
+     * being shut down (see below). [b] is this process's own permission bridge.
+     */
+    private suspend fun pumpCrashed(p: AgentProcess, b: PermissionBridge, e: Exception) {
+        log.error("$convoId pump crashed — stopping its process and settling the session", e)
+        Diagnostics.report(ErrorPath.TURN, Stage.EXIT, ErrorCode.UNEXPECTED, e,
+            SafeMetrics(backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }), isError = true)
+        val owned = proc === p
+        if (!owned && (proc != null || intentionalStop)) return
+        if (owned) proc = null
+        runCatching { p.shutdown() }
+        lifecycleProbe?.invoke(LifecyclePoint.PUMP_CRASHED_AFTER_SHUTDOWN)
+        // The shutdown above suspends for up to the whole EOF → TERM → KILL ladder, and `proc` is already null:
+        // a prompt landing meanwhile lazily started a NEW process. Clearing the turn, revoking grants or
+        // dropping `bridge` now would hit that process — its running turn reads idle, its pending asks vanish
+        // from hasPendingAsk / the approval inbox, and the reaper may take it mid-question (lifecycle design
+        // D3''). Settle only what belonged to this process — its own bridge's open cards — and stop there; the
+        // newer launch owns the conversation, so "send again to restart it" would be stale advice too.
+        if (proc != null) {
+            log.info("$convoId pump crash: a newer process took over during the shutdown — settling only process ${p.pid}")
+            runCatching { b.cancelAll() }
+            return
+        }
+        revokeAllBridgeGrants()
+        clearTurnWork()
+        runCatching { bridge?.cancelAll() }
+        bridge = null
+        runCatching { for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId) }
+        runCatching { backend.onProcessEnded(sessionId) }
+        sink.emit(PocketError("process_exited", "agent session stopped after an internal daemon error — send again to restart it", convoId))
     }
 
     /**
@@ -1965,7 +2168,18 @@ class Conversation(
         var leftoverTasksSettling = false
         for (line in p.stdout) {
             lastActivityMs = System.currentTimeMillis()
-            for (ev in backend.parse(line)) {
+            // PER-EVENT ISOLATION (audit 2026-10-04): one exception while parsing or handling one line used to
+            // fail this coroutine silently — no death branch, stdout no longer read, the turn "executing"
+            // forever. A failed line/event is reported and skipped; the stream goes on.
+            val events = try {
+                backend.parse(line)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                pumpEventFailed("parse", e)
+                emptyList()
+            }
+            for (ev in events) try {
                 when (ev) {
                     is AgentEvent.SessionInit -> {
                         if (ev.sessionId != null && ev.sessionId != sessionId) sessionNotice = ev.notice
@@ -2019,7 +2233,9 @@ class Conversation(
                             }
                             sessionId = newSid
                         }
-                        ev.model?.let { model = it; backfilledModel = null } // the agent's resolved model beats the transcript guess
+                        // the agent's resolved model beats the transcript guess — but never a user pick this process
+                        // was launched before (it would report the OLD model; see [modelPickPending])
+                        ev.model?.let { if (!modelPickPending) model = it; backfilledModel = null }
                         if (firstTime && sessionId != null) {
                             reemitLive = false // this announce already carries the fresh sessionId + mode
                             log.info("$convoId session live: $sessionId")
@@ -2096,7 +2312,8 @@ class Conversation(
                         }
                     }
                     is AgentEvent.ToolResult -> {
-                        val wasSubagent = ev.parentId == null && ev.toolUseId?.let(subagentRuns::containsKey) == true
+                        val wasSubagent = ev.parentId == null &&
+                            ev.toolUseId?.let { id -> synchronized(subagentRuns) { subagentRuns.containsKey(id) } } == true
                         if (ev.parentId == null) finishSubagentFromResult(ev)
                         // an ordinary tool that returned a PICTURE gets a RESULT with thumbnails (issue #332);
                         // every other ordinary tool gets a bare outcome RESULT (issue #380 live folding), which
@@ -2363,6 +2580,16 @@ class Conversation(
                         ErrorCode.DECODE_FAILED, metrics = SafeMetrics(byteCount = ev.raw.encodeToByteArray().size.toLong(),
                             backend = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name }))
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                pumpEventFailed(ev::class.simpleName ?: "event", e)
+                // A turn end that failed half-way must still END the turn: a client waiting on TurnDone would
+                // otherwise spin forever. Only when it failed before the hand-off — never a second TurnDone.
+                if (ev is AgentEvent.TurnResult && isExecuting()) {
+                    settleTurnWork(expectContinuation = false)
+                    runCatching { sink.emit(TurnDone(convoId, ev.finalText, null, error = "daemon failed to process the turn result")) }
+                }
             }
         }
         log.info("$convoId pump ended (intentionalStop=$intentionalStop)")
@@ -2373,6 +2600,16 @@ class Conversation(
             // stdout EOF precedes the last transcript flush, so wait for the real process exit before
             // classifying it (intentional stops settle in stopProcess)
             p.awaitExit()
+            lifecycleProbe?.invoke(LifecyclePoint.DEATH_AFTER_AWAIT_EXIT)
+            // …and again after it: awaitExit suspends (up to 5+2 s), and a /clear, directory switch or settings
+            // relaunch landing meanwhile has already stopped this process and published a new one. Everything
+            // below (clear the turn, revoke grants, drop the handle, heal, re-launch a one-shot drain) would act
+            // on THAT process — orphaning it and minting a second writer (lifecycle design D3). The stop that
+            // replaced us settled this process; its death is history. Stopgap until the lifecycle lock (S4).
+            if (proc !== p) {
+                log.info("$convoId pump: process ${p.pid} was replaced while its exit was awaited — leaving the new one alone")
+                return
+            }
             if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && turnCompleted && p.isCleanTurnExit()) {
                 // The completed turn's ACTIVE authority always dies here. A later prompt that raced this
                 // clean edge keeps its still-staged token: pending authority grants nothing until that exact
@@ -2384,6 +2621,7 @@ class Conversation(
                 bridge?.cancelAll()
                 bridge = null
                 proc = null // dead handle dropped FIRST — a failed drain-launch below must not leave prompts writing into it
+                lifecycleProbe?.invoke(LifecyclePoint.ONE_SHOT_AFTER_NULL)
                 if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
                     // Argv one-shot: drain ONE queued prompt per process. Pop it, then re-record it as the
                     // next launch's initialSend so SessionInit is its consumption receipt.
@@ -2393,10 +2631,9 @@ class Conversation(
                         log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
                         runCatching {
                             launchProcess(
-                                AgentSpec(
-                                    workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                                    permissionMode = permissionMode, serviceTier = serviceTier, initialPrompt = next.text,
-                                ),
+                                // never forks, even pre-first-turn on a fork-opened session (design §4.2: kept
+                                // as today pending a ruling)
+                                launchSpec(forkSession = false, initialPrompt = next.text),
                                 armExecuting = true,
                                 initialSend = InitialSend(next.key, next.text, next.images, next.bridgeGrantToken),
                             )
@@ -2416,10 +2653,7 @@ class Conversation(
                     log.info("$convoId stdin one-shot queue: relaunching with unconsumed prompt(s)")
                     runCatching {
                         launchProcess(
-                            AgentSpec(
-                                workdir, sessionId ?: openedResumeId, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                                permissionMode = permissionMode, serviceTier = serviceTier,
-                            ),
+                            launchSpec(forkSession = false), // same fork rule as the argv drain above
                             armExecuting = true,
                         )
                     }.onFailure { e ->
@@ -2523,12 +2757,7 @@ class Conversation(
             // the refused process took the prompt with it — it's still in the unconsumed ledger (no
             // replay ever came), so launchProcess re-injects it into the forked process (issue #122)
             if (hasUnconsumedPrompts()) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FORK_NOTICE)))
-            launchProcess(
-                AgentSpec(
-                    workdir, resumeId = anchor, model = model, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                    permissionMode = permissionMode, serviceTier = serviceTier, forkSession = true,
-                ),
-            )
+            launchProcess(launchSpec(resumeId = anchor, forkSession = true))
         }
         if (healed.isFailure) {
             sink.emit(
@@ -2749,12 +2978,26 @@ class Conversation(
         // mode's premature result, a settled background task — issues #55/#105) is one more "the process
         // is NOT idle despite !executing" signal, so the relaunch waits it out too.
         //
+        // …and two more (lifecycle design S7 / audit M1): still-RUNNING background work (a backgrounded
+        // build, a background sub-agent, a monitor) and a permission ask / question still waiting for the
+        // user. The relaunch kills the whole process tree: the build or sub-agent would die with it and the
+        // job panel be wiped, the open card withdrawn — all silently, which is exactly what #105 and
+        // [reapStaleJobs] exist to prevent. Same rule as a running turn: this prompt rides the current
+        // process, pendingRelaunch survives, and the change applies on the first send that finds none of
+        // these. Until then the badge already shows the new value (the optimistic announce at switch time),
+        // as it does for a switch made mid-turn.
+        //
         // (issue #104) snapshot the process state BEFORE the (re)launch below: a prompt acked during a fresh
         // spawn or a settings relaunch is exactly the window a client "delivered but no turn" (turnStalled) targets.
         val firstSpawn = proc == null
         val workAtSend = turnWork
-        val relaunching = proc != null && !workAtSend.executing && pendingRelaunch &&
+        val relaunchDue = proc != null && !workAtSend.executing && pendingRelaunch &&
             relaunchGraceElapsed() && !continuationExpected(workAtSend)
+        val heldByWork = relaunchDue && (workAtSend.backgroundWork || hasPendingAsk())
+        if (heldByWork) {
+            log.info("$convoId settings relaunch deferred: background work=${workAtSend.backgroundWork} pendingAsk=${hasPendingAsk()} — prompt rides the current process")
+        }
+        val relaunching = relaunchDue && !heldByWork
         // `executing` must be armed with a happens-before edge to the new pump: a process that dies
         // instantly at startup runs its death-branch `executing = false` on the pump thread, and that
         // clear MUST win. Arming AFTER the launch (as before) lost the race under load — the late `true`
@@ -2787,15 +3030,11 @@ class Conversation(
             // openedResumeId from the SQLite scanner — a cold resume (daemon restart, tap an old session)
             // MUST fall back to openedResumeId or the first prompt silently forks a brand-new session.
             // A truly stale id is recovered at process death (SESSION_NOT_FOUND clears the lineage).
-            val anchor = sessionId ?: openedResumeId
-            val fork = if (sessionId == null) openedWithFork else false
+            val lazySpec = launchSpec(initialPrompt = outgoing) // anchor + fork decision: launchSpec's defaults
+            lifecycleProbe?.invoke(LifecyclePoint.AFTER_SPAWN_DECISION)
             val launched = runCatching {
                 launchProcess(
-                    AgentSpec(
-                        workdir, anchor, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                        permissionMode = permissionMode, serviceTier = serviceTier,
-                        forkSession = fork, initialPrompt = outgoing,
-                    ),
+                    lazySpec,
                     armExecuting = true,
                     initialSend = initialSend,
                 )
@@ -2877,15 +3116,10 @@ class Conversation(
             return false
         }
         if (proc == null) {
-            val anchor = sessionId ?: openedResumeId
-            val fork = if (sessionId == null) openedWithFork else false
             val launched = runCatching {
-                launchProcess(
-                    AgentSpec(
-                        workdir, anchor, model, mode, effort = effort,
-                        permissionMode = permissionMode, serviceTier = serviceTier, forkSession = fork,
-                    ),
-                )
+                // no thinking / agentPreset on this launch: today's behaviour, kept pending a ruling (design
+                // §4.2 #7; only Codex has native control ops, and it reads neither)
+                launchProcess(launchSpec(thinking = null, agentPreset = null))
             }
             if (launched.isFailure) {
                 reply("Could not start the agent for $opLabel: ${launched.exceptionOrNull()?.message ?: "unknown error"}")
@@ -3008,12 +3242,7 @@ class Conversation(
         runtimeEffort = null
         runtimeContextWindow = null
         runtimeAgentPreset = null
-        launchProcess(
-            AgentSpec(
-                workdir, resumeId = null, model = model, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                permissionMode = permissionMode, serviceTier = serviceTier,
-            ),
-        )
+        launchProcess(launchSpec(resumeId = null, forkSession = false))
         sink.emit(ConvoHistory(convoId, emptyList())) // wipe the phone's transcript
         sink.emit(live(null))                          // sessionId backfills on the next init
     }
@@ -3100,12 +3329,9 @@ class Conversation(
         failedTurnStreak = 0 // fresh session in a new cwd — degraded state died with the old transcript
         sawSyntheticThisTurn = false
         lastSyntheticText = null
-        launchProcess(
-            AgentSpec(
-                workdir, resumeId = null, model = null, mode = mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                permissionMode = permissionMode, serviceTier = serviceTier,
-            ),
-        )
+        // model = null: today's behaviour, kept pending a ruling (design §4.2 #9 / audit L2: the header keeps
+        // showing the user's pick while the process runs the default)
+        launchProcess(launchSpec(resumeId = null, forkSession = false, model = null))
         emitCommands() // project commands differ per workdir
     }
 
@@ -3158,6 +3384,7 @@ class Conversation(
         bridgeRequestPermit.set(false)
         bridge?.cancelAll()
         proc?.shutdown() // waits for real exit (force-kill fallback) — file is quiet after this
+        lifecycleProbe?.invoke(LifecyclePoint.STOP_AFTER_SHUTDOWN)
         proc = null
         bridge = null
         settleSubagents(includeBackground = true) // sub-agents died with the tree — stop their cards spinning
@@ -3167,9 +3394,9 @@ class Conversation(
         backend.onProcessEnded(sessionId)
     }
 
-    // ---- sub-agent (Task/Agent) card lifecycle (issue #77) — pump-thread only, like `jobs` ----
+    // ---- sub-agent (Task/Agent) card lifecycle (issue #77) — guarded by subagentRuns' monitor (S6) ----
 
-    private fun rememberSubagent(id: String, tool: String, background: Boolean) {
+    private fun rememberSubagent(id: String, tool: String, background: Boolean) = synchronized(subagentRuns) {
         subagentRuns[id] = SubagentRun(tool, background)
         // bounded like the jobs registry: a leaked entry (completion never seen) must not grow forever
         while (subagentRuns.size > MAX_SUBAGENTS) subagentRuns.remove(subagentRuns.keys.first())
@@ -3244,9 +3471,12 @@ class Conversation(
      *  it); its ERROR result means the launch itself failed, so settle now. */
     private suspend fun finishSubagentFromResult(ev: AgentEvent.ToolResult) {
         val id = ev.toolUseId ?: return
-        val run = subagentRuns[id] ?: return
-        if (run.background && !ev.isError) return
-        subagentRuns.remove(id)
+        val run = synchronized(subagentRuns) {
+            val run = subagentRuns[id] ?: return
+            if (run.background && !ev.isError) return
+            subagentRuns.remove(id)
+            run
+        }
         emitSubagentResult(id, run.tool, ok = !ev.isError, output = subagentReport(ev.content))
     }
 
@@ -3255,25 +3485,33 @@ class Conversation(
      *  it carries the full report, where the notification only has a summary. */
     private suspend fun finishSubagentFromTask(ev: AgentEvent.BackgroundTaskUpdated) {
         val id = ev.toolUseId ?: return
-        val run = subagentRuns[id]?.takeIf { it.background } ?: return
         val ok = when (ev.status?.lowercase()) {
             "completed", "complete", "done", "success" -> true
             "failed", "error", "killed", "cancelled", "canceled", "interrupted" -> false
             else -> return // not terminal — keep the card running
         }
-        subagentRuns.remove(id)
+        val run = synchronized(subagentRuns) {
+            val run = subagentRuns[id]?.takeIf { it.background } ?: return
+            subagentRuns.remove(id)
+            run
+        }
         emitSubagentResult(id, run.tool, ok, output = subagentReport(ev.summary))
     }
 
     /** Settle every still-tracked sub-agent as not-ok (its completion can no longer arrive). */
     private suspend fun settleSubagents(includeBackground: Boolean) {
-        val iter = subagentRuns.entries.iterator()
-        while (iter.hasNext()) {
-            val (id, run) = iter.next()
-            if (!includeBackground && run.background) continue
-            iter.remove()
-            emitSubagentResult(id, run.tool, ok = false, output = null)
+        val settled = synchronized(subagentRuns) {
+            val out = ArrayList<Pair<String, SubagentRun>>()
+            val iter = subagentRuns.entries.iterator()
+            while (iter.hasNext()) {
+                val (id, run) = iter.next()
+                if (!includeBackground && run.background) continue
+                iter.remove()
+                out += id to run
+            }
+            out
         }
+        for ((id, run) in settled) emitSubagentResult(id, run.tool, ok = false, output = null)
     }
 
     private suspend fun emitSubagentResult(id: String, tool: String, ok: Boolean, output: String?) {
@@ -3297,6 +3535,7 @@ class Conversation(
     }
 
     suspend fun close() {
+        closed.set(true) // before anything suspends: no launch may start from here on (see [closed])
         bridgeRequestGate.cancelAll()
         grants.endSession(convoId) // approval design M2: no task grant survives its session
         riskEngine?.forget(convoId) // M3: the sequence ledger dies with the conversation

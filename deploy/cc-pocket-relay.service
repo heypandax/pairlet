@@ -11,7 +11,11 @@ Group=ccpocket
 
 # Small box (1.8 GB RAM): cap the heap. JAVA_TOOL_OPTIONS is read by the JVM itself,
 # so it applies regardless of the launcher script.
-Environment=JAVA_TOOL_OPTIONS=-Xmx256m
+# ExitOnOutOfMemoryError: an OOM'd JVM otherwise keeps running half-dead and Restart=always never
+# fires; exiting lets systemd bring a clean relay back in RestartSec. Outbound buffers are bounded in code
+# per socket (RelayServer.MAX_OUTBOUND_BYTES) and relay-wide (MAX_RELAY_OUTBOUND_BYTES, sized from this -Xmx —
+# change them together); this is the backstop behind both.
+Environment="JAVA_TOOL_OPTIONS=-Xmx256m -XX:+ExitOnOutOfMemoryError"
 
 # Push credentials (APNs .p8 + FCM service account). Optional ("-"): without it the relay still
 # starts and logs "push disabled (logging only)". Provisioned out-of-band to /etc/cc-pocket-relay/,

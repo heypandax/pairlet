@@ -118,6 +118,8 @@ class RunService(
         journal.purge()
     }
 
+    override fun hasLiveRuns(): Boolean = journal.live().isNotEmpty()
+
     // ================================================================= handlers
 
     private fun onGrantQuery(deviceId: String, pin: String, f: ExecutionGrantQuery): Frame {

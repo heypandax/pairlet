@@ -59,8 +59,25 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// A throwaway home for the test JVM. Every daemon store resolves its default path from `user.home`
+// (`~/.cc-pocket/…`, directly or through Identity.defaultPath()), so a test that leans on a default —
+// `DaemonCore(emptyMap())` alone loads prefs/presets/schedules/approval history and sweeps the spawned-
+// session journal — would otherwise read and rewrite the developer's REAL daemon state. Pointing
+// `user.home` here redirects all of them at once; RealHomeGuard (src/test) fails any test JVM that
+// still resolves into the real home. Wiped before each run so no state leaks between runs.
+val testHome = layout.buildDirectory.dir("test-home")
+
 tasks.test {
     useJUnitPlatform()
+    val home = testHome.get().asFile
+    systemProperty("user.home", home.absolutePath)
+    // CC_POCKET_IDENTITY repoints Identity.defaultPath() — and with it every store beside identity.json —
+    // past user.home; a developer shell that exports it must not drag the tests back to the real files.
+    environment.remove("CC_POCKET_IDENTITY")
+    doFirst {
+        home.deleteRecursively()
+        home.mkdirs()
+    }
     testLogging {
         // CI has no test-report artifact — the console line is all we get on a failure, so it must
         // carry the assertion message + stack, not just "AssertionFailedError at Foo.kt:85"

@@ -577,7 +577,7 @@ fun ToolTurnBand(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    tool, color = Tok.tx, style = TypeRole.captionMono, fontWeight = FontWeight.Medium,
+                    tool, color = Tok.tx, style = TypeRole.captionMono.merge(tightCenter(TypeRole.captionMono.fontSize)), fontWeight = FontWeight.Medium,
                     modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.raised)
                         .padding(horizontal = 7.dp, vertical = 5.dp),
                 )
@@ -609,7 +609,7 @@ private fun UnknownOutcome() {
         StateRing(Tok.muted)
         Text(
             stringResource(Res.string.tool_process_unknown_one),
-            color = Tok.tx2, style = TypeRole.captionMono, fontWeight = FontWeight.Medium,
+            color = Tok.tx2, style = TypeRole.captionMono.merge(tightCenter(TypeRole.captionMono.fontSize)), fontWeight = FontWeight.Medium,
         )
     }
 }
@@ -622,7 +622,7 @@ private fun ToolStatus(ok: Boolean) {
         StateMarkGlyph(if (ok) dev.ccpocket.app.ui.session.StateMark.DOT else dev.ccpocket.app.ui.session.StateMark.SQUARE, tint, 7.dp)
         Text(
             stringResource(if (ok) Res.string.done else Res.string.chat_tool_failed),
-            color = Tok.tx2, style = TypeRole.captionMono, fontWeight = FontWeight.Medium,
+            color = Tok.tx2, style = TypeRole.captionMono.merge(tightCenter(TypeRole.captionMono.fontSize)), fontWeight = FontWeight.Medium,
         )
     }
 }

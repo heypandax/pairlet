@@ -35,6 +35,24 @@ class RateLimiter(private val clock: () -> Long = System::currentTimeMillis) {
         return allowed
     }
 
+    /** True while [key] has used up [limit] in its current window (or is locked out) — WITHOUT counting a call.
+     *  For a budget charged only on failure ([check] after the fact) but enforced before every attempt. */
+    fun exhausted(key: String, limit: Int, windowMs: Long): Boolean {
+        val now = clock()
+        var out = false
+        buckets.computeIfPresent(key) { _, b ->
+            out = now < b.lockedUntil || (now - b.windowStart < windowMs && b.count >= limit)
+            b
+        }
+        return out
+    }
+
+    /** Give back one call [check] allowed, for a call that turned out legitimate — e.g. a socket counted
+     *  before its handshake that then authenticated. Never lifts a lockout and never goes below zero. */
+    fun refund(key: String) {
+        buckets.computeIfPresent(key) { _, b -> b.also { if (it.count > 0) it.count-- } }
+    }
+
     /** Drop idle buckets so the map can't grow without bound. Call periodically. */
     fun sweep(idleMs: Long = 3_600_000) {
         val cutoff = clock() - idleMs

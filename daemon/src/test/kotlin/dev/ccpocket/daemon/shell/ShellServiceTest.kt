@@ -14,7 +14,15 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Path
+import java.util.concurrent.Callable
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import kotlin.io.path.readText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -55,6 +63,54 @@ class ShellServiceTest {
     }
 
     @Test
+    fun session_rule_never_auto_runs_a_chained_command() = runBlocking {
+        // audit 2026-10-04 M3: the quick terminal shares the two-token session rule, so a remembered
+        // `echo hi` must not auto-run `echo hi && …` — chained lines re-ask; plain same-prefix lines still ride
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = CopyOnWriteArrayList<Frame>()
+        val coordinator = dev.ccpocket.daemon.approval.ApprovalCoordinator(scope)
+        val shell = ShellService(scope, coordinator = coordinator, verdictTimeoutMs = 5_000)
+        val workdir = System.getProperty("java.io.tmpdir")
+
+        // returns the ask if one was shown (then denied so nothing runs), or null if the command auto-ran
+        suspend fun runOnce(command: String): PermissionAsk? {
+            emitted.clear()
+            val job = scope.async { shell.run(RunShellCommand("c1", command, workdir), PermissionMode.DEFAULT) { emitted += it } }
+            kotlinx.coroutines.withTimeout(5_000) {
+                while (emitted.none { it is PermissionAsk || it is ShellResult }) delay(10)
+            }
+            val ask = emitted.filterIsInstance<PermissionAsk>().firstOrNull()
+            if (ask != null) {
+                coordinator.onVerdict(dev.ccpocket.protocol.PermissionVerdict("c1", ask.askId, dev.ccpocket.protocol.Decision.DENY))
+            }
+            job.await()
+            return ask
+        }
+
+        // seed the rule: approve `echo hi` with session memory
+        val seedJob = scope.async { shell.run(RunShellCommand("c1", "echo hi", workdir), PermissionMode.DEFAULT) { emitted += it } }
+        kotlinx.coroutines.withTimeout(5_000) { while (emitted.none { it is PermissionAsk }) delay(10) }
+        val seed = emitted.filterIsInstance<PermissionAsk>().single()
+        assertEquals("echo hi", seed.rule)
+        coordinator.onVerdict(dev.ccpocket.protocol.PermissionVerdict("c1", seed.askId, dev.ccpocket.protocol.Decision.ALLOW, remember = true))
+        seedJob.await()
+
+        // harmless payloads only: should the gate regress, the test still runs nothing destructive
+        val chained = listOf(
+            "echo hi && echo chained", "echo hi ; echo chained", "echo hi | cat", "echo hi \$(echo chained)",
+            "echo hi `echo chained`", "echo hi\necho chained", "echo hi > /dev/null", "echo hi ;echo chained",
+            "echo hi&&echo chained", "echo hi;echo chained", "echo hi|cat",
+        )
+        val autoRun = chained.filter { runOnce(it) == null }
+        assertTrue(autoRun.isEmpty(), "quick-terminal session rule auto-ran chained commands: ${autoRun.map { it.replace("\n", "\\n") }}")
+
+        // a plain same-prefix command still rides the remembered rule — no card
+        assertEquals(null, runOnce("echo hi there"), "plain same-prefix command must auto-run")
+        assertEquals(0, emitted.filterIsInstance<ShellResult>().single().exitCode)
+        scope.cancel()
+    }
+
+    @Test
     fun approval_timeout_withdraws_the_card_and_reports_denied() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val emitted = CopyOnWriteArrayList<Frame>() // gate completes on a background delay thread
@@ -74,5 +130,85 @@ class ShellServiceTest {
         // and the command is reported denied — never run
         assertTrue(emitted.filterIsInstance<ShellResult>().single().denied)
         scope.cancel()
+    }
+
+    // ------------------------------------------------- subprocess lifetime
+
+    @TempDir
+    lateinit var tmp: Path
+
+    private val isWindows = System.getProperty("os.name").lowercase().contains("win")
+
+    @Test
+    fun a_background_job_holding_stdout_does_not_wedge_the_terminal() {
+        assumeTrue(!isWindows)
+        val pidFile = tmp.resolve("bg.pid")
+        val shell = ShellService(CoroutineScope(Dispatchers.Unconfined))
+        try {
+            // `npm run dev &`: the shell exits at once, the job it left behind keeps our stdout pipe open
+            val first = within(15_000) { runBypass(shell, "echo hi; sleep 60 & echo \$! > '$pidFile'") }
+            assertNotNull(first, "ShellResult never came: the background job's pipe wedged execute()")
+            assertEquals(0, first.exitCode)
+            assertTrue(first.stdout.contains("hi"), first.stdout)
+            // and the session's terminal is free again
+            val second = within(15_000) { runBypass(shell, "echo again") }
+            assertNotNull(second)
+            assertEquals(null, second.error)
+            assertTrue(second.stdout.contains("again"), second.stdout)
+        } finally {
+            pidFrom(pidFile)?.let { pid -> ProcessHandle.of(pid).ifPresent { it.destroyForcibly() } }
+        }
+    }
+
+    @Test
+    fun a_timeout_takes_down_the_whole_process_tree_not_just_the_shell() {
+        assumeTrue(!isWindows)
+        val pidFile = tmp.resolve("child.pid")
+        val shell = ShellService(CoroutineScope(Dispatchers.Unconfined))
+        try {
+            val r = within(20_000) { runBypass(shell, "sleep 60 & echo \$! > '$pidFile'; wait", timeoutMs = 1_000) }
+            assertNotNull(r, "a timed-out command never replied")
+            assertTrue(r.timedOut)
+            val child = assertNotNull(pidFrom(pidFile))
+            assertTrue(gone(child), "the shell's child survived the timeout")
+        } finally {
+            pidFrom(pidFile, waitMs = 0)?.let { pid -> ProcessHandle.of(pid).ifPresent { it.destroyForcibly() } }
+        }
+    }
+
+    private fun gone(pid: Long, waitMs: Long = 5_000): Boolean {
+        val deadline = System.currentTimeMillis() + waitMs
+        while (System.currentTimeMillis() < deadline) {
+            if (!ProcessHandle.of(pid).map { it.isAlive }.orElse(false)) return true
+            Thread.sleep(20)
+        }
+        return false
+    }
+
+    private fun runBypass(shell: ShellService, command: String, timeoutMs: Long = 30_000): ShellResult = runBlocking {
+        val out = CopyOnWriteArrayList<Frame>()
+        shell.run(RunShellCommand("c1", command, tmp.toString(), timeoutMs), PermissionMode.BYPASS_PERMISSIONS) { out += it }
+        out.filterIsInstance<ShellResult>().single()
+    }
+
+    /** Run [block] on its own thread and give up after [ms] — null means it was still blocked. */
+    private fun <T> within(ms: Long, block: () -> T): T? {
+        val pool = Executors.newSingleThreadExecutor { r -> Thread(r, "within").apply { isDaemon = true } }
+        return try {
+            pool.submit(Callable { block() }).get(ms, TimeUnit.MILLISECONDS)
+        } catch (_: TimeoutException) {
+            null
+        } finally {
+            pool.shutdown()
+        }
+    }
+
+    private fun pidFrom(file: Path, waitMs: Long = 5_000): Long? {
+        val deadline = System.currentTimeMillis() + waitMs
+        while (true) {
+            runCatching { file.readText().trim().toLong() }.getOrNull()?.let { return it }
+            if (System.currentTimeMillis() >= deadline) return null
+            Thread.sleep(20)
+        }
     }
 }

@@ -89,6 +89,9 @@ data class AttentionEntry(
     val workdir: String? = null,
     val sessionId: String? = null,
     val origin: String? = null,
+    // the daemon's absolute deadline (epoch ms) when one is known; null = [seconds] is the 30s convention,
+    // not a real deadline — a surface that must not invent one (the desktop bell) reads this instead
+    val expiresAt: Long? = null,
 )
 
 data class FinishedEntry(
@@ -185,6 +188,7 @@ fun PocketRepository.fleetAttention(): List<AttentionEntry> {
                 workdir = row.workdir ?: repo.workdir.value,
                 sessionId = row.sessionId,
                 origin = row.origin,
+                expiresAt = row.expiresAt,
             )
         }
     }

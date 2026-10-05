@@ -57,6 +57,7 @@ import dev.ccpocket.app.resources.st_failure
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.FirstHopHeader
 import dev.ccpocket.app.ui.FirstHopSectionLabel
 import dev.ccpocket.app.ui.session.Hairline
@@ -163,7 +164,7 @@ private fun RequestRow(e: AttentionEntry, ask: PermissionAsk?, onDeny: () -> Uni
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
                 MachineChip(e.machineName, e.os, fontSize = 12.sp, glyph = 14.dp, modifier = Modifier.weight(1f, fill = false))
                 Spacer(Modifier.weight(1f))
-                if (waiting) Text(stringResource(Res.string.ap_waiting_title), color = Tok.tx2, style = TypeRole.caption)
+                if (waiting) Text(stringResource(Res.string.ap_waiting_title), color = Tok.tx2, style = TypeRole.caption.merge(tightCenter(TypeRole.caption.fontSize)))
                 else MiniCountdownRing(seconds, e.seconds.coerceAtLeast(30))
             }
             Text(

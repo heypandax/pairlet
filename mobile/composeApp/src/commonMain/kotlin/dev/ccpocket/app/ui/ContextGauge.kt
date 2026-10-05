@@ -195,6 +195,7 @@ fun ContextCriticalCaption() {
             color = danger,
             fontSize = 12.5.sp,
             fontWeight = FontWeight.Medium,
+            style = tightCenter(12.5.sp),
         )
     }
 }

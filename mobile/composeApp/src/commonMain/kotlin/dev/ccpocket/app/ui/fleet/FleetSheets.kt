@@ -42,6 +42,7 @@ import dev.ccpocket.app.resources.fl_switch_computer
 import dev.ccpocket.app.resources.fl_tool_needs_approval
 import dev.ccpocket.app.resources.st_act_review
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.PocketSheet
 import dev.ccpocket.app.ui.fmtMmSs
 import dev.ccpocket.app.ui.tilde
@@ -123,28 +124,28 @@ fun CrossMachineBanner(entries: List<AttentionEntry>, onReview: () -> Unit, modi
         Icon(Icons.Outlined.Shield, null, tint = Tok.accent, modifier = Modifier.size(14.dp))
         if (entries.size == 1) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                Text(soonest.machineName, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+                Text(soonest.machineName, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, style = tightCenter(11.sp))
                 Text(
                     " · " + stringResource(Res.string.fl_tool_needs_approval, soonest.tool),
-                    color = Tok.tx, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = Tok.tx, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(12.sp),
                 )
             }
         } else {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                Text(waitingApprovalText(entries.size), color = Tok.tx, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(waitingApprovalText(entries.size), color = Tok.tx, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, style = tightCenter(12.sp))
                 Text(
                     " · " + entries.joinToString(", ") { it.machineName },
                     color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(11.sp),
                 )
             }
         }
         Text(
             fmtMmSs(seconds),
-            color = Tok.warn, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+            color = Tok.warn, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = tightCenter(11.sp),
         )
         Text(
-            stringResource(Res.string.st_act_review), color = Tok.base, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            stringResource(Res.string.st_act_review), color = Tok.base, fontSize = 12.sp, fontWeight = FontWeight.Bold, style = tightCenter(12.sp),
             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent)
                 .clickable(onClick = onReview).padding(horizontal = 12.dp, vertical = 5.dp),
         )

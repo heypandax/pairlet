@@ -56,6 +56,7 @@ import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.entry.EntryLabel
 import dev.ccpocket.app.ui.entry.EntryPrimaryButton
 import dev.ccpocket.app.ui.entry.EntryRouteRow
@@ -267,7 +268,7 @@ internal fun DirectoryPickerSheet(
                         Column(Modifier.padding(vertical = Metric.gap)) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
                                 Box(Modifier.size(8.dp).background(Tok.warn))
-                                Text(stringResource(Res.string.dir_picker_error), color = Tok.tx, style = TypeRole.action)
+                                Text(stringResource(Res.string.dir_picker_error), color = Tok.tx, style = TypeRole.action.merge(tightCenter(TypeRole.action.fontSize)))
                             }
                             Row(Modifier.padding(top = Metric.gap), horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
                                 EntrySecondaryButton(stringResource(Res.string.conn_retry), Modifier.weight(1f)) {
@@ -360,7 +361,7 @@ private fun BrowseDirRow(name: String, isProject: Boolean, onClick: () -> Unit) 
         Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
         Text(
-            name, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp,
+            name, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, style = tightCenter(13.5.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
         if (isProject) { HistoryBadge(); Spacer(Modifier.width(8.dp)) }
@@ -399,7 +400,7 @@ private fun PickerBreadcrumb(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Text("‹", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(onClick = onUp).padding(end = 2.dp))
+            Text("‹", color = Tok.tx2, fontSize = 18.sp, style = tightCenter(18.sp), modifier = Modifier.clickable(onClick = onUp).padding(end = 2.dp))
             crumbs.forEachIndexed { i, s ->
                 val last = i == crumbs.lastIndex
                 if (i == 0 && switchable) {
@@ -410,18 +411,18 @@ private fun PickerBreadcrumb(
                     ) {
                         Text(
                             s, color = if (last) Tok.tx else Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                            fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+                            fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, style = tightCenter(12.sp),
                         )
-                        Text(if (expanded) "▴" else "▾", color = Tok.accent, fontSize = 11.sp, modifier = Modifier.padding(start = 3.dp))
+                        Text(if (expanded) "▴" else "▾", color = Tok.accent, fontSize = 11.sp, style = tightCenter(11.sp), modifier = Modifier.padding(start = 3.dp))
                     }
                 } else {
                     Text(
                         s, color = if (last) Tok.tx else Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                        fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+                        fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, style = tightCenter(12.sp),
                         modifier = Modifier.clickable(enabled = !last) { onSegment(i) },
                     )
                 }
-                if (!last) Text("›", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                if (!last) Text("›", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, style = tightCenter(12.sp))
             }
         }
         if (switchable && expanded) {
@@ -451,9 +452,9 @@ private fun RootChoiceRow(label: String, selected: Boolean, onClick: () -> Unit)
         Spacer(Modifier.width(10.dp))
         Text(
             label, color = if (selected) Tok.accent else Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, style = tightCenter(13.sp),
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
-        if (selected) Text("✓", color = Tok.accent, fontSize = 12.sp)
+        if (selected) Text("✓", color = Tok.accent, fontSize = 12.sp, style = tightCenter(12.sp))
     }
 }

@@ -32,6 +32,7 @@ import dev.ccpocket.protocol.RegisterPush
 import dev.ccpocket.protocol.RevokeDevice
 import dev.ccpocket.protocol.Role
 import dev.ccpocket.protocol.Route
+import dev.ccpocket.protocol.WIRE_MAX_FRAME_BYTES
 import dev.ccpocket.protocol.e2e.Wire
 import dev.ccpocket.relay.analytics.AnalyticsConfig
 import dev.ccpocket.relay.analytics.AnalyticsIngress
@@ -53,6 +54,7 @@ import dev.ccpocket.relay.auth.DeviceAuthenticator
 import dev.ccpocket.relay.net.RateLimiter
 import dev.ccpocket.relay.net.clientIp
 import dev.ccpocket.relay.net.installRelayForwardedHeaders
+import dev.ccpocket.relay.net.rateLimitSubject
 import dev.ccpocket.relay.pairing.CodeStore
 import dev.ccpocket.relay.pairing.PairingService
 import dev.ccpocket.relay.store.RelayStore
@@ -74,12 +76,18 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import dev.ccpocket.protocol.Frame as PocketFrame
@@ -98,6 +106,13 @@ class RelayServer(
     private val clock: () -> Long = System::currentTimeMillis,
     analyticsConfig: AnalyticsConfig = AnalyticsConfig.disabled(),
     ga4Forwarder: Ga4Forwarder = HttpGa4Forwarder(),
+    // pre-auth deadline per handshake frame; matches the daemon's and the phone's own 15 s handshake timeout
+    private val handshakeTimeoutMs: Long = 15_000,
+    // relay-wide ceiling on bytes owed to peers (see MAX_RELAY_OUTBOUND_BYTES); injectable for tests
+    outboundBudgetBytes: Long = MAX_RELAY_OUTBOUND_BYTES,
+    // relay-wide budget of failed 6-digit pair-code lookups per window (see PAIR_CODE_FAILURE_BUDGET)
+    private val pairCodeFailureBudget: Int = PAIR_CODE_FAILURE_BUDGET,
+    private val pairCodeFailureWindowMs: Long = PAIR_CODE_FAILURE_WINDOW_MS,
 ) {
     // internal: control-plane tests attach their socket first, exactly as handleDevice does
     internal val broker = Broker()
@@ -107,10 +122,15 @@ class RelayServer(
     internal val analytics = AnalyticsIngress(analyticsConfig, limiter, ga4Forwarder, clock)
     // off-loop fan-out: a slow APNs/FCM round-trip must not block the daemon socket's control loop
     private val pushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val pushSlots = Semaphore(MAX_PUSH_IN_FLIGHT)
+    // closes of sockets other than the caller's own (supersede, revoke) run here, never inline — see closeSoon
+    private val socketScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val daemonAuth = DaemonAuthenticator(store, clock)
     private val deviceAuth = DeviceAuthenticator(store, clock)
     private val pairing = PairingService(store, clock)
     private val codeStore = CodeStore(clock)
+    // shared by every socket's OutboundQueue: the per-socket cap bounds one stalled reader, this bounds them all
+    internal val outboundBudget = OutboundBudget(outboundBudgetBytes)
 
     fun run() { server().start(wait = true) }
 
@@ -138,7 +158,8 @@ class RelayServer(
                 get("/healthz") { call.respondText("ok") }
 
                 post("/v1/pair/redeem") {
-                    val ip = call.clientIp()
+                    // an IPv6 caller is counted per /64 — per address it would own 2^64 fresh buckets
+                    val ip = rateLimitSubject(call.clientIp())
                     if (!limiter.check("redeem:ip:$ip", 5, 60_000, lockoutOnBreach = true)) {
                         call.respondError(HttpStatusCode.TooManyRequests, "rate_limited")
                         return@post
@@ -168,8 +189,14 @@ class RelayServer(
                 }
 
                 post("/v1/pair/code") {
-                    val ip = call.clientIp()
+                    val ip = rateLimitSubject(call.clientIp()) // IPv6: per /64, as for redeem
                     if (!limiter.check("paircode:ip:$ip", 10, 60_000, lockoutOnBreach = true)) {
+                        call.respondError(HttpStatusCode.TooManyRequests, "rate_limited")
+                        return@post
+                    }
+                    // relay-wide: the per-address limit bounds ONE source; many sources together must not be able
+                    // to sweep the 900 000-code space. Charged on failure below, enforced before every lookup.
+                    if (limiter.exhausted(PAIR_CODE_FAILURES_KEY, pairCodeFailureBudget, pairCodeFailureWindowMs)) {
                         call.respondError(HttpStatusCode.TooManyRequests, "rate_limited")
                         return@post
                     }
@@ -179,7 +206,12 @@ class RelayServer(
                         return@post
                     }
                     when (val payload = codeStore.take(req.code.trim())) {
-                        null -> call.respondError(HttpStatusCode.BadRequest, "invalid_or_expired")
+                        null -> {
+                            if (!limiter.check(PAIR_CODE_FAILURES_KEY, pairCodeFailureBudget, pairCodeFailureWindowMs)) {
+                                println("[pair] code lookup failure budget exhausted ($pairCodeFailureBudget per ${pairCodeFailureWindowMs / 1000}s)")
+                            }
+                            call.respondError(HttpStatusCode.BadRequest, "invalid_or_expired")
+                        }
                         else -> call.respondText(PocketJson.encodeToString(payload), ContentType.Application.Json)
                     }
                 }
@@ -201,12 +233,18 @@ class RelayServer(
 
     private suspend fun DefaultWebSocketServerSession.handleDaemon() {
         val ip = call.clientIp()
-        if (!limiter.check("ws:ip:$ip", 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
+        // Per ROUTE, and refunded once the socket authenticates (audit M5): the bucket bounds unauthenticated
+        // churn. Shared and charged for every socket, two daemons on one machine superseding each other used
+        // it up in seconds and the phone on the same Wi-Fi was then refused too.
+        val wsKey = "ws:daemon:ip:$ip"
+        if (!limiter.check(wsKey, 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
 
-        val hello = receiveControl<DaemonHello>() ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
+        val hello = (receiveHandshake<DaemonHello>() ?: return handshakeTimedOut(ip)).value
+            ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
         val challenge = daemonAuth.issueChallenge()
         sendControl(challenge)
-        val auth = receiveControl<DaemonAuth>() ?: run { logConn("expected_auth", ip, account = hello.accountId); return closeWith("expected_auth") }
+        val auth = (receiveHandshake<DaemonAuth>() ?: return handshakeTimedOut(ip, hello.accountId)).value
+            ?: run { logConn("expected_auth", ip, account = hello.accountId); return closeWith("expected_auth") }
 
         val account = when (val r = daemonAuth.verify(hello, auth, challenge.nonce)) {
             is DaemonAuthenticator.Result.Err -> {
@@ -216,34 +254,37 @@ class RelayServer(
                 logConn("auth_failed:${r.code}", ip, account = hello.accountId)
                 return closeWith("auth_failed")
             }
-            is DaemonAuthenticator.Result.Ok -> r.accountId
+            is DaemonAuthenticator.Result.Ok -> r.accountId.also { limiter.refund(wsKey) }
         }
 
-        val conn = conn(account, Role.DAEMON, null, daemonProtoV = hello.protoV)
-        broker.attachDaemon(conn)?.let { old ->
-            Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
-            logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
-            runCatching { old.close("superseded") }
-        }
-        // relayProtoV is OUR capability level, the mirror of DaemonHello.protoV (§3.4): the daemon gates its
-        // targeted offer push on it, because an older relay would silently ignore NotifyPush.deviceId and
-        // fan the alert out to the OWNER's phones instead of the addressed contact.
-        sendControl(Attached(Role.DAEMON, account, relayProtoV = PROTO_V_ATTACH_REPLAY_COMPLETE, connectionId = DiagnosticId(conn.diagnosticId)))
-        // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem)
-        // re-learns them. HEADLESS rows only go to daemons that understand bridges (issue #91): an
-        // older daemon would file the announced key into its FULL-POWER devices.json — a bridge
-        // credential silently escalating to a complete device on daemon downgrade.
-        store.devicesForAccount(account).forEach { d ->
-            if (d.headless && hello.protoV < PROTO_V_HEADLESS) return@forEach
-            broker.controlToDaemon(conn, controlText(DevicePaired(d.deviceId, Codec.b64uEnc(d.devicePubkey))))
-        }
-        // This marker is the replay barrier. The daemon must not infer completion from a timer: a
-        // reconnecting relay may be serving a durable snapshot while the socket is under backpressure.
-        // Sending it through the same control writer after every DevicePaired preserves ordering.
-        broker.controlToDaemon(conn, controlText(DeviceReplayComplete))
-        Diagnostics.connection(conn.diagnosticId)
-        broker.controlToDevices(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
+        val (conn, out) = conn(account, Role.DAEMON, null, daemonProtoV = hello.protoV)
+        // Everything from the attach on sits inside the try (audit M4): a throw between registering the socket
+        // and the read loop (the Attached send meeting a socket the peer already left, the replay's store read
+        // failing) used to skip the finally and leave a ghost daemon that kept every device "online".
         try {
+            broker.attachDaemon(conn)?.let { old ->
+                Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
+                logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
+                runCatching { old.close("superseded") }
+            }
+            // relayProtoV is OUR capability level, the mirror of DaemonHello.protoV (§3.4): the daemon gates its
+            // targeted offer push on it, because an older relay would silently ignore NotifyPush.deviceId and
+            // fan the alert out to the OWNER's phones instead of the addressed contact.
+            sendControl(Attached(Role.DAEMON, account, relayProtoV = PROTO_V_ATTACH_REPLAY_COMPLETE, connectionId = DiagnosticId(conn.diagnosticId)))
+            // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem)
+            // re-learns them. HEADLESS rows only go to daemons that understand bridges (issue #91): an
+            // older daemon would file the announced key into its FULL-POWER devices.json — a bridge
+            // credential silently escalating to a complete device on daemon downgrade.
+            store.devicesForAccount(account).forEach { d ->
+                if (d.headless && hello.protoV < PROTO_V_HEADLESS) return@forEach
+                broker.controlToDaemon(conn, controlText(DevicePaired(d.deviceId, Codec.b64uEnc(d.devicePubkey))))
+            }
+            // This marker is the replay barrier. The daemon must not infer completion from a timer: a
+            // reconnecting relay may be serving a durable snapshot while the socket is under backpressure.
+            // Sending it through the same control writer after every DevicePaired preserves ordering.
+            broker.controlToDaemon(conn, controlText(DeviceReplayComplete))
+            Diagnostics.connection(conn.diagnosticId)
+            broker.controlToDevices(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
             for (frame in incoming) when (frame) {
                 // daemon addresses a specific device: [deviceId][payload] -> route payload to it
                 is Frame.Binary -> Wire.unwrapDevice(frame.data)?.let { (deviceId, payload) -> broker.toDevice(account, deviceId, payload) }
@@ -255,19 +296,24 @@ class RelayServer(
             reportReceiveFailure(error)
             throw error
         } finally {
-            Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
-            // "daemon offline" only when THIS socket was still the account's daemon — a superseded socket's
-            // late exit (the daemon reconnected before we noticed the old link die, e.g. after sleep/wake)
-            // arrives AFTER the successor's PeerPresence(true); broadcasting false then would flip every
-            // device to "computer offline" with no later true to recover on (mirrors the device-side guard)
-            if (broker.detachDaemon(conn)) {
-                logConn("detached", conn.ip, account = account)
-                broker.controlToDevices(account, controlText(PeerPresence(false)))
+            // NonCancellable: a cancelled handler must still unregister — the broker lock can suspend
+            withContext(NonCancellable) {
+                out.close()
+                Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
+                // "daemon offline" only when THIS socket was still the account's daemon — a superseded socket's
+                // late exit (the daemon reconnected before we noticed the old link die, e.g. after sleep/wake)
+                // arrives AFTER the successor's PeerPresence(true); broadcasting false then would flip every
+                // device to "computer offline" with no later true to recover on (mirrors the device-side guard)
+                if (broker.detachDaemon(conn)) {
+                    logConn("detached", conn.ip, account = account)
+                    broker.controlToDevices(account, controlText(PeerPresence(false)))
+                }
             }
         }
     }
 
-    private suspend fun handleDaemonControl(account: String, text: String) {
+    // internal: the push tests drive the daemon control plane directly, as RelayServerControlTest does the device's
+    internal suspend fun handleDaemonControl(account: String, text: String) {
         when (val body = runCatching { PocketJson.decodeFromString<Envelope>(text).body }.getOrNull()) {
             is PairBegin -> {
                 if (!limiter.check("pairbegin:acct:$account", 10, 3_600_000)) {
@@ -317,8 +363,16 @@ class RelayServer(
         val target = body.deviceId
         if (target == null) {
             if (!NotifyGate.shouldSend(body, broker.interactiveDeviceCount(account), targetDeviceSockets = 0)) return
+            // Audit H2: the account fan-out had no ceiling at all (urgent=true always passes the gate above),
+            // and every push reads the store under its single lock — the one every login also waits on — then
+            // spends the relay's own APNs/FCM credentials. Far above what coalesced turn-ends and bridge
+            // approvals produce; like the targeted cap, it degrades to "no alert", never to a lockout.
+            if (!limiter.check("push:acct:$account", MAX_ACCOUNT_PUSH_PER_MINUTE, 60_000)) {
+                logConn("push_rate_limited", ip = "-", account = account)
+                return
+            }
             val route = NotifyGate.routeOf(body)
-            pushScope.launch { pushService.notify(account, body.title, body.body, route) }
+            launchPush(account) { pushService.notify(account, body.title, body.body, route) }
             return
         }
         if (!NotifyGate.shouldSend(body, interactiveDevices = 0, targetDeviceSockets = broker.deviceSocketCount(account, target))) return
@@ -336,7 +390,17 @@ class RelayServer(
         val alert =
             if (store.getDevice(target)?.collaborator == true) NotifyGate.contactAlert(body) ?: return
             else NotifyGate.ownAlert(body)
-        pushScope.launch { pushService.notifyDevice(account, target, alert.title, alert.body, alert.route) }
+        launchPush(account) { pushService.notifyDevice(account, target, alert.title, alert.body, alert.route) }
+    }
+
+    /** Hand one push to [pushScope] — unless [MAX_PUSH_IN_FLIGHT] are already running (a stalled provider, or
+     *  many accounts at once): then it is dropped and logged rather than queued without bound (audit H2). */
+    private fun launchPush(account: String, send: suspend () -> Unit) {
+        if (!pushSlots.tryAcquire()) {
+            logConn("push_busy", ip = "-", account = account)
+            return
+        }
+        pushScope.launch { try { send() } finally { pushSlots.release() } }
     }
 
     /** device control TEXT plane: only push-token (de)registration; everything else rides the data plane.
@@ -437,9 +501,11 @@ class RelayServer(
 
     private suspend fun DefaultWebSocketServerSession.handleDevice() {
         val ip = call.clientIp()
-        if (!limiter.check("ws:ip:$ip", 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
+        val wsKey = "ws:device:ip:$ip" // per route, refunded on success — see handleDaemon
+        if (!limiter.check(wsKey, 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
 
-        val hello = receiveControl<DeviceHello>() ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
+        val hello = (receiveHandshake<DeviceHello>() ?: return handshakeTimedOut(ip)).value
+            ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
         val account = when (val r = deviceAuth.verify(hello)) {
             is DeviceAuthenticator.Result.Err -> {
                 limiter.check("auth:ip:$ip", 5, 60_000, lockoutOnBreach = true)
@@ -447,7 +513,7 @@ class RelayServer(
                 logConn("auth_failed:${r.code}", ip, deviceId = hello.deviceId)
                 return closeWith("auth_failed")
             }
-            is DeviceAuthenticator.Result.Ok -> r.accountId
+            is DeviceAuthenticator.Result.Ok -> r.accountId.also { limiter.refund(wsKey) }
         }
         // a bridge socket is presence-invisible (issue #91): it never flips PeerPresence and never
         // counts toward the "is anyone attached" gates — else an always-on bot mutes every push and
@@ -462,20 +528,27 @@ class RelayServer(
             return closeWith("too_many_connections")
         }
 
-        val conn = conn(account, Role.DEVICE, hello.deviceId, headless = headless)
-        // newest socket per device wins (mirrors attachDaemon): a lingering older socket of the same device
-        // (reconnect overlap, machine-switch race) would otherwise fight this one over the daemon's single
-        // per-device E2E session and deafen it
-        broker.attachDevice(conn)?.let { old ->
-            Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
-            logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
-            runCatching { old.close("superseded") }
-        }
-        val peerId = broker.daemonConn(account)?.diagnosticId
-        Diagnostics.connection(conn.diagnosticId, peerId)
-        sendControl(Attached(Role.DEVICE, account, relayProtoV = PROTO_V_PUSH_ACK, connectionId = DiagnosticId(conn.diagnosticId), peerConnectionId = peerId?.let(::DiagnosticId)))
-        if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
+        // Every frame from this socket reaches the daemon with the routing header in front, and the daemon's
+        // own cap is the wire cap — so this leg stops exactly where the WRAPPED frame would cross it (audit M1).
+        // Over it, Ktor closes THIS socket with TOO_BIG; before, the frame was forwarded and killed the
+        // daemon's whole relay link, dropping every device of the account.
+        maxFrameSize = WIRE_MAX_FRAME_BYTES - Wire.wrapDevice(hello.deviceId, ByteArray(0)).size
+        val (conn, out) = conn(account, Role.DEVICE, hello.deviceId, headless = headless)
+        // From the attach on, everything is inside the try (audit M4): a ghost device socket left by a throw
+        // before the read loop would keep the daemon from ever hearing PeerPresence(false) and hold a slot.
         try {
+            // newest socket per device wins (mirrors attachDaemon): a lingering older socket of the same device
+            // (reconnect overlap, machine-switch race) would otherwise fight this one over the daemon's single
+            // per-device E2E session and deafen it
+            broker.attachDevice(conn)?.let { old ->
+                Diagnostics.connection(old.diagnosticId, conn.diagnosticId, ErrorCode.SUPERSEDED)
+                logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
+                runCatching { old.close("superseded") }
+            }
+            val peerId = broker.daemonConn(account)?.diagnosticId
+            Diagnostics.connection(conn.diagnosticId, peerId)
+            sendControl(Attached(Role.DEVICE, account, relayProtoV = PROTO_V_PUSH_ACK, connectionId = DiagnosticId(conn.diagnosticId), peerConnectionId = peerId?.let(::DiagnosticId)))
+            if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true, DiagnosticId(conn.diagnosticId))))
             for (frame in incoming) when (frame) {
                 is Frame.Binary -> broker.toDaemonFrom(account, hello.deviceId, frame.data)
                 is Frame.Text -> handleDeviceControl(conn, frame.readText())
@@ -486,35 +559,81 @@ class RelayServer(
             reportReceiveFailure(error)
             throw error
         } finally {
-            Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
-            broker.detachDevice(conn)
-            logConn("detached", conn.ip, account = account, deviceId = hello.deviceId, headless = headless)
-            // "peer offline" only when the LAST INTERACTIVE socket left — a superseded/overlapping socket's
-            // exit while another is live must not arm the daemon's idle reaper against a watched
-            // conversation, and a bridge coming or going never moves presence at all
-            if (!headless && broker.interactiveDeviceCount(account) == 0) {
-                broker.controlToDaemon(account, controlText(PeerPresence(false)))
+            withContext(NonCancellable) { // a cancelled handler must still unregister (see handleDaemon)
+                out.close()
+                Diagnostics.connection(conn.diagnosticId, code = ErrorCode.CONNECTION_CLOSED)
+                broker.detachDevice(conn)
+                logConn("detached", conn.ip, account = account, deviceId = hello.deviceId, headless = headless)
+                // "peer offline" only when the LAST INTERACTIVE socket left — a superseded/overlapping socket's
+                // exit while another is live must not arm the daemon's idle reaper against a watched
+                // conversation, and a bridge coming or going never moves presence at all
+                if (!headless && broker.interactiveDeviceCount(account) == 0) {
+                    broker.controlToDaemon(account, controlText(PeerPresence(false)))
+                }
             }
         }
     }
 
     // ---- control-frame codec (TEXT plane) + helpers ----
 
+    /** The authenticated socket's [Conn], writing through a byte-bounded [OutboundQueue] (audit H1). The
+     *  caller must [OutboundQueue.close] it when the handler ends. */
     private fun DefaultWebSocketServerSession.conn(
         account: String,
         role: Role,
         deviceId: String?,
         headless: Boolean = false,
         daemonProtoV: Int = 1,
-    ) = Conn(
-        account, role, deviceId,
-        sendText = { outgoing.send(Frame.Text(it)) },
-        sendBinary = { outgoing.send(Frame.Binary(true, it)) },
-        close = { reason -> runCatching { close(CloseReason(CloseReason.Codes.NORMAL, reason)) } },
-        headless = headless,
-        daemonProtoV = daemonProtoV,
-        ip = call.clientIp(),
-    )
+    ): Pair<Conn, OutboundQueue> {
+        val ip = call.clientIp()
+        val out = OutboundQueue(
+            MAX_OUTBOUND_BYTES,
+            write = { outgoing.send(it); flush() },
+            onOverflow = { queued, relayWide ->
+                logConn("slow_consumer", ip, account = account, deviceId = deviceId, headless = if (role == Role.DEVICE) headless else null)
+                if (relayWide) {
+                    println("[conn] slow_consumer scope=relay queued_bytes=$queued relay_limit=${outboundBudget.limitBytes}")
+                } else {
+                    println("[conn] slow_consumer queued_bytes=$queued limit=$MAX_OUTBOUND_BYTES")
+                }
+                closeSoon(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "slow_consumer"))
+            },
+            budget = outboundBudget,
+        )
+        launch { out.pump() }
+        val conn = Conn(
+            account, role, deviceId,
+            sendText = { out.offer(Frame.Text(it)) },
+            sendBinary = { out.offer(Frame.Binary(true, it)) },
+            close = { reason -> closeSoon(CloseReason(CloseReason.Codes.NORMAL, reason)) },
+            headless = headless,
+            daemonProtoV = daemonProtoV,
+            ip = ip,
+        )
+        return conn to out
+    }
+
+    /**
+     * Close a socket from OUTSIDE its own handler (supersede, revoke) without waiting for it (audit M3).
+     *
+     * `close()` is Close + flush, and the flush completes only once every frame queued ahead of it is in the
+     * socket. On a half-open link with a backlog that is the ping timeout or longer — and the callers are the
+     * replacing socket's handler (its Attached waited, past the phone's 15 s handshake timeout) and the daemon's
+     * read loop (a revoke stalled the whole account's data plane). So the close runs on its own, gets
+     * [CLOSE_GRACE_MS] for the close handshake, and the session is cancelled outright after that.
+     */
+    private fun DefaultWebSocketServerSession.closeSoon(reason: CloseReason) {
+        val session = this
+        socketScope.launch {
+            withTimeoutOrNull(CLOSE_GRACE_MS) {
+                try { session.close(reason) } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+                // close() returns once our Close frame is written; a peer that has stopped reading never answers
+                // it, and the session would then live on until the ping timeout — so wait for the handshake too
+                session.closeReason.await()
+            }
+            session.cancel() // a no-op for a session that already ended
+        }
+    }
 
     private fun controlText(frame: PocketFrame): String =
         PocketJson.encodeToString(Envelope(id = "r", ts = clock(), to = Route.RELAY, body = frame))
@@ -539,9 +658,21 @@ class RelayServer(
     private suspend fun DefaultWebSocketServerSession.sendControl(frame: PocketFrame) =
         outgoing.send(Frame.Text(controlText(frame)))
 
-    private suspend inline fun <reified T> DefaultWebSocketServerSession.receiveControl(): T? {
-        val frame = runCatching { incoming.receive() }.getOrNull() as? Frame.Text ?: return null
-        return runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull() as? T
+    /** One frame of the pre-auth handshake, under [handshakeTimeoutMs] (audit M2). Null = the deadline passed:
+     *  every WebSocket library answers our pings by itself, so without a deadline a socket that never sends
+     *  its hello stays open for good. [Received.value] null = the wrong frame, or the socket ended. */
+    private suspend inline fun <reified T> DefaultWebSocketServerSession.receiveHandshake(): Received<T>? =
+        withTimeoutOrNull(handshakeTimeoutMs) {
+            // receiveCatching, not runCatching { receive() }: the timeout's cancellation must not be swallowed
+            val frame = incoming.receiveCatching().getOrNull() as? Frame.Text
+            Received(frame?.let { runCatching { PocketJson.decodeFromString<Envelope>(it.readText()).body }.getOrNull() as? T })
+        }
+
+    private class Received<T>(val value: T?)
+
+    private suspend fun DefaultWebSocketServerSession.handshakeTimedOut(ip: String, account: String? = null) {
+        logConn("handshake_timeout", ip, account = account)
+        closeWith("handshake_timeout")
     }
 
     private suspend fun DefaultWebSocketServerSession.closeWith(reason: String) =
@@ -568,9 +699,10 @@ class RelayServer(
     ) {
         val code = when {
             reason == "superseded" -> ErrorCode.SUPERSEDED
-            reason == "rate_limited" || reason == "push_rate_limited" -> ErrorCode.RATE_LIMITED
-            reason == "too_many_connections" -> ErrorCode.SIZE_LIMIT
+            reason == "rate_limited" || reason == "push_rate_limited" || reason == "push_busy" -> ErrorCode.RATE_LIMITED
+            reason == "too_many_connections" || reason == "slow_consumer" -> ErrorCode.SIZE_LIMIT
             reason == "detached" -> ErrorCode.CONNECTION_CLOSED
+            reason == "handshake_timeout" -> ErrorCode.TIMEOUT
             reason == "revoked" || reason.startsWith("auth_failed:") -> ErrorCode.REJECTED
             else -> ErrorCode.UNSUPPORTED
         }
@@ -591,6 +723,39 @@ class RelayServer(
         // §3.4: ceiling on how often ONE device may be woken by a targeted push. A real workflow rings a
         // contact a handful of times a day; this only bites a daemon looping the frame.
         const val MAX_TARGETED_PUSH_PER_HOUR = 20
+        // audit H2: per-account fan-out ceiling. The daemon already coalesces turn-end pushes per session, so
+        // even many parallel sessions stay well below this; it only bites a daemon looping the frame.
+        const val MAX_ACCOUNT_PUSH_PER_MINUTE = 30
+        // relay-wide ceiling on push jobs (store read + APNs/FCM round-trip) running at once
+        const val MAX_PUSH_IN_FLIGHT = 256
+        // how long a supersede/revoke close may take to go out cleanly before the socket is cut (audit M3)
+        const val CLOSE_GRACE_MS = 3_000L
+        // audit H1: bytes one socket may owe before it is cut as a slow consumer. Four full-size (4 MiB) frames:
+        // a healthy link drains as the daemon produces, so this only fills when the peer has stopped reading
+        // or is minutes behind. Per socket; MAX_RELAY_OUTBOUND_BYTES below bounds the sum.
+        const val MAX_OUTBOUND_BYTES = 16L * 1024 * 1024
+        // Relay-wide sum of every socket's backlog. Sized from the unit's -Xmx256m (deploy/cc-pocket-relay.service):
+        // 96 MiB is 3/8 of the heap, leaving 160 MiB for the JVM/Ktor/SQLite/push baseline, the frames being READ
+        // (up to MAX_FRAME each, not yet in any queue) and GC headroom. Normal use stays far below it: a healthy
+        // socket owes a frame or two while it drains, so it takes 24 full-size (4 MiB) history frames queued at
+        // the same instant — e.g. a dozen devices each two windows behind — to reach it, whereas six readers
+        // stalled at the per-socket cap already would. Over it, the largest backlogs are cut first (a stalled
+        // reader, almost always), so a healthy device is reached only after every bigger one is gone.
+        // ExitOnOutOfMemoryError in the unit stays the last resort.
+        const val MAX_RELAY_OUTBOUND_BYTES = 96L * 1024 * 1024
+        // Relay-wide budget of FAILED 6-digit pair-code lookups (/v1/pair/code), per fixed window. Codes are 6
+        // digits (900 000 values) and live 120 s. Per source the lookup is already capped at 10/min with
+        // escalating lockout, but many sources (or, before /64 keying, one IPv6 block) multiply that freely.
+        // 600 per 10 min bounds the whole relay to at most ~1 200 wrong guesses inside any one code's 120 s life
+        // (a full window spent in a burst, plus the next one across the boundary): ≤ 0.13 % per issued code,
+        // against an unbounded share today. The reverse risk — someone burning the budget so nobody can pair by
+        // code — is why it is not lower: one source can spend at most 10/min = 100 per window, so blocking takes
+        // at least six distinct IPv4 addresses or IPv6 /64s kept at their limit, real users' typos stay a
+        // handful per window, the block lifts by itself within the window, and QR pairing (straight to
+        // /v1/pair/redeem) is never affected.
+        const val PAIR_CODE_FAILURE_BUDGET = 600
+        const val PAIR_CODE_FAILURE_WINDOW_MS = 10 * 60_000L
+        const val PAIR_CODE_FAILURES_KEY = "paircode:fail:global"
         // an APNs token is 64 hex chars and an FCM one a few hundred; 4096 is far above any real vendor
         // token and exists so a malformed/hostile registration is refused ("bad_request") instead of
         // being written into the devices row

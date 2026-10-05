@@ -161,7 +161,7 @@ fun WinTrayFlyout(
                             a,
                             onDeny = { model.resolveAttention(a, allow = false) },
                             onAllow = { model.resolveAttention(a, allow = true) },
-                            onOpen = { openMain(); jumpToMachine(model, a.accountId) },
+                            onOpen = { openMain(); model.openAttention(a) },
                         )
                     }
                     // 溢出去的审批落到「审批中心」= 铃铛的全机群待办队列（model.showAttention）。
@@ -195,7 +195,7 @@ fun WinTrayFlyout(
                         Dot(Tok.tx.copy(alpha = 0.22f), 6.dp)
                         Text(
                             stringResource(Res.string.win_tray_all_quiet),
-                            color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                            color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, style = tightCenter(12.5.sp),
                         )
                     }
                 }
@@ -377,7 +377,7 @@ private fun WinApprovalRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Un
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        a.tool, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        a.tool, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), fontWeight = FontWeight.Medium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                     )
                     WinChip(a.machine, bright = hovered)
@@ -463,7 +463,7 @@ private fun WinRunningRow(title: String, computer: String, elapsed: String?, onC
             Dot(Tok.ok, 6.dp)
         }
         Text(
-            title, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, maxLines = 1,
+            title, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp), maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
         )
         WinChip(computer, bright = false)

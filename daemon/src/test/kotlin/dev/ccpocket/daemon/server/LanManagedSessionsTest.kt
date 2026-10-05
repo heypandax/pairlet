@@ -225,4 +225,34 @@ class LanManagedSessionsTest {
             f.close()
         }
     }
+
+    /**
+     * Audit 2026-10-04 (session-relay M5): a revoke used to bite only when the revoked device SENT its next
+     * frame (or on a pin/managed/memo push) — until then its socket kept receiving every session stream,
+     * approval card and handoff/review row. The revoke itself (the devices.json write) now cuts it.
+     */
+    @Test
+    fun a_revoke_closes_a_silent_lan_socket_without_waiting_for_its_next_frame(): Unit = runBlocking {
+        val f = Fixture(this)
+        val scratch = Files.createTempDirectory("ccp-lan-revoke").toFile()
+        try {
+            val keysA = f.device("devA"); val keysB = f.device("devB")
+            val a = f.connect(); f.handshake(a, "devA", keysA)
+            val b = f.connect(); f.handshake(b, "devB", keysB)
+            kotlinx.coroutines.delay(200) // both sockets are idle in their pumps
+
+            f.allowed.remove("devA")
+            // what DeviceSessions.persist() does on a revoke: the allow-list write bumps the epoch
+            dev.ccpocket.daemon.identity.PairedDevices.save(HashMap(f.allowed), File(scratch, "devices.json"))
+
+            assertNotNull(withTimeoutOrNull(5_000) { a.job.join() }, "the revoked device's socket must close on the revoke itself")
+            assertTrue(a.failure?.message.orEmpty().contains("revoked"), "closed as revoked: ${a.failure}")
+            kotlinx.coroutines.delay(200)
+            assertTrue(b.job.isActive, "a device that is still paired keeps its socket")
+            b.ws.inbound.close()
+        } finally {
+            f.close()
+            scratch.deleteRecursively()
+        }
+    }
 }
