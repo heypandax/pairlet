@@ -6,7 +6,7 @@ import kotlinx.coroutines.delay
 /**
  * Run [body] every [periodMs], forever — and let no single failed iteration end it.
  *
- * [RelayClient.run] launches its resident loops (idle reaper, guest-expiry sweep) as children of the same
+ * [RelayClient.run] launches its resident loops (the idle reaper) as children of the same
  * coroutineScope as the reconnect loop. An exception escaping one of them failed that child, which cancelled
  * the scope — the reconnect loop included — and run() threw out of Main: a daemon that no longer talks to
  * the relay (audit 2026-10-04). A failed iteration is handed to [onFailure] and the next one runs on time.

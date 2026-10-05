@@ -63,7 +63,7 @@ class DeviceSessions(
     private val lanUrl: () -> String? = { null }, // advertised in DaemonInfo after each handshake (null = direct listener off)
     private val hostname: () -> String? = { null }, // OS computer name advertised in DaemonInfo (client's default binding name)
     private val gatewayBaseUrl: () -> String? = { null }, // third-party ANTHROPIC_BASE_URL in DaemonInfo (issue #139; null = official endpoint)
-    /** The restricted-credential authority (issue #91 bridges + #115 guests): classification, constraints,
+    /** The restricted-credential authority (issue #91 bridges, #367 execution links, the retired kinds): classification, constraints,
      *  capability gates. */
     val bridges: BridgeRegistry = BridgeRegistry(),
     private val send: suspend (deviceId: String, payload: ByteArray) -> Unit,
@@ -349,7 +349,7 @@ class DeviceSessions(
      *  PeerPresence(true) edge just re-syncs the page; clearing here was what turned every daemon-side
      *  relay blip into a phone-side full teardown + supersede storm). Sessions still die on revoke, on
      *  the attach-replay reconcile, and when a newer handshake displaces them. [owned] is per-connection
-     *  bookkeeping for the guest-revoke path and still resets; owned conversations keep running in the
+     *  bookkeeping for the restricted-credential revoke path and still resets; owned conversations keep running in the
      *  background — the idle reaper reclaims them once truly abandoned. */
     suspend fun onDisconnect() = mutex.withLock {
         owned.clear()
@@ -544,7 +544,7 @@ class DeviceSessions(
         val confirmedPsk = mutex.withLock { link.pskShadow = null; pskFor.remove(deviceId) }
         // FIRST successful decrypt after pairing: the PSK (the exact pairing ticket) is now PROVEN to be
         // held by this device. If it matches a pending intent, finalize the restricted classification here
-        // (bridge #91 OR guest #115) — the one moment the binding is cryptographically exact.
+        // (bridge #91 OR execution link #367) — the one moment the binding is cryptographically exact.
         if (confirmedPsk != null && confirmedPsk.isNotEmpty()) {
             if (viaTwin) {
                 log.info("first-contact PSK abandoned for ${deviceId.take(8)}… — device handshook without its ticket (#161)")
