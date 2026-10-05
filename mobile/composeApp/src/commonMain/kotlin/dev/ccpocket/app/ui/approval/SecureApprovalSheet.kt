@@ -54,12 +54,10 @@ import dev.ccpocket.app.resources.ap_kind
 import dev.ccpocket.app.resources.ap_legacy_note
 import dev.ccpocket.app.resources.ap_project
 import dev.ccpocket.app.resources.ap_queue
-import dev.ccpocket.app.resources.ap_recorded_title
 import dev.ccpocket.app.resources.ap_required
 import dev.ccpocket.app.resources.ap_waiting_sub
 import dev.ccpocket.app.resources.ap_waiting_title
 import dev.ccpocket.app.resources.diff_more_lines
-import dev.ccpocket.app.resources.ho_bash_recorded
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
@@ -281,7 +279,6 @@ private fun ApprovalBody(ui: ApprovalUi) {
     }
     ApprovalEvidence(ui)
     ApprovalPayload(ui)
-    if (ui.recordedShell) RecordedBand()
     ui.workdir?.let { ProjectRow(it) }
     if (ui.family == ApprovalFamily.LEGACY) {
         Text(
@@ -405,19 +402,6 @@ private fun DiffPayload(diff: String) {
 }
 
 private const val DIFF_MAX_LINES = 140
-
-/** §2.2/§4.3: a shell command inside a REVIEW handoff is confirmed on its own and leaves a record. Lives in
- *  the BODY next to the evidence — beside the buttons it would read as advice about which one to press. */
-@Composable
-private fun RecordedBand() {
-    Row(Modifier.padding(top = Metric.gapL).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
-        Box(Modifier.padding(top = 5.dp).size(8.dp).border(1.5.dp, Tok.tx2, CircleShape))
-        Column {
-            Text(stringResource(Res.string.ap_recorded_title), color = Tok.tx, style = TypeRole.body.copy(fontWeight = FontWeight.Medium))
-            Text(stringResource(Res.string.ho_bash_recorded), color = Tok.tx2, style = TypeRole.caption, modifier = Modifier.padding(top = 2.dp))
-        }
-    }
-}
 
 /** The session's real working directory. No workdir → no row; never substituted with a repo name. */
 @Composable

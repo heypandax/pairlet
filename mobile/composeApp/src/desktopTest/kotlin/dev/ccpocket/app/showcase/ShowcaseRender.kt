@@ -44,11 +44,8 @@ import dev.ccpocket.app.ui.approval.ApprovalUi
 import dev.ccpocket.app.ui.approval.SecureApprovalSheet
 import dev.ccpocket.app.ui.approval.approvalUi
 import dev.ccpocket.app.ui.fleet.FleetHomeScreen
-import dev.ccpocket.app.ui.share.ShareFolderScreen
-import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
-import dev.ccpocket.protocol.ShareCreated
 import dev.ccpocket.protocol.AskOption
 import dev.ccpocket.protocol.AskQuestion
 import dev.ccpocket.protocol.AssistantChunk
@@ -154,9 +151,6 @@ class ShowcaseRender {
 
         // backend 的剧本状态：StartSessionModeSheet 的选中 agent 是内部 remember——用 key() 重建来切换
         val backendAgent = mutableStateOf(AgentKind.CLAUDE)
-
-        // share 的入参：演示文件夹（与 DemoData 同一虚构用户，不含真实路径）
-        val shareDir = DirectoryEntry(path = "/Users/alex/code/cc-pocket", name = "cc-pocket", isDir = true)
 
         // backfill 的口播素材：断网前流出的前缀 + 补齐帧一次续上的正文
         val bfAsk = "把这次重构整理成迁移文档，写到 docs/migration.md"
@@ -344,13 +338,6 @@ class ShowcaseRender {
             Beat(0) { demoMode.value = true },
         )) { repo -> FleetHomeScreen(repo, onBack = {}, onOpenInbox = {}) },
 
-        // ⑫ 共享文件夹（owner 侧）：三档访问级 + 有效期的分享面板 → 中段生成邀请（QR + 摘要）
-        Show("share", 6400, beats = listOf(
-            Beat(3400) {
-                receiveForTest(ShareCreated(ok = true, invite = DemoData.sampleInvite(shareDir.path, AccessTier.COLLABORATE, 3L * 24 * 3600)))
-            },
-        )) { repo -> ShareFolderScreen(repo, shareDir, onBack = {}) },
-
         // ⑬ 断线补齐：流出两句 → 中段静止（模拟断网）→ ConvoHistory 一次把漏掉的正文续上（TranscriptMerge）
         Show("backfill", 8000, beats = listOf(
             Beat(0) {
@@ -483,7 +470,7 @@ class ShowcaseRender {
                     workdir = dir,
                 ),
             ),
-            // 04 · one-off / review shell: Deny + Allow once only, and the record band explains why
+            // 04 · one-off (the daemon's neverRemember): Deny + Allow once only, whatever scopes it offered
             ApprovalFrame(
                 "oneoff", dark = true,
                 approvalUi(
@@ -491,8 +478,9 @@ class ShowcaseRender {
                         "ap-4", "Bash", "Run command",
                         "ssh deploy@build-01.internal 'sudo systemctl restart ccpocket-relay'",
                         rule = "Bash(ssh:*)", grants = listOf("once", "task", "session"), timeoutSec = 45,
+                        neverRemember = true,
                     ),
-                    workdir = dir, risk = risk("ap-4", "medium", "remote host"), handoffReview = true,
+                    workdir = dir, risk = risk("ap-4", "medium", "remote host"),
                 ),
             ),
             // 05 · noAutoDeny: no ring, no number, no ∞ — a truthful waiting state; V2 with only `once`

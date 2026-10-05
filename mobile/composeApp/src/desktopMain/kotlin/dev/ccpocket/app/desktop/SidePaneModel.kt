@@ -190,11 +190,6 @@ class SidePaneModel(
     override val rewindError: String? get() = null
     override fun dismissRewindError() {}
     override val sessionLineage: dev.ccpocket.app.data.PocketRepository.SessionLineage? get() = null
-    // Same story for the handoff banner ChatPane renders above the stream: delegated, a column showed the
-    // FOCUSED session's handoff and its Recall/Cancel/Reviewed buttons acted on it. Nulling the handoff
-    // itself is what closes that — the verbs are unreachable from a column once no banner is drawn.
-    override val activeHandoff: dev.ccpocket.protocol.SessionHandoff? get() = null
-    override fun handoffIsRecipient(): Boolean = false
     // ── attachments: the focused pane's, by construction (see SidePane's KDoc — "attachments … stay on
     //    the focused pane"). Delegated, the focused session's staged images/files rendered into EVERY
     //    column's composer, a paste or a drop inside a column hung its file on the focused session's next

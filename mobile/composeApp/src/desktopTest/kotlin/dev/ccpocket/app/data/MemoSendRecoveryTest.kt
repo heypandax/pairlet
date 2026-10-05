@@ -229,10 +229,10 @@ class MemoSendRecoveryTest {
 
     @Test
     fun a_non_owner_binding_a_plain_link_and_a_lost_link_cannot_record() {
-        val guest = Harness(role = BindingRole.GUEST)
-        guest.announce()
-        assertEquals(MemoBlock.NOT_OWNER, guest.host.readiness.value.block)
-        assertNull(guest.host.readiness.value.scope)
+        val nonOwner = Harness(role = BindingRole.COLLABORATOR)
+        nonOwner.announce()
+        assertEquals(MemoBlock.NOT_OWNER, nonOwner.host.readiness.value.block)
+        assertNull(nonOwner.host.readiness.value.scope)
 
         val h = Harness()
         h.announce()

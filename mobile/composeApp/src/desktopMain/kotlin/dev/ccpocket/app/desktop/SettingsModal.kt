@@ -36,9 +36,7 @@ import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -46,22 +44,11 @@ import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.SUPPORT_CHAT_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.openWebUrl
-import dev.ccpocket.app.pairing.encode
 import dev.ccpocket.app.resources.brand_former_name
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.*
-import dev.ccpocket.app.ui.share.DEFAULT_TIER
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
-import dev.ccpocket.app.ui.share.SHARE_TIERS
-import dev.ccpocket.app.ui.share.ShareExpiryOption
-import dev.ccpocket.app.ui.share.ShareStatus
-import dev.ccpocket.app.ui.share.countdown
-import dev.ccpocket.app.ui.share.expiryOptionLabel
-import dev.ccpocket.app.ui.share.groupShares
-import dev.ccpocket.app.ui.share.shareStatus
-import dev.ccpocket.app.ui.share.tierHelp
-import dev.ccpocket.app.ui.share.tierLabel
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -90,7 +77,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -127,8 +113,6 @@ enum class SettingsTab(internal val label: StringResource, internal val icon: Im
     USAGE(Res.string.settings_usage, Icons.Rounded.DataUsage),
     COMPUTERS(Res.string.settings_tab_computers, Icons.Rounded.Devices),
     SCHEDULES(Res.string.settings_tab_schedules, Icons.Rounded.Schedule),
-    SHARES(Res.string.settings_tab_shared, Icons.Rounded.Share),
-    COLLABORATORS(Res.string.co_screen_title, Icons.Rounded.People),
     BRIDGES(Res.string.settings_bridges, Icons.Rounded.SmartToy),
     SHORTCUTS(Res.string.settings_tab_shortcuts, Icons.Rounded.Keyboard),
     HELP(Res.string.settings_tab_help, Icons.AutoMirrored.Outlined.HelpOutline),
@@ -183,8 +167,6 @@ fun SettingsModal(model: DesktopModel, initialTab: SettingsTab = SettingsTab.GEN
                     SettingsTab.USAGE -> UsagePane(model)
                     SettingsTab.COMPUTERS -> ComputersPane(model)
                     SettingsTab.SCHEDULES -> SchedulesPane(model)
-                    SettingsTab.SHARES -> SharesPane(model)
-                    SettingsTab.COLLABORATORS -> CollaboratorsPane(model)
                     SettingsTab.BRIDGES -> BridgesPane(model)
                     SettingsTab.SHORTCUTS -> ShortcutsPane()
                     SettingsTab.HELP -> HelpPane()
@@ -1648,8 +1630,6 @@ private fun TextBtn(label: String, color: androidx.compose.ui.graphics.Color, en
     )
 }
 
-// ── folder-share (issue #115): the desktop owner management + invite pane ──
-
 @Composable
 private fun SchedulesPane(model: DesktopModel) {
     // scheduled tasks (issue #137): the management list — cancel here; the creation gesture lives on
@@ -1705,145 +1685,6 @@ private fun SchedulesPane(model: DesktopModel) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun SharesPane(model: DesktopModel) {
-    LaunchedEffect(Unit) { model.refreshShares() }
-    val now = epochMillis()
-    val invite = model.lastShareInvite
-    Column {
-        Text(stringResource(Res.string.shared_folders_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
-        if (invite != null) {
-            InviteResultCard(invite.folderName, tierLabel(invite.tier), invite.encode()) { model.clearLastShare() }
-        } else {
-            ShareCreateForm(model)
-        }
-        Spacer(Modifier.height(16.dp))
-
-        val groups = groupShares(model.shares, now)
-        if (model.shares.isEmpty()) {
-            Text(stringResource(Res.string.shared_folders_empty), color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
-        }
-        groups.active.forEach { s ->
-            ShareCard(
-                path = s.path, guest = s.guestLabel ?: stringResource(Res.string.share_guest_someone), tier = tierLabel(s.tier),
-                expires = stringResource(Res.string.share_expires_in, countdown(s.expiresAt, now)),
-                active = shareStatus(s, now) == ShareStatus.ACTIVE_NOW,
-                onRevoke = { model.revokeShare(s.deviceId) },
-            )
-        }
-        if (groups.history.isNotEmpty()) {
-            Text(stringResource(Res.string.share_history_label), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
-            groups.history.forEach { s ->
-                ShareCard(
-                    path = s.path, guest = s.guestLabel ?: stringResource(Res.string.share_guest_someone),
-                    tier = stringResource(if (s.revoked) Res.string.share_revoked_label else Res.string.share_expired_label),
-                    expires = "", active = false, ended = true,
-                    onRevoke = { model.createShare(s.path, s.tier, s.expiresAt - s.createdAt) }, revokeLabel = stringResource(Res.string.share_share_again), revokeColor = Tok.tx2,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ShareCreateForm(model: DesktopModel) {
-    var path by remember { mutableStateOf("") }
-    var tier by remember { mutableStateOf(DEFAULT_TIER) }
-    var expiry by remember { mutableStateOf(ShareExpiryOption.DEFAULT) }
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp)) {
-        Text(stringResource(Res.string.share_composer_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        Text(stringResource(Res.string.share_path_hint), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp))
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp)) {
-            if (path.isEmpty()) Text("/Users/me/project", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
-            BasicTextField(path, { path = it }, singleLine = true, textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp), cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth())
-        }
-        Spacer(Modifier.height(14.dp))
-        ShareFormLabel(stringResource(Res.string.share_access_level))
-        Spacer(Modifier.height(7.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SHARE_TIERS.forEach { t -> SegPill(tierLabel(t), tier == t) { tier = t } }
-        }
-        // #212: a one-line, mode-accurate explanation of the selected tier so a security choice isn't blind
-        Text(
-            tierHelp(tier), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, lineHeight = 16.sp,
-            modifier = Modifier.padding(top = 7.dp),
-        )
-        Spacer(Modifier.height(14.dp))
-        ShareFormLabel(stringResource(Res.string.share_expires_label))
-        Spacer(Modifier.height(7.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            ShareExpiryOption.entries.forEach { o -> SegPill(expiryOptionLabel(o), expiry == o) { expiry = o } }
-        }
-        Text(
-            stringResource(Res.string.share_expiry_help), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp,
-            modifier = Modifier.padding(top = 7.dp),
-        )
-        Spacer(Modifier.height(14.dp))
-        Text(
-            stringResource(Res.string.share_create), color = if (path.isBlank()) Tok.muted else Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
-            style = tightCenter(13.sp),
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(if (path.isBlank()) Tok.surface else Tok.accent)
-                .then(if (path.isBlank()) Modifier else Modifier.clickable { model.createShare(path.trim(), tier, expiry.seconds) }).padding(vertical = 10.dp),
-        )
-    }
-}
-
-/** The small caps section label inside the desktop share composer ("ACCESS LEVEL" / "EXPIRES") — matches
- *  the muted, letter-spaced heading language used elsewhere in Settings (#212). */
-@Composable
-private fun ShareFormLabel(text: String) {
-    Text(
-        text.uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
-        fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
-    )
-}
-
-@Composable
-private fun SegPill(label: String, selected: Boolean, onClick: () -> Unit) {
-    Text(
-        label, color = if (selected) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.Medium,
-        style = tightCenter(11.5.sp),
-        modifier = Modifier.clip(RoundedCornerShape(7.dp)).then(if (selected) Modifier.background(Tok.accent) else Modifier.border(1.dp, Tok.hair, RoundedCornerShape(7.dp)))
-            .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
-    )
-}
-
-@Composable
-private fun InviteResultCard(folder: String, tier: String, code: String, onDone: () -> Unit) {
-    val clipboard = LocalClipboardManager.current
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.accent.copy(alpha = 0.06f)).border(1.dp, Tok.accent.copy(alpha = 0.3f), RoundedCornerShape(12.dp)).padding(14.dp)) {
-        Text(stringResource(Res.string.share_invite_ready), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        Text("$folder · $tier — " + stringResource(Res.string.share_invite_hint), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(top = 3.dp, bottom = 10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(code, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(11.sp), modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
-            TextBtn(stringResource(Res.string.path_copy), Tok.accent) { clipboard.setText(AnnotatedString(code)) }
-            TextBtn(stringResource(Res.string.share_done), Tok.tx2, onClick = onDone)
-        }
-    }
-}
-
-@Composable
-private fun ShareCard(
-    path: String, guest: String, tier: String, expires: String, active: Boolean,
-    ended: Boolean = false, revokeLabel: String? = null, revokeColor: androidx.compose.ui.graphics.Color = Tok.danger, onRevoke: () -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(if (ended) Tok.base else Tok.surface)
-            .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        if (active) PulseDot(Tok.ok, 6.dp) else Box(Modifier.size(6.dp).clip(RoundedCornerShape(50)).background(Tok.muted))
-        Column(Modifier.weight(1f)) {
-            Text(path, color = if (ended) Tok.tx2 else Tok.tx, fontFamily = Dk.mono, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                buildString { append(guest); append(" · "); append(tier); if (expires.isNotEmpty()) { append(" · "); append(expires) } },
-                color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-        }
-        TextBtn(revokeLabel ?: stringResource(Res.string.share_revoke), revokeColor, onClick = onRevoke)
     }
 }
 

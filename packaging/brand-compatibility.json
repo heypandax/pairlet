@@ -25,15 +25,13 @@
     },
     {
       "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/Pairing.kt",
-      "sha256": "632eee241a0228974b759d1440f5290ebca6bf54bc469c582af4333468749693"
+      "sha256": "109e77705b9dda51d8735c742c41c6620cd1afec881988f26ce858679afc14c6",
+      "note": "2026-10-05 retired features: Collaborator Links no longer have a separate collab_links store (not read, not cleared) and BindingRole drops GUEST (folder share, removed; no released build ever stored it, every redeem defaulted to OWNER). BindingRole stays a plain lowercase string with the tolerant decode, so a stored 'guest', 'collaborator', an unknown or absent role never fails the list decode: unknown values degrade to OWNER. Device keys, the paired-list and active-account storage keys, the legacy single-record migration, the relay redeem request, the default relay and the 6-digit code resolution are unchanged. BindingRoleStoreTest covers the legacy role strings."
     },
     {
       "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/IncomingLink.kt",
-      "sha256": "6ec06223778a0a6cf947e8d140bdcc7d64bd344fc27c5dc36f772aa336ac4929"
-    },
-    {
-      "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/ShareInvites.kt",
-      "sha256": "efab47fb125424a7b619f68094f336d9699008139c8dc8e1e24613d18d98d1c4"
+      "sha256": "1d0adf04c83939dd5d7e5979bf8f41ece9fc445e431f4cf76241b41b842a7951",
+      "note": "2026-10-05 retired features (ReviewRequest, Session Handoff, Collaborator Links, Folder Share): the review-contact, collab, handoff and share hosts are recognised by host alone and parse to IncomingLink.Retired, which callers answer with a 'feature retired' notice and no pairing attempt or pair_failed; the payload is never decoded. A bare blob is no longer an invite at the paste entry and falls through to the pre-scheme pair forms. The ccpocket:// scheme, the pair (full link and 6-digit code) and session hosts, and legacy bare pair query strings and codes parse exactly as before. IncomingLinkTest and RetiredFeaturesTest cover every retired host, corrupt payloads, case variants and the unchanged pair/session routes."
     },
     {
       "path": "mobile/composeApp/src/desktopMain/kotlin/dev/ccpocket/app/desktop/DesktopUpdater.kt",

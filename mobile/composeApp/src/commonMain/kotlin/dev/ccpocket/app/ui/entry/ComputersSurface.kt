@@ -33,7 +33,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
-import dev.ccpocket.app.pairing.BindingRole
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.Res
@@ -42,7 +41,6 @@ import dev.ccpocket.app.resources.computers_active_binding
 import dev.ccpocket.app.resources.computers_add
 import dev.ccpocket.app.resources.computers_helper
 import dev.ccpocket.app.resources.computers_more
-import dev.ccpocket.app.resources.computers_role_guest
 import dev.ccpocket.app.resources.computers_role_owner
 import dev.ccpocket.app.resources.computers_section
 import dev.ccpocket.app.resources.computers_title
@@ -204,9 +202,7 @@ private fun ComputerRow(
     onRename: () -> Unit,
     onRemove: () -> Unit,
 ) {
-    val role = stringResource(
-        if (d.role == BindingRole.GUEST) Res.string.computers_role_guest else Res.string.computers_role_owner,
-    )
+    val role = stringResource(Res.string.computers_role_owner)
     Column(Modifier.fillMaxWidth()) {
         Hairline()
         Row(

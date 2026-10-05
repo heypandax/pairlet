@@ -85,7 +85,7 @@ enum class TelKey(val id: String) {
     Feature("feature"),
     Reuse("reuse"),
     Backend("backend"),
-    Source("source"),       // qr | qr-link | code | link | share | collaborator | code-add
+    Source("source"),       // qr | qr-link | code | link | code-add
     Transport("transport"), // relay | direct
     Resume("resume"),       // 0 | 1
     Tool("tool"),

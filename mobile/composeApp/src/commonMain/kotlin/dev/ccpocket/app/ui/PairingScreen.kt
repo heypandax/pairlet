@@ -52,7 +52,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
-import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
@@ -165,29 +164,6 @@ fun PairingScreen(repo: PocketRepository, firstRun: Boolean = false) {
         }
         Spacer(Modifier.height(Metric.gapS))
         EntryTitle(stringResource(Res.string.pair_title), stringResource(Res.string.pair_sub))
-
-        // A pure RECIPIENT (SESSION-HANDOFF.md §10: "接收方要求 cc-pocket App；不要求 daemon") has
-        // collaborator links but no owner binding, so this pairing screen is their whole app — it would
-        // otherwise read as "you haven't started yet" while their contact link is live and offers are
-        // already routed here. One line, stated once; the offer overlay above still does the real work.
-        val collabLinks = remember { dev.ccpocket.app.pairing.Pairing.collaboratorLinks() }
-        if (!adding && collabLinks.isNotEmpty()) {
-            val shape = RoundedCornerShape(Metric.radius)
-            Column(
-                Modifier.padding(top = 18.dp).fillMaxWidth().clip(shape)
-                    .background(Tok.warn.copy(alpha = 0.08f)).border(Metric.hairline, Tok.warn.copy(alpha = 0.38f), shape)
-                    .padding(Metric.gapL),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
-                    Box(Modifier.size(8.dp).rotate(45f).background(Tok.warn)) // attention, not danger
-                    Text(stringResource(Res.string.co_pairing_linked), color = Tok.tx, style = TypeRole.action.merge(tightCenter(TypeRole.action.fontSize)))
-                }
-                Text(
-                    stringResource(Res.string.co_pairing_linked_sub, collabLinks.joinToString("、") { it.displayName() }),
-                    color = Tok.tx2, style = TypeRole.caption, modifier = Modifier.padding(top = Metric.gapXs),
-                )
-            }
-        }
 
         // ── the hierarchy: six digits, then the one canonical action ──
         EntryLabel(stringResource(Res.string.pair_code_label), Modifier.padding(top = 26.dp, bottom = Metric.gap))

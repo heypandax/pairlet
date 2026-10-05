@@ -54,7 +54,6 @@ enum class SettingsDest {
     COMPUTERS,
     SHARED_FOLDERS,
     JOIN_FOLDER,
-    COLLABORATORS,
     BRIDGES,
 
     // ── security & approvals ──
@@ -84,8 +83,7 @@ val SettingsDest.category: SettingsCategory?
         SettingsDest.CONTEXT_WINDOW, SettingsDest.PER_MODEL_WINDOWS, SettingsDest.AGENT_FILTER ->
             SettingsCategory.AGENT
 
-        SettingsDest.COMPUTERS, SettingsDest.SHARED_FOLDERS, SettingsDest.JOIN_FOLDER, SettingsDest.COLLABORATORS,
-        SettingsDest.BRIDGES ->
+        SettingsDest.COMPUTERS, SettingsDest.SHARED_FOLDERS, SettingsDest.JOIN_FOLDER, SettingsDest.BRIDGES ->
             SettingsCategory.CONNECTIONS
 
         SettingsDest.APPROVAL_NO_AUTO_DENY, SettingsDest.FULL_CONTROL_EXPIRY, SettingsDest.APP_LOCK ->

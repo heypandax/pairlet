@@ -606,16 +606,6 @@ private fun RulesReview(rules: List<String>, onClear: (String) -> Unit, onClearA
     }
 }
 
-/**
- * A tool token that RUNS A COMMAND. The daemon normalizes every backend onto Claude-shaped names
- * (ToolMeta synthesizes "Bash" for Codex too), so this is one token in practice — the tolerant match is
- * for a backend whose naming drifts, because getting this wrong the SAFE way (treating something as a
- * shell) only costs an extra confirmation.
- */
-fun isShellTool(tool: String): Boolean = tool.lowercase() in setOf(
-    "bash", "shell", "local_shell", "exec_command", "execute_command", "run_command",
-)
-
 /** M3 advisory risk badge (design frame 4 `.rbg`): the four states stay distinguishable by SHAPE, not
  *  only color — HIGH is a solid danger fill ("Risk found"), UNKNOWN a dashed-feel outline with "?"
  *  ("Not assessed"): finding risk and failing to assess are different facts (SMART-APPROVAL §八). */

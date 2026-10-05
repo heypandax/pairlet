@@ -49,7 +49,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.ui.PAIR_COMMAND
 import dev.ccpocket.app.data.PocketRepository
-import dev.ccpocket.app.pairing.decodeShareInvite
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.action_back
@@ -59,10 +58,6 @@ import dev.ccpocket.app.resources.cancel
 import dev.ccpocket.app.resources.choose_computer
 import dev.ccpocket.app.resources.connect
 import dev.ccpocket.app.resources.connect_computer_header
-import dev.ccpocket.app.resources.join_cta
-import dev.ccpocket.app.resources.join_invalid
-import dev.ccpocket.app.resources.join_paste_placeholder
-import dev.ccpocket.app.resources.join_scan_title
 import dev.ccpocket.app.resources.pair_code_invalid
 import dev.ccpocket.app.resources.run_code_prefix
 import dev.ccpocket.app.resources.run_code_suffix
@@ -80,41 +75,6 @@ fun ConnectPanel(repo: PocketRepository) {
             Text("Pairlet", color = Tok.tx, fontFamily = Dk.ui, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(28.dp))
             if (repo.addingDevice.value || repo.pairedList.isEmpty()) PairingForm(repo) else DevicePicker(repo)
-            Spacer(Modifier.height(18.dp))
-            JoinSharedFolder(repo)
-        }
-    }
-}
-
-/** Guest entry (issue #115): paste a folder-share invite to join ONE folder (not a whole computer). */
-@Composable
-private fun JoinSharedFolder(repo: PocketRepository) {
-    var open by remember { mutableStateOf(false) }
-    var blob by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
-    if (!open) {
-        Text(
-            stringResource(Res.string.join_scan_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
-            style = tightCenter(12.sp),
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = true }.padding(horizontal = 12.dp, vertical = 6.dp),
-        )
-        return
-    }
-    Column(Modifier.fillMaxWidth()) {
-        Text(stringResource(Res.string.join_scan_title).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
-        Spacer(Modifier.height(10.dp))
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface).border(1.dp, if (error) Tok.danger else Tok.hair, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 11.dp)) {
-            if (blob.isEmpty()) Text(stringResource(Res.string.join_paste_placeholder), color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
-            BasicTextField(blob, { blob = it; error = false }, singleLine = true, textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp), cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth())
-        }
-        if (error) {
-            Spacer(Modifier.height(8.dp))
-            Text(stringResource(Res.string.join_invalid), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp)
-        }
-        Spacer(Modifier.height(12.dp))
-        PrimaryButton(stringResource(Res.string.join_cta), enabled = blob.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-            val inv = decodeShareInvite(dev.ccpocket.app.pairing.canonicalLinkScheme(blob))
-            if (inv != null) repo.redeemShareInvite(inv) else error = true
         }
     }
 }

@@ -35,7 +35,7 @@ data class PinStateDoc(
      *  [ProjectPinReducer.MAX_ALIASES]), so intent keeps meaning the same project after the daemon re-canonicalizes
      *  its display path. Forgotten whenever the stream moves to another device or store. */
     val aliases: Map<String, String> = emptyMap(),
-    /** Local-only scopes (a folder-share guest binding, no binding at all): the plain list, newest first. */
+    /** Local-only scopes (no binding at all): the plain list, newest first. */
     val local: List<String> = emptyList(),
     /** Already-acknowledged operations of [stream] (every seq ≤ `stream.ackedSeq`) whose path the daemon has not
      *  yet resolved to a key. NOT intent: never shown, never renumbered, never quarantined — only resent as-is to

@@ -77,7 +77,7 @@ class ProjectPinStoreTest {
         (ProjectPinReducer.enqueue(doc, path, pinned) as ProjectPinReducer.Edit.Applied).doc
 
     private fun owner(id: String) = PairedDaemon("wss://relay.invalid", id, "pk-$id", "dev-$id", "cred-$id")
-    private fun guest(id: String) = owner(id).copy(role = BindingRole.GUEST)
+    private fun nonOwner(id: String) = owner(id).copy(role = BindingRole.COLLABORATOR)
 
     /** A correlated fetch reply on the binding's device, acknowledging through [ack]. */
     private fun fetch(doc: PinStateDoc, device: String, ack: Long, rev: Long) = ProjectPinReducer.applyReply(
@@ -232,11 +232,11 @@ class ProjectPinStoreTest {
         val registry = ProjectPinRegistry(storage, ::token)
         val legacy = "/a\n/b\n/c"
         storage.writeOutcome = PinFileWrite.NotWritten
-        registry.migrateLegacyIfNeeded(legacy, listOf(owner("A"), guest("G")), owner("A"))
+        registry.migrateLegacyIfNeeded(legacy, listOf(owner("A"), nonOwner("G")), owner("A"))
         assertTrue(storage.files.isEmpty(), "a failed write lands neither marker nor operations")
 
         storage.writeOutcome = PinFileWrite.Durable
-        registry.migrateLegacyIfNeeded(legacy, listOf(owner("A"), guest("G")), guest("G"))
+        registry.migrateLegacyIfNeeded(legacy, listOf(owner("A"), nonOwner("G")), nonOwner("G"))
         val doc = registry.scope(PinScopeKey.Owner("A")).document()
         assertEquals(listOf("/c", "/b", "/a"), doc.pending.map { it.path })
         assertEquals(true, doc.legacy?.claimed)
@@ -244,7 +244,6 @@ class ProjectPinStoreTest {
         registry.migrateLegacyIfNeeded(legacy, listOf(owner("A")), owner("A"))
         ProjectPinRegistry(storage, ::token).migrateLegacyIfNeeded(legacy, listOf(owner("A")), owner("A")) // a restart
         assertEquals(3, registry.scope(PinScopeKey.Owner("A")).document().pending.size, "claimed exactly once")
-        assertTrue(ProjectPinRegistry(storage, ::token).scope(PinScopeKey.Guest("G")).document().pending.isEmpty())
     }
 
     @Test
@@ -278,8 +277,8 @@ class ProjectPinStoreTest {
     @Test
     fun no_owner_or_an_unreadable_document_defers_the_migration_without_guessing() {
         val storage = FakePersistence()
-        ProjectPinRegistry(storage, ::token).migrateLegacyIfNeeded("/a", listOf(guest("G")), guest("G"))
-        ProjectPinRegistry(storage, ::token).migrateLegacyIfNeeded("/a", listOf(owner("A"), owner("B")), guest("G"))
+        ProjectPinRegistry(storage, ::token).migrateLegacyIfNeeded("/a", listOf(nonOwner("G")), nonOwner("G"))
+        ProjectPinRegistry(storage, ::token).migrateLegacyIfNeeded("/a", listOf(owner("A"), owner("B")), nonOwner("G"))
         assertTrue(storage.files.isEmpty())
 
         storage.files["owner-X"] = "not json"
@@ -385,26 +384,26 @@ class ProjectPinStoreTest {
     }
 
     @Test
-    fun a_guest_binding_on_the_owners_account_neither_holds_nor_disturbs_owner_authority() {
+    fun a_non_owner_binding_on_the_owners_account_neither_holds_nor_disturbs_owner_authority() {
         val o = owner("A")
-        val g = o.copy(deviceId = "dev-G", credential = "cred-G", role = BindingRole.GUEST)
+        val g = o.copy(deviceId = "dev-G", credential = "cred-G", role = BindingRole.COLLABORATOR)
 
         val initialized = ProjectPinRegistry(FakePersistence(), ::token)
         initialized.initializeAuthorityOnce { listOf(o, g) }
-        assertNotNull(initialized.acquireLease(o), "a legitimate guest sibling does not void the owner")
-        assertNull(initialized.acquireLease(g), "a guest never gets an owner lease")
+        assertNotNull(initialized.acquireLease(o), "a non-owner sibling does not void the owner")
+        assertNull(initialized.acquireLease(g), "a non-owner never gets an owner lease")
 
         val registry = ProjectPinRegistry(FakePersistence(), ::token)
         registry.initializeAuthorityOnce { listOf(o) }
         val lease = assertNotNull(registry.acquireLease(o))
         registry.refreshAfterPairingChange { listOf(o, g) }
-        assertTrue(registry.isCurrent(lease), "adding a guest keeps the owner's epoch")
+        assertTrue(registry.isCurrent(lease), "adding a non-owner keeps the owner's epoch")
         assertEquals(lease, registry.acquireLease(o))
         registry.refreshAfterPairingChange { listOf(o) }
-        assertTrue(registry.isCurrent(lease), "removing the guest keeps it too")
+        assertTrue(registry.isCurrent(lease), "removing the non-owner keeps it too")
 
         registry.refreshAfterPairingChange { listOf(g) }
-        assertFalse(registry.isCurrent(lease), "a guest-only account has no owner authority")
+        assertFalse(registry.isCurrent(lease), "a non-owner-only account has no owner authority")
         assertNull(registry.acquireLease(g))
         assertNull(registry.acquireLease(o))
 
@@ -516,13 +515,12 @@ class ProjectPinStoreTest {
 
     @Test
     fun scope_keys_isolate_roles_and_the_demo_is_never_written() {
-        assertNotEquals(PinScopeKey.Owner("abc").storageName, PinScopeKey.Guest("abc").storageName)
         assertEquals(PinScopeKey.Owner("acct"), PinScopeKey.of(owner("acct"), demo = false))
-        assertEquals(PinScopeKey.Guest("acct"), PinScopeKey.of(guest("acct"), demo = false))
-        assertEquals(PinScopeKey.Inbox, PinScopeKey.of(owner("acct").copy(role = BindingRole.COLLABORATOR), demo = false))
+        // the retired COLLABORATOR role never reaches a repository; were one handed in, nothing is written
+        assertEquals(PinScopeKey.Demo, PinScopeKey.of(owner("acct").copy(role = BindingRole.COLLABORATOR), demo = false))
         assertEquals(PinScopeKey.Demo, PinScopeKey.of(owner("acct"), demo = true))
         assertEquals(PinScopeKey.Unpaired, PinScopeKey.of(null, demo = false))
-        assertTrue(PinScopeKey.Owner("abc").synced && !PinScopeKey.Guest("abc").synced)
+        assertTrue(PinScopeKey.Owner("abc").synced)
 
         val storage = FakePersistence()
         val demo = ProjectPinRegistry(storage, ::token).scope(PinScopeKey.Demo)

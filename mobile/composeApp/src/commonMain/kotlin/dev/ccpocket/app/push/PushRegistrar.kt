@@ -42,7 +42,7 @@ import kotlin.random.Random
 // ── the pieces a pairing supplies ───────────────────────────────────────────────────────────────────
 
 /** One registerable identity: which relay, whose account, and the deviceId the token is filed under.
- *  The primary computer, every fleet satellite and every collaborator inbox is a separate one. */
+ *  The primary computer and every fleet satellite is a separate one. */
 data class PairingKey(val relay: String, val accountId: String, val deviceId: String)
 
 /** Why a submission ended. [written] on a failure separates "never reached a socket" from "may already
@@ -311,7 +311,7 @@ class PushRegistrar(
 
     /**
      * Submit ONE clearing registration for [key] and then forget it entirely — the severed-link path
-     * (a Collaborator Link removed, a daemon unpaired). Best effort by design: the credential is about
+     * (a daemon unpaired). Best effort by design: the credential is about
      * to be discarded, so this is the last moment the relay row can ever be cleared, but a failure here
      * must not block the removal the user asked for.
      */

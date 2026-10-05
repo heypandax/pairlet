@@ -1,6 +1,7 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.app.net.DepositOutcome
+import dev.ccpocket.app.pairing.BindingRole
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.push.DefaultPushPlatform
 import dev.ccpocket.app.push.PairingKey
@@ -163,5 +164,44 @@ class PushRegisterTest {
         r.setNotificationsEnabled(false)
 
         assertEquals("", calls.last().token, "turning notifications off on the LAN must still de-register at the relay")
+    }
+
+    /**
+     * Fleet satellites register too. They used to be excluded on the theory that the primary link's token
+     * already wakes this phone — true of the owner's account fan-out, but it left the satellite's own
+     * deviceId unreachable by a TARGETED push, and a phone whose primary link was broken with no other
+     * registered path at all. The relay still refuses the identities that must not register.
+     *
+     * (Moved here unchanged from the retired CollaboratorInboxPushTest: an OWNER binding pinned to its own
+     * computer — a satellite link, not the primary — deposits the platform token under its own deviceId.)
+     */
+    @Test fun aFleetSatelliteRegistersItsOwnTokenToo() {
+        PushTokens.deliverForTest(PushToken("ios", "tok-A"))
+        val dialed = CopyOnWriteArrayList<RegisterPush>()
+        val r = PocketRepository(
+            scope,
+            pinnedTo = PairedDaemon(
+                relay = "wss://127.0.0.1:9", accountId = "acct-colleague", daemonPub = "pk",
+                deviceId = "dev-me", credential = "cred", role = BindingRole.OWNER,
+            ),
+        ).apply {
+            useRelay = true
+            sessionActive.value = true
+            notificationsOn.value = true // independent of whatever a previous run persisted
+            directLinkUp = { true }      // observe the token through the one-shot dial rather than a socket
+            registrarOverride = registrar()
+            pushDial = { _, f, _ ->
+                dialed += f
+                DepositOutcome.Acked(PushRegistrationResult(
+                    f.requestId!!,
+                    if (f.token.isEmpty()) PushRegistrationOutcome.CLEARED else PushRegistrationOutcome.STORED,
+                ))
+            }
+            onSendForTest = {}
+        }
+
+        r.receiveControlForTest(Attached(Role.DEVICE, "acct-colleague"))
+
+        assertEquals(listOf("tok-A"), dialed.map { it.token })
     }
 }

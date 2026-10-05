@@ -59,30 +59,6 @@ class EntryUiTest {
         )
     }
 
-    /**
-     * A pure recipient (SESSION-HANDOFF.md §10) owns collaborator links and NO binding, so by binding count
-     * alone they are indistinguishable from a first run — and they are the one audience for whom "install
-     * the daemon on your computer" is the wrong instruction entirely. The pairing screen carries the line
-     * that explains their actual state; the guide does not.
-     */
-    @Test
-    fun aPureRecipientIsNotTreatedAsAFirstRun() {
-        assertEquals(
-            EntryLanding.PAIR,
-            entryLanding(hasBindings = false, addingDevice = false, hasCollaboratorLinks = true),
-        )
-        assertNotEquals(
-            EntryLanding.FIRST_RUN_CONNECT,
-            entryLanding(hasBindings = false, addingDevice = false, hasCollaboratorLinks = true),
-            "a recipient must never be sent through daemon onboarding",
-        )
-        // …and an owner who ALSO holds collaborator links still goes to their own computers
-        assertEquals(
-            EntryLanding.COMPUTERS,
-            entryLanding(hasBindings = true, addingDevice = false, hasCollaboratorLinks = true),
-        )
-    }
-
     // ══ the six connection phases ══════════════════════════════════════════════════════════════════
 
     @Test

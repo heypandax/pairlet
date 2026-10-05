@@ -13,11 +13,9 @@ import dev.ccpocket.protocol.ApprovalPrefs
 import dev.ccpocket.protocol.ArchivedSessions
 import dev.ccpocket.protocol.AuthState
 import dev.ccpocket.protocol.BridgeListing
-import dev.ccpocket.protocol.CollaboratorListing
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.DirectoryEntry
-import dev.ccpocket.protocol.HandoffListing
 import dev.ccpocket.protocol.PathEntries
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
@@ -27,7 +25,6 @@ import dev.ccpocket.protocol.ScheduleInfo
 import dev.ccpocket.protocol.ScheduleState
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.SessionSummary
-import dev.ccpocket.protocol.ShareListing
 import dev.ccpocket.protocol.SkillCatalog
 import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.Usage
@@ -249,7 +246,7 @@ class ResetInventoryTest {
         r.receiveForTest(ArchivedSessions(listOf(SessionSummary("old-a", "t", "p", 1, "/inv/w", 0))))
         r.receiveForTest(PathEntries(workdir = PocketRepository.BROWSE_HOME, subPath = "", roots = listOf("C:\\")))
         // the frozen / per-daemon features: contents don't matter, only that the repository took them in
-        listOf(BridgeListing::class.java, ShareListing::class.java, HandoffListing::class.java, CollaboratorListing::class.java,
+        listOf(BridgeListing::class.java,
             AuthState::class.java, PresetsState::class.java, SkillCatalog::class.java, ApprovalPrefs::class.java)
             .forEach { r.receiveForTest(assertNotNull(Arbitrary.of(it) as? dev.ccpocket.protocol.Frame, "build ${it.simpleName}")) }
         r.receiveForTest(PushPrefs(enabled = false))
@@ -332,8 +329,7 @@ class ResetInventoryTest {
             listOf("directLinkUp", "pushDial", "registrarOverride", "linkHealthOverride", "onSendForTest", "pinWriterForTest",
                 "memoWriterForTest", "memoStoreForTest", "redeemForTest", "dialForTest")
                 .forEach { put(it, "test seam / injected function") }
-            listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply", "onCollaboratorLinkAdded",
-                "onNotificationsChanged")
+            listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply")
                 .forEach { put(it, "shell callback wiring, not state") }
             listOf("stableLinkResetMs", "presenceProbeMs", "managedCallTimeoutMs", "managedListPageTimeoutMs", "managedEnableTimeoutMs",
                 "managedLoadingMaxMs", "promptReceiptTimeoutMs", "promptTurnTimeoutMs", "firstPromptTimeoutMs", "sessionsOpenTimeoutMs")
@@ -365,14 +361,9 @@ class ResetInventoryTest {
         // GAP-* = 疑似缺陷，待单独决定 — the cells marked K are the "should probably clear but doesn't" points of the
         // proposal's §4.4, confirmed by this run. Do NOT fix them here; a fix is its own commit and edits these rows.
         //   GAP-桥接   DSC/SWC keep the bridge request state (busy/error/credential/merge check) — frozen feature
-        //   GAP-共享   DSC/SWC keep share request state + the pending invite (shareEnded: DSC only — the cold switch
-        //              reloads it per account) — frozen feature
-        //   GAP-交接   DSC/SWC keep handoff/collaborator request state, one-shot artefacts and this device's own
-        //              links/invites (only handoffsLoaded is cleared) — frozen feature
         //   GAP-会话视图 DSC/SWC keep allow rules (DEM clears them) — verified harmless, deliberately untouched
-        //   FIX-桥接 / FIX-共享 / FIX-交接: DSC/SWC drop only the frozen features' cached LISTINGS (+ their loaded
-        //              flags / list deadline), which each surface re-pulls from the next daemon on open. activeHandoff
-        //              is not scoped to the chat on screen: a WAITING handoff on A locked a new session's composer on B
+        //   FIX-桥接: DSC/SWC drop only the frozen features' cached LISTINGS (+ their loaded flags /
+        //              list deadline), which each surface re-pulls from the next daemon on open
         // FIX-* = a former GAP that disconnect() now clears (the cold switch inherits it); OK-* = a former GAP judged
         // harmless after reading every reader, kept on purpose:
         //   FIX-偏好   push / approval prefs are daemon truth whose null means "not answered" — a next daemon too old
@@ -423,7 +414,6 @@ class ResetInventoryTest {
             linkStableJob                R R K K K K K K
             presenceProbeJob             R R K K K K K K
             directoriesRev               K K K K K K K K
-            handoffListingRev            K K K K K K K K
             attachedThisSession          R R K K K K K K
             diagnosticConnectionId       R R K K K K K K
             daemonOffline                R R K K K K K K
@@ -483,7 +473,6 @@ class ResetInventoryTest {
             demoConnecting               R R K K K K K K
             directories                  R R K K K K K K
             directoriesLoaded            R R K K K K K K
-            handoffsLoaded               R R K K K K K K
             refreshing                   K K R K K K K K  # OK-不对称
             sessions                     R R R K K K K R
             sessionsDir                  R R R K K K K R
@@ -671,7 +660,6 @@ class ResetInventoryTest {
             pairFailureSeq               K K K K K K K K
             pairVerifying                K K K K K K K K
             pairAttempt                  K K K K K K K K
-            pushSevering                 K K K K K K K K
             demoSeq                      K K K K K K K K
             demoAsked                    K K K K K K K K
             demoPendingReply             K K K K K K K K
@@ -729,33 +717,6 @@ class ResetInventoryTest {
             limitConfirmed               R R K R K K K K  # OK-降级
             repairOffer                  R R K R K K K K  # OK-降级
             repairProgress               R R K R K K K K  # OK-降级
-            shares                       R R K K K K K K  # FIX-共享
-            sharesLoaded                 R R K K K K K K  # FIX-共享
-            sharesRefreshing             K K K K K K K K  # GAP-共享
-            lastShareCreated             K K K K K K K K  # GAP-共享
-            shareEnded                   K R K K K K K K  # GAP-共享（只在 DSC；冷换机按目标账户重载）
-            handoffs                     R R K K K K K K  # FIX-交接
-            activeHandoff                R R K K K K K K  # FIX-交接
-            handoffCreating              K K K K K K K K  # GAP-交接
-            handoffError                 K K K K K K K K  # GAP-交接
-            handoffUnsupported           K K K K K K K K  # GAP-交接
-            lastHandoffInvite            K K K K K K K K  # GAP-交接
-            handoffAccepting             K K K K K K K K  # GAP-交接
-            handoffAcceptError           K K K K K K K K  # GAP-交接
-            autoOpenedHandoffs           K K K K K K K K  # GAP-交接
-            acceptedHere                 K K K K K K K K  # GAP-交接
-            collaborators                R R K K K K K K  # FIX-交接
-            collaboratorTicket           K K K K K K K K  # GAP-交接
-            collaboratorTicketCreating   K K K K K K K K  # GAP-交接
-            collaboratorError            K K K K K K K K  # GAP-交接
-            lastCollaboratorConnected    K K K K K K K K  # GAP-交接
-            collaboratorsLoaded          R R K K K K K K  # FIX-交接
-            collaboratorLinks            K K K K K K K K  # GAP-交接
-            collabRedeeming              K K K K K K K K  # GAP-交接
-            collabRedeemError            K K K K K K K K  # GAP-交接
-            pendingCollabInvite          K K K K K K K K  # GAP-交接
-            pendingShareInvite           K K K K K K K K  # GAP-共享
-            pendingOfferId               K K K K K K K K  # GAP-交接
             sessionsOpening              R R R K K K K R
             sessionsOpeningJob           R R R K K K K R
             managedFailed                R R K K K K K K

@@ -398,7 +398,7 @@ internal class MemoHost(
     private val failedLists = HashSet<String>()
 
     private fun pickerProjects(): List<dev.ccpocket.protocol.DirectoryEntry> =
-        repo.directories.filter { it.isDir && it.sharedBy == null }.sortedByDescending { it.lastModified }.take(PICKER_PROJECTS)
+        repo.directories.filter { it.isDir }.sortedByDescending { it.lastModified }.take(PICKER_PROJECTS)
 
     /** Ask for [workdirs]' session lists unless a fresh answer or a pending question is already there. */
     private fun askFor(workdirs: List<String>, retryFailed: Boolean) {

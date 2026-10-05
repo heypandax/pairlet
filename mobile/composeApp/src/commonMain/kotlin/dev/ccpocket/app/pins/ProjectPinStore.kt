@@ -98,25 +98,20 @@ sealed class PinScopeKey(val storageName: String?, val synced: Boolean) {
     /** A computer this device paired as its owner: one synced document per computer. */
     data class Owner(val accountId: String) : PinScopeKey("owner-" + safePinName(accountId), synced = true)
 
-    /** A folder-share guest binding: pins stay local and never reach, or come from, the owner's list. */
-    data class Guest(val accountId: String) : PinScopeKey("guest-" + safePinName(accountId), synced = false)
-
     /** No binding at all: local only. */
     data object Unpaired : PinScopeKey("local", synced = false)
 
     /** The no-pairing demo: in memory only, never written anywhere. */
     data object Demo : PinScopeKey(null, synced = false)
 
-    /** A Collaborator Link inbox: it has no projects, so it has no pins. */
-    data object Inbox : PinScopeKey(null, synced = false)
-
     companion object {
         fun of(binding: PairedDaemon?, demo: Boolean): PinScopeKey = when {
             demo -> Demo
             binding == null -> Unpaired
             binding.role == BindingRole.OWNER -> Owner(binding.accountId)
-            binding.role == BindingRole.GUEST -> Guest(binding.accountId)
-            else -> Inbox
+            // the retired COLLABORATOR role, which this build never loads: as before, it has no projects,
+            // so its pins live in memory only and are never written
+            else -> Demo
         }
     }
 }
@@ -406,9 +401,8 @@ class ProjectPinRegistry(
     }
 
     private fun install(bindings: List<PairedDaemon>) {
-        // only an OWNER binding syncs, so only it holds authority: a guest sibling on the same account keeps its pins
-        // local and never disturbs the owner. Two OWNER identities for one account speak for nothing: no lease
-        // rather than a guess.
+        // only an OWNER binding syncs, so only it holds authority. Two OWNER identities for one account speak for
+        // nothing: no lease rather than a guess.
         val current = bindings.filter { it.role == BindingRole.OWNER }.groupBy { it.accountId }
             .filterValues { same -> same.all { it.deviceId == same[0].deviceId && it.credential == same[0].credential } }
             .mapValues { it.value[0] }

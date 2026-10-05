@@ -15,15 +15,15 @@ import kotlin.test.assertTrue
  * the out-of-order listing guard, the '/'-joined subPath algebra over an ANCHOR that may be "~" or a
  * filesystem root ("/", "C:\") (#176 root switcher), the native-separator workdir join (never a doubled
  * root separator), badge/recents matching against the flat project list (both host separators, off-home
- * projects now reachable), and the guest-view detection that keeps the browser owner-only client-side.
+ * projects now reachable).
  */
 class DirectoryPickerLogicTest {
 
     private fun listing(subPath: String, vararg entries: PathEntry, anchor: String = "~", ok: Boolean = true) =
         PathEntries(workdir = anchor, subPath = subPath, entries = entries.toList(), ok = ok)
 
-    private fun dir(path: String, name: String = path.substringAfterLast('/').substringAfterLast('\\'), sharedBy: String? = null) =
-        DirectoryEntry(path = path, name = name, isDir = true, hasSessions = true, sharedBy = sharedBy)
+    private fun dir(path: String, name: String = path.substringAfterLast('/').substringAfterLast('\\')) =
+        DirectoryEntry(path = path, name = name, isDir = true, hasSessions = true)
 
     // ── rows ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -177,14 +177,5 @@ class DirectoryPickerLogicTest {
         assertTrue(nullHome.all { it.anchor == "/" }, "these sample paths all sit under the Unix root")
         // Windows separators map into the picker's '/' keys
         assertEquals(listOf("dev/app"), browseRecents(listOf(dir("C:\\Users\\alex\\dev\\app")), "C:\\Users\\alex").map { it.subPath })
-    }
-
-    // ── guest view ────────────────────────────────────────────────────────────────────────────────
-
-    @Test
-    fun guest_view_is_all_rows_stamped_and_nothing_else() {
-        assertTrue(isGuestDirView(listOf(dir("/s/root", sharedBy = "panda"))))
-        assertFalse(isGuestDirView(listOf(dir("/s/root", sharedBy = "panda"), dir("/Users/alex/mine"))))
-        assertFalse(isGuestDirView(emptyList()), "an empty (still-loading / fresh) list must not read as guest")
     }
 }

@@ -25,19 +25,21 @@ data class PairingInfo(val relay: String, val accountId: String, val daemonPub: 
 
 /**
  * What a local binding's credential is (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.2.1). Purely a LOCAL
- * routing/display fact — the daemon enforces the real authority — but the app must not treat three very
- * different credentials as one "computer":
+ * routing/display fact — the daemon enforces the real authority — but the app must not treat different
+ * credentials as one "computer":
  *
  *  - [OWNER]        a computer you paired: directories, sessions, settings, the lot;
- *  - [GUEST]        a folder-share invite you redeemed (issue #115): one folder on someone else's machine;
- *  - [COLLABORATOR] a Collaborator Link (§4.1): ZERO session access — an inbox for Handoff offers only.
+ *  - [COLLABORATOR] a Collaborator Link — RETIRED (2026-10). The value stays only so records an older build
+ *                   wrote still decode; this build never creates, loads or connects such a binding.
  *
  * Persisted as a plain STRING with a tolerant decode: records written before this field existed have no
- * `role` at all (the default applies) and a value only a NEWER build knows degrades to [OWNER] — the
- * pre-role reading — instead of failing the whole list decode and unpairing every computer.
+ * `role` at all (the default applies) and a value this build does not know degrades to [OWNER] — the
+ * pre-role reading — instead of failing the whole list decode and unpairing every computer. That covers a
+ * value only a NEWER build knows and the retired `guest` (folder share, removed 2026-10; no released build
+ * ever stored it).
  */
 @Serializable(with = BindingRoleSerializer::class)
-enum class BindingRole { OWNER, GUEST, COLLABORATOR }
+enum class BindingRole { OWNER, COLLABORATOR }
 
 private object BindingRoleSerializer : KSerializer<BindingRole> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("BindingRole", PrimitiveKind.STRING)
@@ -98,7 +100,7 @@ object Pairing {
     }
 
     /** The relay-side half of every redeem: register our pubkey, receive a credential. Persists NOTHING —
-     *  the caller decides which store the resulting binding belongs in (a computer vs. a contact inbox). */
+     *  the caller decides where the resulting binding is stored. */
     private suspend fun redeemCredential(
         info: PairingInfo,
         keys: E2ECrypto.KeyPair,
@@ -121,15 +123,6 @@ object Pairing {
         role: BindingRole = BindingRole.OWNER,
     ): PairedDaemon =
         redeemCredential(info, keys, client, role).also { upsert(it); setActive(it.accountId) }
-
-    /**
-     * Redeem a Collaborator Link ticket (§4.1). Deliberately NOT [redeem]: a collaborator credential is
-     * not "a computer you control" — it grants zero session access and must never join the machine list,
-     * the fleet, the switcher, or [active]. It lands in its own store ([collaboratorLinks]) and leaves the
-     * active account exactly where the user left it.
-     */
-    suspend fun redeemCollaboratorLink(info: PairingInfo, keys: E2ECrypto.KeyPair, client: HttpClient): PairedDaemon =
-        redeemCredential(info, keys, client, BindingRole.COLLABORATOR).also { upsertCollaborator(it) }
 
     /** The relay this app pairs against (the daemon dials the same one). Override in Advanced if self-hosting. */
     const val DEFAULT_RELAY = "wss://pocket.ark-nexus.cc"
@@ -166,9 +159,10 @@ object Pairing {
      *  - `(accountId, role)` keeps "re-pairing the same computer refreshes its credential in place" true:
      *    a second OWNER redeem supersedes the first rather than leaving a dead duplicate row.
      *
-     * Together they stop the bug this rule exists for: redeeming a folder-share (GUEST) invite for a daemon
-     * you already own used to REPLACE the owner binding, downgrading the whole machine to one folder.
-     * (Collaborator links never reach this list at all — see [upsertCollaborator].)
+     * Together they stop the bug this rule exists for: redeeming a (since retired) folder-share invite for a
+     * daemon you already own used to REPLACE the owner binding, downgrading the whole machine to one folder.
+     * (Collaborator links never reached this list: an older build kept them in a separate `collab_links`
+     * entry, which this build neither reads nor clears.)
      */
     fun upsert(p: PairedDaemon): List<PairedDaemon> =
         (loadAll().filterNot { it.accountId == p.accountId && (it.deviceId == p.deviceId || it.role == p.role) } + p)
@@ -203,43 +197,9 @@ object Pairing {
         pinned.firstOrNull { it.role == BindingRole.OWNER } ?: pinned.firstOrNull() ?: all.lastOrNull()
     }
 
-    // ── collaborator links (SESSION-HANDOFF.md §4.1) — a SEPARATE store, deliberately ──────────────
-    // A Collaborator Link is an inbox, not a computer: it can receive Handoff offers and nothing else.
-    // Keeping it out of [loadAll] keeps it out of the machine list, the fleet satellites, the ⌘K switcher
-    // and [active] by construction, instead of by every reader remembering to filter.
-
-    /** Every Collaborator Link this device holds (contacts who can hand work to us). Never a "computer". */
-    fun collaboratorLinks(): List<PairedDaemon> =
-        SecureStore.getString(K_COLLAB_LINKS)?.let {
-            runCatching { json.decodeFromString<List<PairedDaemon>>(it) }.getOrDefault(emptyList())
-        }.orEmpty()
-
-    private fun saveCollaborators(list: List<PairedDaemon>) =
-        SecureStore.putString(K_COLLAB_LINKS, json.encodeToString(list))
-
-    /** Add or refresh a Collaborator Link. Keyed on accountId alone: re-scanning a colleague's QR mints a
-     *  new deviceId for the SAME contact, and the old credential is dead the moment the new one exists —
-     *  keeping both would leave a permanently failing link in the inbox. */
-    fun upsertCollaborator(p: PairedDaemon): List<PairedDaemon> =
-        (collaboratorLinks().filterNot { it.accountId == p.accountId } + p.copy(role = BindingRole.COLLABORATOR))
-            .also(::saveCollaborators)
-
-    /** Drop a Collaborator Link (the local half of "remove contact"). */
-    fun removeCollaborator(accountId: String): List<PairedDaemon> =
-        collaboratorLinks().filterNot { it.accountId == accountId }.also(::saveCollaborators)
-
-    /** Persist a Collaborator Link's daemon-advertised direct URL / computer name — same write-through the
-     *  computer list gets, so an inbox link also skips the relay on a LAN and reads as a name, not a hash. */
-    fun setCollaboratorDirectUrl(accountId: String, url: String?): List<PairedDaemon> =
-        collaboratorLinks().map { if (it.accountId == accountId) it.copy(directUrl = url) else it }.also(::saveCollaborators)
-
-    fun setCollaboratorHostName(accountId: String, name: String?): List<PairedDaemon> =
-        collaboratorLinks().map { if (it.accountId == accountId) it.copy(hostName = name?.ifBlank { null }) else it }.also(::saveCollaborators)
-
     private const val K_PRIV = "device_priv"
     private const val K_PUB = "device_pub"
     private const val K_PAIRED = "paired_daemon"       // legacy single record (migrated into K_PAIRED_LIST, then removed)
     private const val K_PAIRED_LIST = "paired_daemons" // JSON array of every bound computer
     private const val K_ACTIVE = "active_account"      // accountId of the binding we currently talk to
-    private const val K_COLLAB_LINKS = "collab_links"  // JSON array of Collaborator Links — NOT computers
 }

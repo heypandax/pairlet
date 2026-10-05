@@ -66,24 +66,6 @@ class DesktopUiTest {
     }
 
     @Test
-    fun sharedGroupShowsProvenancePillAndExpiry() = runComposeUiTest {
-        // a guest's shared folder in RECENT (issue #115): the neutral "Shared" pill + "owner · 6d left"
-        // — the same provenance statement mobile's SharedProjectCell makes, on the desktop group header.
-        // The pill/caption strings resolve via getString (the JVM locale picks the resource language).
-        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
-        waitForIdle()
-        val badge = runBlocking { getString(Res.string.shared_badge) }
-        val left = runBlocking { getString(Res.string.share_left_days, 6) }
-        // the RECENT list outgrew the test viewport (the OpenCode seed row) — scroll the shared
-        // group into view first; the assertions below are about RENDERING, not initial visibility
-        onNodeWithTag("sidebar-list").performScrollToNode(hasText("acme-api"))
-        waitForIdle()
-        assertPresent("acme-api")                 // the shared group's header renders
-        assertPresent(badge)                      // the hairline pill (shared_badge — same string as mobile)
-        assertPresent("panda-mbp · $left")        // origin machine + remaining validity, at rest
-    }
-
-    @Test
     fun recentGroupsCollapse() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
         // the last RECENT group sits below the fold at test size (the docked Archived/Reviews rows take
@@ -127,7 +109,7 @@ class DesktopUiTest {
 
     @Test
     fun oldDaemonRendersFlatWithNoManagement() = runComposeUiTest {
-        // degrade: an older daemon / guest omits groups → repo reports canEditGroups=false → flat list,
+        // degrade: an older daemon omits groups → repo reports canEditGroups=false → flat list,
         // no group headers, no create entry. (groupsSupported=false is what folds into canEditGroups.)
         val model = object : DesktopModel by SeedDesktopModel() {
             override val customGroups = emptyList<DkGroup>()

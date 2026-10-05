@@ -94,8 +94,6 @@ class SidePaneModelDelegationGuardTest {
         // rewind/fork: the menu is already hidden by canRewind=false; these are its BANNERS
         "canRewind", "rewindBlockedByTurn", "startRewind", "rewindError", "dismissRewindError",
         "sessionLineage",
-        // the handoff banner ChatPane draws above the stream, with verbs that acted on the focused session
-        "activeHandoff", "handoffIsRecipient",
         // header/composer surfaces that belong to the focused conversation
         "changedFiles", "gitStatus", "slashCommands", "pathListing", "browsePath",
         "switchMode", "switchEffort", "switchServiceTier",
@@ -132,14 +130,9 @@ class SidePaneModelDelegationGuardTest {
         "renameComputer", "removeComputer", "activeIsThisMachine",
         // window-level overlay flags
         "switcherOpen", "showNewSession", "showTray", "palette", "showSettings", "showAddComputer",
-        "showAttention", "showWorktrees", "showSkills", "showHandoff",
+        "showAttention", "showWorktrees", "showSkills",
         "showFolderPicker", "showQuotaPopover",
         "anyOverlayOpen", "dismissOverlays",
-        // session handoff + collaborator links (raised from window chrome; the pane's banner is inert)
-        "handoffInvite", "handoffCreating", "handoffError", "handoffIsInitiator", "handoffCreate",
-        "handoffCancel", "handoffRecall", "handoffComplete", "handoffReturn", "dismissHandoffInvite",
-        "collaborators", "collaboratorTicket", "lastCollaboratorConnected", "collaboratorError",
-        "listCollaborators", "createCollaboratorTicket", "removeCollaborator",
         // usage dashboard (the live repository, handed over whole)
         "usageRepo",
         // sidebar: pins, projects, sessions, groups, archive, rename, RECENT
@@ -213,9 +206,7 @@ class SidePaneModelDelegationGuardTest {
         "phonePush", "refreshPushPrefs",
         "approvalNoAutoDeny", "refreshApprovalPrefs", "approvalFullControlExpiryMs",
         "fullControlExpiryMs",
-        // folder-share + schedules
-        "shares", "sharesLoaded", "lastShareInvite", "refreshShares", "createShare", "revokeShare",
-        "clearLastShare", "redeemShareInvite",
+        // schedules
         "schedules", "schedulesLoaded", "schedulesStale", "refreshSchedules", "cancelSchedule",
         // account + API presets
         "authState", "refreshAuth", "switchAccount", "stopAuthBlocker", "submitAuthCode",
