@@ -1160,7 +1160,7 @@ interface DesktopModel {
     /** Remove this daemon binding from the desktop's local credential list; the daemon itself is unchanged. */
     fun removeComputer(c: DkComputer)
 
-    // ── folder-share (issue #115): owner management + guest redeem. All default to inert so the
+    // ── folder-share (issue #115): owner management. All default to inert so the
     //    seed/preview model needs no changes; the live [RepoDesktopModel] wires them to the repo. ──
     val shares: List<dev.ccpocket.protocol.ShareInfo> get() = emptyList()
     val sharesLoaded: Boolean get() = false
@@ -1170,8 +1170,6 @@ interface DesktopModel {
     fun createShare(path: String, tier: dev.ccpocket.protocol.AccessTier, expiresInSec: Long) {}
     fun revokeShare(deviceId: String) {}
     fun clearLastShare() {}
-    /** Guest: decode + redeem a pasted invite blob; false if it isn't a valid invite. */
-    fun redeemShareInvite(blob: String): Boolean = false
 
     // scheduled tasks (issue #137): the ACTIVE computer's schedule list (management surface — the
     // creation gesture lives on mobile's composer). Defaults keep seed/preview/test fakes inert;

@@ -118,10 +118,8 @@ import dev.ccpocket.protocol.RevokeShare
 import dev.ccpocket.protocol.ShareCreated
 import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.ShareInfo
-import dev.ccpocket.protocol.ShareInvite
 import dev.ccpocket.protocol.ShareListing
 import dev.ccpocket.protocol.ShareRevoked
-import dev.ccpocket.app.pairing.toPairingInfo
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.SlashCommand
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
@@ -5268,24 +5266,11 @@ class PocketRepository(
     /** Owner: revoke a share by its guest [deviceId] — cuts the live link now, kills the credential. */
     fun revokeShare(deviceId: String) { sharesRefreshing.value = true; scope.launch { runCatching { send(RevokeShare(deviceId)) } } }
 
-    /** Guest: redeem a scanned/pasted folder-share invite — the same relay redeem as pairing a computer,
-     *  but the daemon scopes this binding to the one shared folder (issue #115). */
-    fun redeemShareInvite(invite: ShareInvite) {
-        status.value = StatusMsg(Res.string.status_pairing)
-        scope.launch { doPair("share") { invite.toPairingInfo() } }
-    }
-
-    /** A scanned/opened `ccpocket://share#…` waiting for the guest accept-preview (§7): a deep link or a QR
-     *  must NEVER redeem on sight — the user reviews what they are joining and says yes first. */
-    val pendingShareInvite = mutableStateOf<ShareInvite?>(null)
-
     /**
-     * THE deep-link front door (§7). iOS `onOpenURL`, the Android VIEW intent, the pairing scanner and the
-     * Join Folder paste field all come through here, so the routing table lives in exactly one place and an
-     * invite QR can't be redeemed by whichever entry point happens to see it first.
+     * THE deep-link front door (§7). iOS `onOpenURL`, the Android VIEW intent and the pairing scanner all
+     * come through here, so the routing table lives in exactly one place.
      *
-     * [allowBareBlob] is the explicit-paste opt-in: a naked base64 string is only treated as an invite when
-     * a human deliberately pasted it into a field that asks for one.
+     * [allowBareBlob] marks an explicit paste; see [parseIncomingLink] (no bare blob is an invite any more).
      *
      * [fromScan] is telemetry-only origin: the camera and a tapped deep link hand over the SAME payload, so
      * only the entry point can tell them apart (issue #278). It changes no routing and no behaviour.
@@ -5295,8 +5280,6 @@ class PocketRepository(
         when (link) {
             is IncomingLink.Code -> pairWithCode(link.code, fromScan = fromScan)
             is IncomingLink.Pair -> pair(link.url, fromScan = fromScan)
-            // an invite parks in its trust screen; it never redeems here
-            is IncomingLink.Share -> pendingShareInvite.value = link.invite
             is IncomingLink.Session -> requestOpenSession(link.workdir, link.sessionId)
             // a link for a feature this build no longer has: say so and do nothing else. It is a known
             // link, not a failed pairing — so no setPairFailure and no pair_failed, unlike Unknown below.

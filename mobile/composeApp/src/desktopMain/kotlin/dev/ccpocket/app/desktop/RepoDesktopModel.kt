@@ -1869,10 +1869,6 @@ class RepoDesktopModel(
     override fun createShare(path: String, tier: dev.ccpocket.protocol.AccessTier, expiresInSec: Long) { repo.createShare(path, tier, expiresInSec) }
     override fun revokeShare(deviceId: String) { repo.revokeShare(deviceId) }
     override fun clearLastShare() { repo.lastShareCreated.value = null }
-    override fun redeemShareInvite(blob: String): Boolean {
-        val inv = dev.ccpocket.app.pairing.decodeShareInvite(dev.ccpocket.app.pairing.canonicalLinkScheme(blob)) ?: return false
-        repo.redeemShareInvite(inv); return true
-    }
 
     private companion object {
         const val K_PINS = "desktop_pins"

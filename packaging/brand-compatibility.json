@@ -29,7 +29,8 @@
     },
     {
       "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/IncomingLink.kt",
-      "sha256": "6ec06223778a0a6cf947e8d140bdcc7d64bd344fc27c5dc36f772aa336ac4929"
+      "sha256": "1d0adf04c83939dd5d7e5979bf8f41ece9fc445e431f4cf76241b41b842a7951",
+      "note": "2026-10-05 retired features (ReviewRequest, Session Handoff, Collaborator Links, Folder Share): the review-contact, collab, handoff and share hosts are recognised by host alone and parse to IncomingLink.Retired, which callers answer with a 'feature retired' notice and no pairing attempt or pair_failed; the payload is never decoded. A bare blob is no longer an invite at the paste entry and falls through to the pre-scheme pair forms. The ccpocket:// scheme, the pair (full link and 6-digit code) and session hosts, and legacy bare pair query strings and codes parse exactly as before. IncomingLinkTest and RetiredFeaturesTest cover every retired host, corrupt payloads, case variants and the unchanged pair/session routes."
     },
     {
       "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/ShareInvites.kt",

@@ -508,17 +508,6 @@ fun App(scope: CoroutineScope) {
                 )
             }
         }
-        // ── root-level trust screen (implementation review §7) ─────────────────────────────────────────
-        // Rides ABOVE everything except App Lock, and depends on no session, no workdir and not even a
-        // connected computer: a folder-share guest's very first interaction with this app is this.
-        repo.pendingShareInvite.value?.let { invite ->
-            dev.ccpocket.app.SystemBackHandler(enabled = true) { repo.pendingShareInvite.value = null }
-            dev.ccpocket.app.ui.share.AcceptPreview(
-                invite,
-                onJoin = { repo.redeemShareInvite(invite); repo.pendingShareInvite.value = null },
-                onDecline = { repo.pendingShareInvite.value = null },
-            )
-        }
         // App Lock (issue #109): the gate blocks ALL content (incl. the permission sheet) until biometrics
         // pass; the cover masks the app-switcher snapshot while briefly backgrounded. Both reuse the same
         // branded lockup. Desktop never reaches App(), so this overlay is Android/iOS-only by construction.
