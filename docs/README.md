@@ -24,7 +24,7 @@
 | 查看直连／中继路径选择与 P2P 的评估结论 | [路径选择与 P2P 评估（已搁置：三段式实施不合理，P2P 不立项；A0 另行跟踪）](design/TRANSPORT-PATH-SELECTION-EVALUATING.md) |
 | 品牌迁移与升级兼容 | [命名](PAIRLET-NAMING.md)、[兼容清单](PAIRLET-COMPATIBILITY.md)、[CLI 兼容](PAIRLET-CLI-COMPATIBILITY.md)、[发布准备](PAIRLET-ROLLOUT.md) |
 | 部署网站与服务 | [部署说明](../deploy/README.md)、[网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)（日期快照） |
-| 支持知识与跨人协作 | [支持知识](SUPPORT-KNOWLEDGE.md)、[协作交接](COLLABORATION-HANDOFF.md)、[飞书菜单](FEISHU-BOT-MENU.md) |
+| 支持知识与跨人协作 | [支持知识](SUPPORT-KNOWLEDGE.md)、[飞书菜单](FEISHU-BOT-MENU.md)；已下线的协作交接说明见[历史归档](archive/COLLABORATION-HANDOFF.md) |
 | 安全、原创性与问题分析 | [安全模型](SECURITY.md)、[原创性说明](ANTIPLAGIARISM.md)、[问题分析](analysis/) |
 | 查询旧方案和验收依据 | [历史归档](archive/README.md)，实现与发布状态需另行核实 |
 
