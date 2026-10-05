@@ -1,10 +1,8 @@
 package dev.ccpocket.daemon.bridge
 
 import dev.ccpocket.daemon.DaemonCore
-import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentBackendFactory
-import dev.ccpocket.daemon.agent.AgentIo
-import dev.ccpocket.daemon.agent.AgentSpec
+import dev.ccpocket.daemon.conversation.LifecycleBackend
 import dev.ccpocket.daemon.execution.ExecutionGrantDraft
 import dev.ccpocket.daemon.execution.ExecutionGrantStore
 import dev.ccpocket.daemon.execution.ExecutionRelayPolicy
@@ -30,8 +28,6 @@ import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.ExecutionRunAccepted
 import dev.ccpocket.protocol.ExecutionRunSubmit
 import dev.ccpocket.protocol.Frame
-import dev.ccpocket.protocol.HistoryMessage
-import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionMode
@@ -39,7 +35,6 @@ import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionGone
-import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.ToDaemon
 import dev.ccpocket.protocol.e2e.E2ECrypto
@@ -53,9 +48,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.JsonObject
 import java.io.File
-import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
@@ -322,32 +315,14 @@ class RetiredGuestCleanupTest {
 
     // ---- a guest whose label equals a live bridge's origin ----
 
-    /** Never launches: a plain (non-takeOver) open is lazy (#61), so a bridge's open leaves a live conversation. */
-    private class StubBackend : AgentBackend {
-        override val kind = AgentKind.CLAUDE
-        override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
-        override fun processBuilder(spec: AgentSpec) = throw UnsupportedOperationException()
-        override suspend fun attach(io: AgentIo, spec: AgentSpec) = throw UnsupportedOperationException()
-        override suspend fun parse(line: String): Nothing = throw UnsupportedOperationException()
-        override suspend fun sendPrompt(text: String, images: List<ImageData>) = throw UnsupportedOperationException()
-        override suspend fun interrupt() = throw UnsupportedOperationException()
-        override suspend fun respondPermission(
-            askId: String, allow: Boolean, remember: Boolean,
-            originalInput: JsonObject?, updatedInput: String?, denyMessage: String?,
-        ) = throw UnsupportedOperationException()
-        override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = false
-        override suspend fun onProcessEnded(sessionId: String?) {}
-        override fun transcriptDir(workdir: String): Path = throw UnsupportedOperationException()
-        override fun replayHistory(workdir: String, sessionId: String) = emptyList<HistoryMessage>()
-        override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
-    }
-
     private inner class LiveHarness {
         val dir = File(root, "live").apply { mkdirs() }
         val identity = Identity.loadOrCreate(File(dir, "identity.json"))
         val bridges = BridgeRegistry(File(dir, "bridges.json"))
+        // never launches: a plain (non-takeOver) open is lazy (#61), so a bridge's open leaves a live conversation
+        // without any process behind it
         val core = DaemonCore(
-            mapOf(AgentKind.CLAUDE to AgentBackendFactory { StubBackend() }),
+            mapOf(AgentKind.CLAUDE to AgentBackendFactory { LifecycleBackend { _, _ -> "exit 1" } }),
             projectPinStore = MemoryProjectPinStore(PinStoreState(incarnation = "inc-0123456789abcdef")),
             managedSessionRoot = File(dir, "managed"),
         )
