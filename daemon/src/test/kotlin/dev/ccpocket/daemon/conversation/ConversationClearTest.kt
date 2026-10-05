@@ -49,7 +49,6 @@ class ConversationClearTest {
         ) {}
         override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = true
         override suspend fun onProcessEnded(sessionId: String?) {}
-        override fun transcriptDir(workdir: String): Path = Path.of(workdir)
         override fun listSessions(workdir: String): List<SessionSummary> = listOf(
             SessionSummary(
                 sessionId = "resumed-sid",

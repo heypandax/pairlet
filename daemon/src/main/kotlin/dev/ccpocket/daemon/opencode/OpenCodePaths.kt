@@ -13,15 +13,8 @@ object OpenCodePaths {
             ?: System.getenv("XDG_STATE_HOME")?.let { Path.of(it, "opencode") }
             ?: Path.of(System.getProperty("user.home"), ".local", "share", "opencode")
 
-    fun configRoot(): Path =
-        System.getenv("OPENCODE_CONFIG_DIR")?.let { Path.of(it) }
-            ?: Path.of(System.getProperty("user.home"), ".config", "opencode")
-
     /** The SQLite database containing sessions. */
     fun database(): Path = dataRoot().resolve("opencode.db")
-
-    /** The auth credentials file. */
-    fun authFile(): Path = dataRoot().resolve("auth.json")
 
     /**
      * READ-ONLY, busy-tolerant connection to opencode.db, or null when it doesn't exist. opencode

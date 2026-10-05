@@ -52,9 +52,6 @@ data class DshConfigOptions(
     /** The opaque value to send for a bare model [id], or null when dsh does not offer that model. */
     fun modelValue(id: String): String? = models.firstOrNull { it.id == id }?.value
 
-    /** The efforts dsh advertises, as bare ids. Empty = it advertised none (do not invent a ladder). */
-    fun effortIds(): Set<String> = efforts.map { it.id }.toSet()
-
     val isEmpty: Boolean get() = models.isEmpty() && efforts.isEmpty() && currentModel == null
 
     companion object {

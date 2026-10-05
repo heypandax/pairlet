@@ -69,7 +69,6 @@ class ConversationPumpIsolationTest {
             // once: the death branch's cleanup fails; a later close() must still be able to stop the session
             if (endThrows && !thrown) { thrown = true; throw IllegalStateException("cleanup bug") }
         }
-        override fun transcriptDir(workdir: String): Path = Path.of(workdir)
         override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
         override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null

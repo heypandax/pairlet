@@ -25,9 +25,7 @@ import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.ApprovalAttentionHeartbeat
-import dev.ccpocket.protocol.ApprovalHistoryPage
 import dev.ccpocket.protocol.ApprovalGrantMutationResult
-import dev.ccpocket.protocol.FetchApprovalHistory
 import dev.ccpocket.protocol.RevokeGrant
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AgentRepairStart
@@ -158,7 +156,6 @@ class RequestRouter(
         dev.ccpocket.daemon.approval.ApprovalCoordinator(scope),
     private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
         dev.ccpocket.daemon.approval.ApprovalGrantStore(),
-    private val approvalHistory: dev.ccpocket.daemon.approval.ApprovalHistoryStore? = null,
     // the Git panel's engine (#280) and, on the same argv allow-list, worktree management (#281).
     // Defaulted like the model services so router tests that never touch git need no wiring; DaemonCore
     // passes one wired to the registry's live-session truth so a worktree with a running agent is
@@ -914,10 +911,6 @@ class RequestRouter(
                     )
                 }
             }
-            // §18.2 P2-2: the recoverable decision trail — owner-only, newest first, redacted rows only
-            is FetchApprovalHistory -> if (origin == null) {
-                sink.emit(ApprovalHistoryPage(approvalHistory?.recent(frame.limit) ?: emptyList()))
-            }
 
             is SwitchDirectory -> {
                 val wd = dirs.validateWorkdir(frame.workdir)
@@ -997,7 +990,7 @@ class RequestRouter(
             // long the OWNER's approvals wait. Persist AND mirror into the per-ask read, so the next card
             // picks it up without a relaunch.
             // origin re-checked here like every other owner-plane approval frame
-            // (ListPendingApprovals / RevokeGrant / FetchApprovalHistory): the capability choke point
+            // (ListPendingApprovals / RevokeGrant): the capability choke point
             // already denies it, and this is the second lock the rest of the plane carries.
             is SetApprovalPrefs -> if (origin == null) {
                 frame.noAutoDeny?.let {

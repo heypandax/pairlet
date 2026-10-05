@@ -15,9 +15,8 @@ import java.util.UUID
 
 /**
  * §18.2 P2-2: the RECOVERABLE approval history — every human decision and every grant/rule-covered
- * auto-run lands here as one JSONL line, so a client that was offline (or a daemon that restarted) can
- * still answer "what ran under which authorization" ([recent] serves the additive
- * `FetchApprovalHistory` frame).
+ * auto-run lands here as one JSONL line — a recoverable on-disk trail of "what ran under which
+ * authorization" that survives offline clients and daemon restarts.
  *
  * Minimization is enforced again at THIS persistence boundary: Bash arguments are discarded (even a
  * generic argument can be a secret that pattern redaction cannot recognize), every other string is
@@ -37,26 +36,6 @@ class ApprovalHistoryStore(private val file: File) {
             }
         }.onFailure { storageWriteFailed(it); log.warn("history append failed: ${it.message}") }
     }
-
-    /** Newest-first page for the account-wide history view. Corrupt lines are skipped, never a crash. */
-    fun recent(limit: Int, maxBytes: Int = MAX_PAGE_BYTES): List<ApprovalHistoryItem> = runCatching {
-        synchronized(lock) {
-            if (!file.exists()) return emptyList()
-            val newest = file.readLines().asReversed().asSequence()
-                .mapNotNull { line -> runCatching { JSON.decodeFromString(ApprovalHistoryItem.serializer(), line) }.onFailure(::storageReadFailed).getOrNull() }
-                .map(::sanitize) // also protects rows written by a pre-hardening daemon
-                .take(limit.coerceIn(1, MAX_PAGE))
-            val page = ArrayList<ApprovalHistoryItem>()
-            var encodedBytes = PAGE_OVERHEAD_BYTES
-            for (item in newest) {
-                val itemBytes = JSON.encodeToString(ApprovalHistoryItem.serializer(), item).encodeToByteArray().size + 1
-                if (encodedBytes + itemBytes > maxBytes.coerceAtLeast(PAGE_OVERHEAD_BYTES + 1)) break
-                page += item
-                encodedBytes += itemBytes
-            }
-            page
-        }
-    }.onFailure(::storageReadFailed).getOrElse { emptyList() }
 
     private fun countLines(): Int = if (file.exists()) file.readLines().size else 0
 
@@ -134,9 +113,6 @@ class ApprovalHistoryStore(private val file: File) {
     companion object {
         private val JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true }
         const val MAX_LINES = 5_000
-        const val MAX_PAGE = 500
-        const val MAX_PAGE_BYTES = 3 * 1024 * 1024 // leaves ample room below relay MAX_FRAME=4 MiB
-        private const val PAGE_OVERHEAD_BYTES = 1024
         private const val ID_MAX = 160
         private const val LABEL_MAX = 80
         private const val BASIS_MAX = 160

@@ -455,8 +455,6 @@ class DshBackend(
 
     // ---- disk (unchanged by the transport switch: dsh 0.1.2 did not move or reshape the store) ----
 
-    override fun transcriptDir(workdir: String): Path = DshPaths.sessionsRoot()
-
     override fun listSessions(workdir: String): List<SessionSummary> = DshTranscriptScanner.scan(workdir)
 
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
@@ -533,12 +531,6 @@ class DshBackend(
     /** VISIBLE FOR TESTS ONLY: what dsh last reported as this session's model (the live IT asserts the
      *  read-back rather than the request — see [DshBackendLiveIT]). */
     internal fun liveModelForTest(): String? = options.currentModel
-
-    /** VISIBLE FOR TESTS ONLY: stands in for the session a live handshake would have opened. */
-    internal fun bindSessionForTest(id: String, options: DshConfigOptions = DshConfigOptions.EMPTY) {
-        client.bindSession(id)
-        this.options = options
-    }
 
     // ---- helpers ----
 

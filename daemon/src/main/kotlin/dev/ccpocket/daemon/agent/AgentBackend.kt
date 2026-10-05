@@ -120,9 +120,6 @@ interface AgentBackend {
 
     // ---- disk: resume / listing / history (per-backend transcript stores) ----
 
-    /** The on-disk transcript directory for [workdir] (Claude: ~/.claude/projects/<key>; Codex: ~/.codex/sessions). */
-    fun transcriptDir(workdir: String): Path
-
     /**
      * The durable transcript FILE for [sessionId], or null when this backend keeps no per-session file
      * the daemon may read (SQLite stores, unverified formats). Non-null is the capability that admits a
