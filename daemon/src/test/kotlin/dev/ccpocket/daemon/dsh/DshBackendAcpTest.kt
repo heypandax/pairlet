@@ -602,6 +602,31 @@ class DshBackendAcpTest {
         assertEquals(blocks("try again"), contentOf(prompts(w).single()), "the new process takes prompts normally")
     }
 
+    /** The watchdog used to guard only the FIRST process: a relaunch kept the old session-open id, so a
+     *  relaunched dsh that never answered `initialize` left its prompts waiting forever. */
+    @Test
+    fun `a relaunched process that never answers the handshake is still bounded`() = runBlocking {
+        val w = mutableListOf<String>()
+        val injected = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val b = DshBackend(null, handshakeTimeoutMs = 100)
+        try {
+            b.attach(AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+                AgentSpec(Path.of("/repo"), mode = PermissionMode.DEFAULT))
+            b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""")
+            b.parse("""{"jsonrpc":"2.0","id":2,"result":{"sessionId":"$SESSION","configOptions":$configOptions}}""")
+            // relaunch onto a process that never answers
+            b.attach(AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+                AgentSpec(Path.of("/repo"), resumeId = SESSION, mode = PermissionMode.DEFAULT))
+            b.sendPrompt("hello again", emptyList())
+            val deadline = System.currentTimeMillis() + 5_000
+            while (injected.isEmpty() && System.currentTimeMillis() < deadline) kotlinx.coroutines.delay(20)
+            val events = b.parse(injected.single())
+            assertEquals("hello again", assertIs<AgentEvent.UserReplay>(events[0]).text)
+            assertTrue("never completed its handshake" in assertIs<AgentEvent.AssistantText>(events[1]).text)
+            assertTrue(assertIs<AgentEvent.TurnResult>(events[2]).isError)
+        } finally { b.onProcessEnded(null) }
+    }
+
     private companion object {
         const val SESSION = "744ff28d-161c-4186-9f61-82e1de14e6fe"
 

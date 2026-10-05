@@ -64,12 +64,6 @@ class AcpClient(
         val handshakeHint: () -> String,
         /** A JSON-RPC error object → the one line a user is shown. */
         val describeError: (JsonObject?) -> String,
-        /**
-         * Keep the previous process's session-open request id across a relaunch. dsh's backend never reset
-         * it, which made its handshake watchdog guard only the FIRST process a backend instance launched;
-         * kept as-is so this refactor changes no behaviour.
-         */
-        val keepSessionOpenIdAcrossRelaunch: Boolean = false,
     )
 
     /** How a recorded session is reopened. */
@@ -166,7 +160,7 @@ class AcpClient(
         this.resumeId = resumeId
         sessionId = null
         openFailure = null
-        if (!config.keepSessionOpenIdAcrossRelaunch) sessionOpenId = -1
+        sessionOpenId = -1
         replaying = false
         openTimedOut = false
         imagePrompts = false
