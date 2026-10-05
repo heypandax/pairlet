@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.kimi
 
+import dev.ccpocket.daemon.acp.AcpRpc
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
@@ -37,7 +38,6 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Drives the Kimi Code CLI via `kimi acp` — the Agent Client Protocol v1 over newline-delimited JSON-RPC 2.0
@@ -65,7 +65,7 @@ class KimiBackend(
 ) : AgentBackend {
     private val log = logger("KimiBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val idSeq = AtomicLong(1)
+    private val rpc = AcpRpc { io?.writeLine?.invoke(it) }
     private val bootstrap = Mutex() // guards sessionId + promptQueue so the opening turn is never lost to a race
 
     @Volatile private var io: AgentIo? = null
@@ -172,7 +172,7 @@ class KimiBackend(
         stopTaskWatchers() // the previous process's tasks are no longer this conversation's jobs
         handshakeWatch?.cancel()
         // kick off the ACP handshake — session open happens when the initialize response lands
-        initializeId = rpcRequest("initialize", buildJsonObject {
+        initializeId = rpc.request("initialize", buildJsonObject {
             put("protocolVersion", 1)
             putJsonObject("clientCapabilities") {
                 putJsonObject("fs") { put("readTextFile", false); put("writeTextFile", false) }
@@ -313,13 +313,13 @@ class KimiBackend(
         val rid = resumeId
         sessionOpenId = if (rid != null) {
             suppressReplayUpdates = true // session/load replays history via session/update before responding
-            rpcRequest("session/load", buildJsonObject {
+            rpc.request("session/load", buildJsonObject {
                 put("sessionId", rid)
                 put("cwd", workdir)
                 putJsonArray("mcpServers") {}
             })
         } else {
-            rpcRequest("session/new", buildJsonObject {
+            rpc.request("session/new", buildJsonObject {
                 put("cwd", workdir)
                 putJsonArray("mcpServers") {}
             })
@@ -452,7 +452,7 @@ class KimiBackend(
             // we declared fs caps false, so these shouldn't arrive; decline so the agent doesn't block on us.
             else -> {
                 log.warn("kimi unsupported server request: $method")
-                rpcRespondError(idEl, -32601, "not supported by cc-pocket")
+                rpc.respondError(idEl, AcpRpc.METHOD_NOT_FOUND, "not supported by cc-pocket")
                 emptyList()
             }
         }
@@ -491,7 +491,7 @@ class KimiBackend(
 
     /** Allocate the request id and mark the prompt in flight — MUST run inside [bootstrap], so a racing
      *  sendPrompt/flush can never see "idle" between the decision and the registration (double-send). */
-    private fun reservePrompt(text: String): Long = idSeq.getAndIncrement().also { promptIds[it] = text }
+    private fun reservePrompt(text: String): Long = rpc.nextId().also { promptIds[it] = text }
 
     /** The in-flight prompt just settled (any stopReason / error) — send the oldest queued prompt, if any.
      *  Returns the error turns of the prompts refused on the way. */
@@ -526,7 +526,7 @@ class KimiBackend(
     // holds); a prompt with images but blank text sends the images alone, never an empty text block
     private suspend fun writePrompt(id: Long, prompt: Prompt) {
         val sid = sessionId ?: return
-        rpcSend(id, "session/prompt", buildJsonObject {
+        rpc.send(id, "session/prompt", buildJsonObject {
             put("sessionId", sid)
             putJsonArray("prompt") {
                 if (prompt.text.isNotBlank() || prompt.images.isEmpty()) {
@@ -562,7 +562,7 @@ class KimiBackend(
     override suspend fun interrupt() {
         val sid = sessionId ?: return
         // ACP session/cancel is a NOTIFICATION (no id); the in-flight prompt then resolves stopReason=cancelled
-        rpcNotify("session/cancel", buildJsonObject { put("sessionId", sid) })
+        rpc.notify("session/cancel", buildJsonObject { put("sessionId", sid) })
     }
 
     override suspend fun respondPermission(
@@ -580,7 +580,7 @@ class KimiBackend(
         } else {
             buildJsonObject { put("outcome", "cancelled") } // no matching option → treat as cancel/deny
         }
-        rpcRespondResult(pending.rpcId, buildJsonObject { put("outcome", outcome) })
+        rpc.respondResult(pending.rpcId, buildJsonObject { put("outcome", outcome) })
     }
 
     /** Choose the ACP permission option matching the decision. Options carry a `kind` ∈
@@ -658,35 +658,6 @@ class KimiBackend(
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null // seeded live via updates
 
     override fun defaultModel(workdir: String): String? = KimiDefaultModel.resolve()
-
-    // ---- JSON-RPC 2.0 plumbing (ACP requires the `jsonrpc` field, unlike codex app-server) ----
-
-    private suspend fun rpcRequest(method: String, params: JsonObject?): Long {
-        val id = idSeq.getAndIncrement()
-        rpcSend(id, method, params)
-        return id
-    }
-
-    /** A request whose id was pre-allocated (see [reservePrompt] — registered before the write). */
-    private suspend fun rpcSend(id: Long, method: String, params: JsonObject?) {
-        write(buildJsonObject {
-            put("jsonrpc", "2.0")
-            put("id", id)
-            put("method", method)
-            params?.let { put("params", it) }
-        })
-    }
-
-    private suspend fun rpcNotify(method: String, params: JsonObject?) =
-        write(buildJsonObject { put("jsonrpc", "2.0"); put("method", method); params?.let { put("params", it) } })
-
-    private suspend fun rpcRespondResult(id: JsonElement, result: JsonObject) =
-        write(buildJsonObject { put("jsonrpc", "2.0"); put("id", id); put("result", result) })
-
-    private suspend fun rpcRespondError(id: JsonElement, code: Int, message: String) =
-        write(buildJsonObject { put("jsonrpc", "2.0"); put("id", id); putJsonObject("error") { put("code", code); put("message", message) } })
-
-    private suspend fun write(obj: JsonObject) { io?.writeLine(obj.toString()) }
 
     /** The refusal of the prompt reserved as [id] (see [sendPrompt]) — settled on the pump like its error
      *  response would be. */

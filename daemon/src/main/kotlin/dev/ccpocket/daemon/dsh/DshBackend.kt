@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.dsh
 
+import dev.ccpocket.daemon.acp.AcpRpc
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
@@ -34,7 +35,6 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Drives the DeepSeek Harness (`dsh`) over its ACP v1 stdio profile (issue #255, re-transported for dsh 0.1.2).
@@ -109,7 +109,7 @@ class DshBackend(
 ) : AgentBackend {
     private val log = logger("DshBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val idSeq = AtomicLong(1)
+    private val rpc = AcpRpc { io?.writeLine?.invoke(it) }
 
     /** Owns the handshake watchdog and the async config pushes; cancelled when the process ends. */
     private var scope: CoroutineScope? = null
@@ -240,7 +240,7 @@ class DshBackend(
         scope?.let { runCatching { it.cancel() } }
         val fresh = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope = fresh
-        initializeId = rpcRequest("initialize", buildJsonObject {
+        initializeId = rpc.request("initialize", buildJsonObject {
             put("protocolVersion", ACP_PROTOCOL_VERSION)
             putJsonObject("clientCapabilities") {
                 // We serve no filesystem or terminal on the agent's behalf; dsh does its own IO.
@@ -441,13 +441,13 @@ class DshBackend(
         sessionOpenId = if (rid != null) {
             // A resume adopts the session's own recorded configuration; dsh verifies the workspace and
             // restores the log WITHOUT replaying updates (fact 5).
-            rpcRequest("session/resume", buildJsonObject {
+            rpc.request("session/resume", buildJsonObject {
                 put("sessionId", rid)
                 put("cwd", workdir)
                 putJsonArray("mcpServers") {}
             })
         } else {
-            rpcRequest("session/new", buildJsonObject {
+            rpc.request("session/new", buildJsonObject {
                 put("cwd", workdir)
                 putJsonArray("mcpServers") {}
             })
@@ -578,7 +578,7 @@ class DshBackend(
             // an unanswered server request hangs dsh's turn forever (it has no timeout of its own).
             else -> {
                 log.warn("dsh unsupported server request: $method")
-                rpcRespondError(idEl, -32601, "not supported by cc-pocket")
+                rpc.respondError(idEl, AcpRpc.METHOD_NOT_FOUND, "not supported by cc-pocket")
                 emptyList()
             }
         }
@@ -618,7 +618,7 @@ class DshBackend(
     /** Allocate the request id and mark the prompt in flight — MUST run inside [bootstrap] so a racing
      *  send/flush can never see "idle" between the decision and the registration (a double send is
      *  exactly the `-32602 already in flight` the queue exists to prevent). */
-    private fun reservePrompt(text: String): Long = idSeq.getAndIncrement().also { promptIds[it] = text }
+    private fun reservePrompt(text: String): Long = rpc.nextId().also { promptIds[it] = text }
 
     /** The session just opened (and any launch-time config landed): release what arrived before it. Returns
      *  the error turns of the prompts refused on the way. */
@@ -666,7 +666,7 @@ class DshBackend(
      *  holds); a prompt with images but blank text sends the images alone, never an empty text block. */
     private suspend fun writePrompt(id: Long, prompt: Prompt) {
         val sid = sessionId ?: return
-        rpcSend(id, "session/prompt", buildJsonObject {
+        rpc.send(id, "session/prompt", buildJsonObject {
             put("sessionId", sid)
             putJsonArray("prompt") {
                 if (prompt.text.isNotBlank() || prompt.images.isEmpty()) {
@@ -696,7 +696,7 @@ class DshBackend(
     override suspend fun interrupt() {
         val sid = sessionId ?: return
         // ACP session/cancel is a NOTIFICATION; the in-flight prompt then resolves stopReason=cancelled.
-        rpcNotify("session/cancel", buildJsonObject { put("sessionId", sid) })
+        rpc.notify("session/cancel", buildJsonObject { put("sessionId", sid) })
     }
 
     /** The ACP surface has no rename (dsh names sessions itself, from the first prompt). Answering false
@@ -723,7 +723,7 @@ class DshBackend(
         } else {
             buildJsonObject { put("outcome", "cancelled") } // nothing matched → cancel beats guessing
         }
-        rpcRespondResult(pending.rpcId, buildJsonObject { put("outcome", outcome) })
+        rpc.respondResult(pending.rpcId, buildJsonObject { put("outcome", outcome) })
     }
 
     /** The option whose `kind` matches the decision. Ids are dsh's own strings (`allow-once`), never ours. */
@@ -774,9 +774,9 @@ class DshBackend(
     private val pendingConfig = java.util.concurrent.ConcurrentLinkedDeque<ConfigWrite>()
 
     private suspend fun sendConfig(sid: String, write: ConfigWrite) {
-        val id = idSeq.getAndIncrement()
+        val id = rpc.nextId()
         configIds[id] = write
-        rpcSend(id, "session/set_config_option", buildJsonObject {
+        rpc.send(id, "session/set_config_option", buildJsonObject {
             put("sessionId", sid)
             put("configId", write.configId) // NOT optionId (fact 3)
             put("value", write.value)
@@ -969,40 +969,6 @@ class DshBackend(
      *  response would be. */
     private fun syntheticRefusal(id: Long, message: String): String =
         buildJsonObject { put("type", SYNTHETIC_REFUSAL); put("id", id); put("message", message) }.toString()
-
-    // ---- JSON-RPC 2.0 plumbing ----
-
-    private suspend fun rpcRequest(method: String, params: JsonObject?): Long {
-        val id = idSeq.getAndIncrement()
-        rpcSend(id, method, params)
-        return id
-    }
-
-    /** A request whose id was pre-allocated (see [reservePrompt] / [sendConfig] — both register first). */
-    private suspend fun rpcSend(id: Long, method: String, params: JsonObject?) {
-        write(buildJsonObject {
-            put("jsonrpc", "2.0")
-            put("id", id)
-            put("method", method)
-            params?.let { put("params", it) }
-        })
-    }
-
-    private suspend fun rpcNotify(method: String, params: JsonObject?) =
-        write(buildJsonObject { put("jsonrpc", "2.0"); put("method", method); params?.let { put("params", it) } })
-
-    private suspend fun rpcRespondResult(id: JsonElement, result: JsonObject) =
-        write(buildJsonObject { put("jsonrpc", "2.0"); put("id", id); put("result", result) })
-
-    private suspend fun rpcRespondError(id: JsonElement, code: Int, message: String) =
-        write(
-            buildJsonObject {
-                put("jsonrpc", "2.0"); put("id", id)
-                putJsonObject("error") { put("code", code); put("message", message) }
-            },
-        )
-
-    private suspend fun write(obj: JsonObject) { io?.writeLine(obj.toString()) }
 
     private companion object {
         /** ACP v1. dsh answers `protocolVersion: 1` (probe 0.1.2-rc.1). */
