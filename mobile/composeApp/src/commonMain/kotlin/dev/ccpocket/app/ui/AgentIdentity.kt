@@ -93,57 +93,65 @@ fun AgentGlyph(agent: AgentKind, color: Color = agentColor(agent), size: Int = 1
     Canvas(Modifier.size(size.dp)) {
         val s = this.size.minDimension / 20f
         fun p(x: Float, y: Float) = Offset(x * s, y * s)
-        if (agent == AgentKind.CODEX) {
-            val w = 1.6f * s
-            // central node
-            drawCircle(color, radius = 2.3f * s, center = p(10f, 10f), style = Stroke(width = w))
-            // two orbit arcs (top-right + bottom-left), radius 6.8 around center
-            val box = Offset((10f - 6.8f) * s, (10f - 6.8f) * s)
-            val d = Size(13.6f * s, 13.6f * s)
-            drawArc(color, startAngle = -90f, sweepAngle = 90f, useCenter = false, topLeft = box, size = d, style = Stroke(width = w, cap = StrokeCap.Round))
-            drawArc(color, startAngle = 90f, sweepAngle = 90f, useCenter = false, topLeft = box, size = d, style = Stroke(width = w, cap = StrokeCap.Round))
-        } else if (agent == AgentKind.OPENCODE) {
-            val w = 1.6f * s
-            val innerColor = color.copy(alpha = 0.3f)
-            drawRoundRect(
-                color = color, topLeft = p(3f, 2f), size = Size(14f * s, 16f * s),
-                cornerRadius = CornerRadius(1.5f * s, 1.5f * s), style = Stroke(width = w)
-            )
-            drawRoundRect(
-                color = innerColor, topLeft = p(5f, 10f), size = Size(10f * s, 7f * s),
-                cornerRadius = CornerRadius(1f * s, 1f * s)
-            )
-        } else if (agent == AgentKind.KIMI) {
-            val w = 1.6f * s
-            // crescent moon (Moonshot): an outer disc arc with an inner bite arc, both open on the right
-            val box = Offset(3f * s, 2f * s)
-            val d = Size(15f * s, 15f * s)
-            drawArc(color, startAngle = 40f, sweepAngle = 280f, useCenter = false, topLeft = box, size = d, style = Stroke(width = w, cap = StrokeCap.Round))
-            val ibox = Offset(7f * s, 3.5f * s)
-            val id = Size(12f * s, 12f * s)
-            drawArc(color, startAngle = 60f, sweepAngle = 240f, useCenter = false, topLeft = ibox, size = id, style = Stroke(width = w, cap = StrokeCap.Round))
-        } else if (agent == AgentKind.ZCODE) {
-            val w = 1.7f * s
-            // A quiet geometric Z: recognizable at list-row size without importing a brand asset.
-            drawLine(color, p(4f, 5f), p(16f, 5f), strokeWidth = w, cap = StrokeCap.Round)
-            drawLine(color, p(16f, 5f), p(4f, 15f), strokeWidth = w, cap = StrokeCap.Round)
-            drawLine(color, p(4f, 15f), p(16f, 15f), strokeWidth = w, cap = StrokeCap.Round)
-        } else if (agent == AgentKind.DSH) {
-            val w = 1.6f * s
-            // A "deep dive" double chevron pointing down (issue #255): reads as descent/depth for DeepSeek,
-            // and its axis is vertical, so it never gets mistaken for Claude's rightward prompt chevron at
-            // list-row size — the only other stroke-only glyph in the set.
-            drawLine(color, p(5f, 5.5f), p(10f, 10.5f), strokeWidth = w, cap = StrokeCap.Round)
-            drawLine(color, p(10f, 10.5f), p(15f, 5.5f), strokeWidth = w, cap = StrokeCap.Round)
-            drawLine(color, p(5f, 10.5f), p(10f, 15.5f), strokeWidth = w, cap = StrokeCap.Round)
-            drawLine(color, p(10f, 15.5f), p(15f, 10.5f), strokeWidth = w, cap = StrokeCap.Round)
-        } else {
-            val w = 1.8f * s
-            // chevron ">"
-            drawLine(color, p(5f, 5f), p(9.2f, 9.2f), strokeWidth = w, cap = StrokeCap.Round)
-            drawLine(color, p(9.2f, 9.2f), p(5f, 13.4f), strokeWidth = w, cap = StrokeCap.Round)
-            // prompt underline
-            drawLine(color, p(11f, 14f), p(15f, 14f), strokeWidth = w, cap = StrokeCap.Round)
+        // exhaustive on purpose: an `else` here used to draw any backend it did not know as Claude's chevron
+        when (agent) {
+            AgentKind.CODEX -> {
+                val w = 1.6f * s
+                // central node
+                drawCircle(color, radius = 2.3f * s, center = p(10f, 10f), style = Stroke(width = w))
+                // two orbit arcs (top-right + bottom-left), radius 6.8 around center
+                val box = Offset((10f - 6.8f) * s, (10f - 6.8f) * s)
+                val d = Size(13.6f * s, 13.6f * s)
+                drawArc(color, startAngle = -90f, sweepAngle = 90f, useCenter = false, topLeft = box, size = d, style = Stroke(width = w, cap = StrokeCap.Round))
+                drawArc(color, startAngle = 90f, sweepAngle = 90f, useCenter = false, topLeft = box, size = d, style = Stroke(width = w, cap = StrokeCap.Round))
+            }
+            AgentKind.OPENCODE -> {
+                val w = 1.6f * s
+                val innerColor = color.copy(alpha = 0.3f)
+                drawRoundRect(
+                    color = color, topLeft = p(3f, 2f), size = Size(14f * s, 16f * s),
+                    cornerRadius = CornerRadius(1.5f * s, 1.5f * s), style = Stroke(width = w)
+                )
+                drawRoundRect(
+                    color = innerColor, topLeft = p(5f, 10f), size = Size(10f * s, 7f * s),
+                    cornerRadius = CornerRadius(1f * s, 1f * s)
+                )
+            }
+            AgentKind.KIMI -> {
+                val w = 1.6f * s
+                // crescent moon (Moonshot): an outer disc arc with an inner bite arc, both open on the right
+                val box = Offset(3f * s, 2f * s)
+                val d = Size(15f * s, 15f * s)
+                drawArc(color, startAngle = 40f, sweepAngle = 280f, useCenter = false, topLeft = box, size = d, style = Stroke(width = w, cap = StrokeCap.Round))
+                val ibox = Offset(7f * s, 3.5f * s)
+                val id = Size(12f * s, 12f * s)
+                drawArc(color, startAngle = 60f, sweepAngle = 240f, useCenter = false, topLeft = ibox, size = id, style = Stroke(width = w, cap = StrokeCap.Round))
+            }
+            AgentKind.ZCODE -> {
+                val w = 1.7f * s
+                // A quiet geometric Z: recognizable at list-row size without importing a brand asset.
+                drawLine(color, p(4f, 5f), p(16f, 5f), strokeWidth = w, cap = StrokeCap.Round)
+                drawLine(color, p(16f, 5f), p(4f, 15f), strokeWidth = w, cap = StrokeCap.Round)
+                drawLine(color, p(4f, 15f), p(16f, 15f), strokeWidth = w, cap = StrokeCap.Round)
+            }
+            AgentKind.DSH -> {
+                val w = 1.6f * s
+                // A "deep dive" double chevron pointing down (issue #255): reads as descent/depth for DeepSeek,
+                // and its axis is vertical, so it never gets mistaken for Claude's rightward prompt chevron at
+                // list-row size — the only other stroke-only glyph in the set.
+                drawLine(color, p(5f, 5.5f), p(10f, 10.5f), strokeWidth = w, cap = StrokeCap.Round)
+                drawLine(color, p(10f, 10.5f), p(15f, 5.5f), strokeWidth = w, cap = StrokeCap.Round)
+                drawLine(color, p(5f, 10.5f), p(10f, 15.5f), strokeWidth = w, cap = StrokeCap.Round)
+                drawLine(color, p(10f, 15.5f), p(15f, 10.5f), strokeWidth = w, cap = StrokeCap.Round)
+            }
+            AgentKind.CLAUDE -> {
+                val w = 1.8f * s
+                // chevron ">"
+                drawLine(color, p(5f, 5f), p(9.2f, 9.2f), strokeWidth = w, cap = StrokeCap.Round)
+                drawLine(color, p(9.2f, 9.2f), p(5f, 13.4f), strokeWidth = w, cap = StrokeCap.Round)
+                // prompt underline
+                drawLine(color, p(11f, 14f), p(15f, 14f), strokeWidth = w, cap = StrokeCap.Round)
+            }
         }
     }
 }

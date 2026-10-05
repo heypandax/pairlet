@@ -13,12 +13,17 @@ import dev.ccpocket.protocol.AgentKind
  * deny-by-omission until DaemonInfo explicitly advertises the wire name. DSH (issue #255) is the
  * second, and inherits the same rule for the same reason — silently landing in a Claude session after
  * asking for dsh is worse than not offering the row at all.
+ *
+ * Deliberately exhaustive (no `else`): a backend added to [AgentKind] must be placed by hand, and it belongs
+ * with ZCode and DSH — an `else -> true` used to offer every new backend to daemons that cannot run it.
  */
 internal fun agentAvailableFromDaemon(agent: AgentKind, supportedAgents: Collection<String>): Boolean =
     when (agent) {
+        // predate the reverse advertisement: an older daemon that omits it still runs these
+        AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI -> true
+        // added after it: deny by omission
         AgentKind.ZCODE -> AGENT_WIRE_ZCODE in supportedAgents
         AgentKind.DSH -> AGENT_WIRE_DSH in supportedAgents
-        else -> true
     }
 
 /** Pure projection shared by the mobile and desktop pickers. */

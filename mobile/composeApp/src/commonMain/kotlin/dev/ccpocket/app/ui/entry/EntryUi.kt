@@ -218,7 +218,8 @@ fun agentModeChoices(
  */
 fun agentDefaultMode(agent: AgentKind): PermissionMode = when (agent) {
     AgentKind.OPENCODE -> PermissionMode.BYPASS_PERMISSIONS
-    else -> PermissionMode.DEFAULT
+    // exhaustive (no `else`) so a new backend's fallback rung is a decision, not an accident
+    AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH -> PermissionMode.DEFAULT
 }
 
 /**
