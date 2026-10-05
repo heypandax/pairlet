@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.HistoryMessage
+import dev.ccpocket.protocol.PocketJson
 
 /**
  * One transcript-replay answer with its cursor metadata (issue #147 incremental reattach).
@@ -31,6 +32,8 @@ data class ReplaySlice(
     val failedRows: Long? = null,
     /** Daemon-internal read failure, sent as PocketError rather than replacement conversation history. */
     val readError: String? = null,
+    /** Rows of the count-capped window that a byte budget left out (daemon-internal, for the open log). */
+    val budgetDropped: Int = 0,
 ) {
     companion object {
         val EMPTY = ReplaySlice(emptyList())
@@ -72,6 +75,9 @@ object ReplaySlicer {
      * keeping the row itself, which leaves the count intact and so stays a clean delta. That is
      * deliberate — the shed is not silent, it rides out as `HistoryMessage.imagesTruncated` and the
      * client renders the notice on that turn.
+     *
+     * [firstWindowBytes] (null = off, today's window byte for byte) narrows a FULL window further to the
+     * newest rows whose encoded JSON fits it — see [firstWindow]. The delta path never applies it.
      */
     fun slice(
         rows: List<Row>,
@@ -79,6 +85,7 @@ object ReplaySlicer {
         sinceSeq: Long?,
         maxMessages: Int,
         maxBytes: Long,
+        firstWindowBytes: Long? = null,
     ): ReplaySlice {
         if (sinceSeq != null && sinceSeq in 1..cursor) {
             val crossPatched = rows.any { it.line <= sinceSeq && it.patchLine > sinceSeq }
@@ -98,7 +105,10 @@ object ReplaySlicer {
             // fall through: the cursor can't be honored cleanly — full window below
         }
         val capped = if (rows.size > maxMessages) rows.subList(rows.size - maxMessages, rows.size) else rows
-        val msgs = ReplayBudget.fit(capped.map { it.stamped() }, maxBytes)
+        val fitted = ReplayBudget.fit(capped.map { it.stamped() }, maxBytes)
+        val keep = firstWindowBytes?.let { firstWindow(capped.subList(capped.size - fitted.size, capped.size), fitted, it) }
+            ?: fitted.size
+        val msgs = if (keep == fitted.size) fitted else fitted.subList(fitted.size - keep, fitted.size)
         val kept = capped.subList(capped.size - msgs.size, capped.size)
         return ReplaySlice(
             msgs,
@@ -106,7 +116,58 @@ object ReplaySlicer {
             lastSeq = cursor,
             delta = false,
             hasMore = rows.size > msgs.size,
+            budgetDropped = capped.size - msgs.size,
         )
+    }
+
+    /** Encoded-JSON target for a first window narrowed by [slice]'s `firstWindowBytes`. The 2026-10-05
+     *  session-open analysis measured a 6.8 MB Claude session's 100-row window at ~0.40 MB and its relay
+     *  path (daemon → HK relay → phone, store-and-forward per message) at tens of KB/s, i.e. seconds per
+     *  window; 192 KB is the size it proposed for the first screen, the rest paging in on demand.
+     *
+     *  NOT applied to any client yet. Every shipped phone build pages older history only from a
+     *  `snapshotFlow` on "list parked at the top", which emits on CHANGE: a window too short to scroll is
+     *  "at the top" from the first frame on, never changes, and so never pages (ui/App.kt, the
+     *  `loadOlderHistory` effect). A narrower first window makes that dead end reachable; enabling it waits
+     *  for a client that pages a short window and says so. */
+    const val FIRST_WINDOW_BYTES = 192L * 1024
+
+    /** Rows a narrowed first window keeps even when they alone exceed [FIRST_WINDOW_BYTES]: never an empty
+     *  first screen. A row count cannot promise a FULL screen (folded tool rows, one-word replies), which is
+     *  why [FIRST_WINDOW_BYTES] above stays off for today's clients. */
+    const val FIRST_WINDOW_MIN_ROWS = 8
+
+    /** The envelope around the rows (`Envelope` + `ConvoHistory` fields + a diagnostic context) — measured
+     *  at a few hundred bytes; reserved out of the budget so the WHOLE encoded frame stays under it. */
+    internal const val FIRST_WINDOW_FRAME_RESERVE = 2L * 1024
+
+    /**
+     * How many of the newest [msgs] (aligned with [rows]) a narrowed first window keeps: rows are taken whole,
+     * newest first, while their encoded JSON (plus a separator each) fits [budget] less the frame reserve —
+     * never altered, so whatever is left out pages back in exactly as it is. At least [FIRST_WINDOW_MIN_ROWS]
+     * (or every row, when fewer) are kept regardless of size.
+     *
+     * The cut never splits one source line's rows: paging answers rows STRICTLY before `firstSeq`, so a window
+     * starting mid-line would orphan that line's earlier rows. The split line is dropped from the window when
+     * that keeps the floor, else taken whole.
+     */
+    internal fun firstWindow(rows: List<Row>, msgs: List<HistoryMessage>, budget: Long): Int {
+        val room = budget - FIRST_WINDOW_FRAME_RESERVE
+        var used = 0L
+        var n = 0
+        while (n < msgs.size) {
+            val size = ReplayBudget.utf8Size(PocketJson.encodeToString(HistoryMessage.serializer(), msgs[msgs.size - 1 - n])) + 1
+            if (used + size > room) break
+            used += size
+            n++
+        }
+        val floor = minOf(FIRST_WINDOW_MIN_ROWS, msgs.size)
+        if (n < floor) n = floor
+        fun splits(k: Int) = k in 1 until rows.size && rows[rows.size - k].line == rows[rows.size - k - 1].line
+        var k = n
+        while (splits(k) && k > floor) k--
+        if (splits(k)) { k = n; while (splits(k)) k++ }
+        return k
     }
 
     /** One older-history page: the newest [limit] rows strictly BEFORE [beforeSeq], byte-budgeted like

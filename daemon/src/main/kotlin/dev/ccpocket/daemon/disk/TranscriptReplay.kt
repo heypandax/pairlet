@@ -34,15 +34,17 @@ object TranscriptReplay {
         slice(file, sinceSeq = null, maxMessages = maxMessages, maxFrameTextBytes = maxFrameTextBytes).messages
 
     /** The (re)open replay with cursor metadata (issue #147): a DELTA past [sinceSeq] when it can be
-     *  honored, else the same full tail window as [read] — see [ReplaySlicer.slice] for the fallbacks. */
+     *  honored, else the same full tail window as [read] — see [ReplaySlicer.slice] for the fallbacks.
+     *  [firstWindowBytes]: [ReplaySlicer.slice]'s narrowed first window; null (every caller today) = off. */
     fun slice(
         file: Path,
         sinceSeq: Long?,
         maxMessages: Int = 100,
         maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
+        firstWindowBytes: Long? = null,
     ): ReplaySlice {
         val parsed = parse(file)
-        return ReplaySlicer.slice(parsed.first, parsed.second, sinceSeq, maxMessages, maxFrameTextBytes)
+        return ReplaySlicer.slice(parsed.first, parsed.second, sinceSeq, maxMessages, maxFrameTextBytes, firstWindowBytes)
             .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
     }
 
