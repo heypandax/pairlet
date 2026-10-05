@@ -19,10 +19,6 @@ import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.SkillCatalogService
 import dev.ccpocket.daemon.disk.UsageService
-import dev.ccpocket.daemon.handoff.CollaboratorScope
-import dev.ccpocket.daemon.handoff.HandoffGuard
-import dev.ccpocket.daemon.handoff.HandoffRegistry
-import dev.ccpocket.daemon.handoff.HandoffService
 import dev.ccpocket.daemon.opencode.OpenCodeModelService
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.schedule.SchedulerService
@@ -55,19 +51,8 @@ import dev.ccpocket.protocol.AuthLogin
 import dev.ccpocket.protocol.AuthLoginCancel
 import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
-import dev.ccpocket.protocol.AcceptHandoff
-import dev.ccpocket.protocol.CancelHandoff
 import dev.ccpocket.protocol.CancelTurn
-import dev.ccpocket.protocol.CompleteHandoff
-import dev.ccpocket.protocol.CreateHandoff
-import dev.ccpocket.protocol.DeclineHandoff
 import dev.ccpocket.protocol.GetWorkflowAgentDetail
-import dev.ccpocket.protocol.HandoffCreated
-import dev.ccpocket.protocol.HandoffListing
-import dev.ccpocket.protocol.HandoffUpdated
-import dev.ccpocket.protocol.ListHandoffs
-import dev.ccpocket.protocol.RecallHandoff
-import dev.ccpocket.protocol.ReturnHandoff
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchModels
 import dev.ccpocket.protocol.FetchPresets
@@ -209,7 +194,7 @@ class RequestRouter(
     /**
      * #367 G1: the EXECUTION run plane. Deliberately a settable property rather than a constructor
      * parameter — the plane needs the grant store and the credential registry, both of which only exist
-     * once the relay link is up, exactly like [dev.ccpocket.daemon.DaemonCore.collaboratorControl].
+     * once the relay link is up, exactly like [dev.ccpocket.daemon.DaemonCore.executionControl].
      *
      * The transport ([dev.ccpocket.daemon.relay.DeviceSessions]) depends on the INTERFACE only and never on
      * the run service: it hands over a frame already admitted by
@@ -343,15 +328,15 @@ class RequestRouter(
      * for "refused" — the caller then answers with the frame shape its request expects, so the phone gets
      * a readable state instead of silence.
      */
-    private fun gitWorkdir(workdir: String, origin: String?, guestScope: GuestScope?, collabScope: CollaboratorScope?): java.nio.file.Path? {
-        if (!gitOwnerOnly(origin, guestScope, collabScope)) return null
+    private fun gitWorkdir(workdir: String, origin: String?, guestScope: GuestScope?): java.nio.file.Path? {
+        if (!gitOwnerOnly(origin, guestScope)) return null
         return dirs.validateWorkdir(workdir)
     }
 
     /** Why a git request was refused. A non-owner learns only that the surface is owner-only — never
      *  whether the path they named exists, which would make this a directory oracle. */
-    private fun gitDenial(origin: String?, guestScope: GuestScope?, collabScope: CollaboratorScope?, workdir: String): String =
-        if (!gitOwnerOnly(origin, guestScope, collabScope)) GIT_OWNER_ONLY else "not a readable directory: $workdir"
+    private fun gitDenial(origin: String?, guestScope: GuestScope?, workdir: String): String =
+        if (!gitOwnerOnly(origin, guestScope)) GIT_OWNER_ONLY else "not a readable directory: $workdir"
 
     /**
      * Run a launched reply [block]; when it throws, answer [fallback] first so the client is not left waiting
@@ -371,9 +356,8 @@ class RequestRouter(
     }
 
     companion object {
-        /** The device identity for callers with no transport-authenticated id: trusted in-process
-         *  callers. One machine-local pseudo-device, so the handoff
-         *  gate still arbitrates it (it is never a lease holder unless it accepted a handoff itself). */
+        /** The pseudo-device name of a trusted in-process caller, which has no transport-authenticated id. Never
+         *  an identity a device-owned record may be filed under (see [voiceMemoRequest]). */
         const val LOCAL_DEVICE_ID = "local"
 
         /** The error a file-surface reply carries when its service failed unexpectedly (audit 2026-10-04 C). */
@@ -406,10 +390,6 @@ class RequestRouter(
         fun allowedForCaps(frame: Frame, caps: ClientCapsHolder?): Boolean = when {
             frame is dev.ccpocket.protocol.HistoryComplete || frame is dev.ccpocket.protocol.PromptProgress || frame is dev.ccpocket.protocol.ApprovalProgress -> caps?.supportsDiagnostics == true
             approvalV2Only(frame) -> caps?.supportsApprovalV2 == true
-            // issue #228: fan-out is daemon-wide, but AgentKind vocabulary is per connection. A
-            // modern ZCode phone must never opt a legacy sibling into a HandoffUpdated it cannot
-            // decode. Null is a legacy/no-declaration ingress and therefore fails closed too.
-            frame is HandoffUpdated -> capsAllow(caps, frame.handoff.agent)
             // issue #362: replies AND pushes — a pin frame only reaches a connection that declared it
             frame is dev.ccpocket.protocol.ProjectPinsState -> caps?.supportsProjectPins == true
             // issue #360: replies AND pushes — a managed frame only reaches a connection that declared it; a null /
@@ -432,11 +412,6 @@ class RequestRouter(
             frame is dev.ccpocket.protocol.VoiceMemoState -> caps?.supportsVoiceMemo == true
             else -> true
         }
-
-        /** Strip handoff rows carrying an undeclared post-baseline [AgentKind]. Unlike
-         * [allowedForCaps], a listing can keep its compatible rows instead of dropping the frame. */
-        internal fun filterHandoffs(items: List<dev.ccpocket.protocol.SessionHandoff>, caps: ClientCapsHolder?) =
-            items.filter { capsAllow(caps, it.agent) }
 
         /**
          * [DirectoryEntry] carries agent vocabulary in BOTH [DirectoryEntry.activeSessions] and
@@ -482,15 +457,9 @@ class RequestRouter(
 
         /**
          * The Git panel's owner test (#280 §3.1 / #281 §5), as a pure function so it can be asserted
-         * without standing up a router.
-         *
-         * All THREE credential classes must be absent. `origin != null` is a bridge or a share; a scoped
-         * guest carries [GuestScope]; and a COLLABORATOR link carries only [CollaboratorScope] — its
-         * origin and guestScope are BOTH null, so the older two-term test would have waved through
-         * exactly the weakest credential the product hands out.
+         * without standing up a router: [isOwner] — no bridge or share origin, no guest scope.
          */
-        internal fun gitOwnerOnly(origin: String?, guestScope: GuestScope?, collabScope: CollaboratorScope?): Boolean =
-            origin == null && guestScope == null && collabScope == null
+        internal fun gitOwnerOnly(origin: String?, guestScope: GuestScope?): Boolean = isOwner(origin, guestScope)
 
         /** The one refusal sentence a non-owner sees — no repository facts leak with it. */
         internal const val GIT_OWNER_ONLY = "the Git panel is owner-only"
@@ -531,14 +500,9 @@ class RequestRouter(
     // the WHOLE session auto-allows (per-session ⇒ race-free). Passed ONLY by trusted in-process code (the
     // built-in engine); the relay/LAN ingress never sets it, so an external adapter can never claim it.
     // Ignored for non-OpenSession frames.
-    // [deviceId] (SESSION-HANDOFF.md §5.3): the TRANSPORT-authenticated identity of the sender — the relay
-    // ingress passes the Noise-proven deviceId, the gated LAN path its hello'd device — NEVER a frame field.
-    // It drives the handoff controller gate and stamps handoff mutations; null (in-process callers) falls
-    // back to [LOCAL_DEVICE_ID].
-    // [collabScope] (SESSION-HANDOFF.md §4.1) is non-null ONLY for a COLLABORATOR link credential, whose
-    // frame was already vetted by CollaboratorGuard at the ingress: it restricts the handoff plane to the
-    // device's OWN offers (accept/decline/return + a filtered listing), denies every owner-side handoff
-    // op, and carries the vetted OpenSession's path scope into the conversation's PermissionBridge.
+    // [deviceId]: the TRANSPORT-authenticated identity of the sender — the relay ingress passes the
+    // Noise-proven deviceId, the gated LAN path its hello'd device — NEVER a frame field. It keys the
+    // device-owned planes (project pins, voice memos); null for in-process callers.
     // [bridgeContextPreamble] (issue #242) is a BUILT-IN bridge's session-stable context (which chat, which
     // project, what the session cannot see), appended to the agent's SYSTEM prompt for the conversation this
     // OpenSession creates. Carries no authority and is set only by trusted in-process code; null everywhere else.
@@ -546,8 +510,7 @@ class RequestRouter(
     // one at a time and in request order with every other reply of the same lane (see [emitSessions]). The
     // relay ingress passes the deviceId — its single reader serves every device, so a listing produced
     // inline holds all of them. Null (LAN socket, in-process callers, tests) keeps the reply inline.
-    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, collabScope: CollaboratorScope? = null, pinConnection: dev.ccpocket.daemon.pins.ProjectPinConnection? = null, listingLane: String? = null, onOpened: suspend (String) -> Unit = {}) {
-        val dev = deviceId ?: LOCAL_DEVICE_ID
+    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, pinConnection: dev.ccpocket.daemon.pins.ProjectPinConnection? = null, listingLane: String? = null, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
             // capability declaration (wire-compat gate for AgentKind additions) — no reply; the very
             // next list request answers unfiltered. Ingress handlers may process frames concurrently,
@@ -604,12 +567,9 @@ class RequestRouter(
             // session archive (issue #202): same daemon-side-truth + re-push contract as the groups above.
             // Acting from the cross-project archive view answers with the ARCHIVE list instead, so restoring
             // a row there never repoints the client's currently-listed directory to that row's project.
-            // OWNER means all three credential classes are absent. A COLLABORATOR arrives with origin ==
-            // null AND guestScope == null (only collabScope is set — see DeviceSessions), so testing the
-            // first two alone is vacuous for exactly the weakest credential we hand out. The handoff plane
-            // in this same file already spells all three out; so does this.
+            // OWNER means no restricted credential: no bridge/share origin and no guest scope ([isOwner]).
             is SetSessionArchived -> {
-                val owner = origin == null && guestScope == null && collabScope == null
+                val owner = isOwner(origin, guestScope)
                 if (owner) {
                     val ok = SessionArchive.setArchived(groupWorkdir(frame.workdir), frame.sessionId, frame.archived, archiveFile)
                     // a refused write (bad id, cap hit) must not read as success: the re-pushed list would
@@ -627,24 +587,24 @@ class RequestRouter(
             // a multi-project scan → off the inbound pump like FetchUsage. Owner only: this is a
             // cross-project discovery surface, strictly more than the per-dir listing a guest may have.
             is ListArchivedSessions ->
-                if (origin == null && guestScope == null && collabScope == null) {
+                if (isOwner(origin, guestScope)) {
                     scope.launch { emitArchivedSessions(sink, caps) }
                 }
 
             // project-pin sync (issue #362): OWNER-ONLY and deliberately NOT launched — both transports hand it
             // over in receive order, so one connection's fetch and operation batches commit in the order sent.
-            // Restricted credentials never reach here (GuestCaps / BridgeCaps / CollaboratorCaps default-deny
-            // both pin frame types); the three-way owner test below is the second door.
-            is dev.ccpocket.protocol.SyncProjectPins -> syncProjectPins(frame, sink, origin, guestScope, collabScope, caps, deviceId, pinConnection)
+            // Restricted credentials never reach here (GuestCaps / BridgeCaps default-deny both pin frame
+            // types); the owner test below is the second door.
+            is dev.ccpocket.protocol.SyncProjectPins -> syncProjectPins(frame, sink, origin, guestScope, caps, deviceId, pinConnection)
 
             // managed session list (issue #360): OWNER-ONLY. Restricted credentials never reach here (GuestCaps /
-            // BridgeCaps / CollaboratorCaps default-deny all five request types); the three-way owner test in
-            // [managedSessionsRequest] is the second door and refuses before any directory or title is read.
+            // BridgeCaps default-deny all five request types); the owner test in [managedSessionsRequest] is
+            // the second door and refuses before any directory or title is read.
             is dev.ccpocket.protocol.ListManagedSessions,
             is dev.ccpocket.protocol.EnableManagedSessions,
             is dev.ccpocket.protocol.DiscoverSessions,
             is dev.ccpocket.protocol.ImportSession,
-            is dev.ccpocket.protocol.RemoveManagedSession -> managedSessionsRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, guestScope, collabScope, caps)
+            is dev.ccpocket.protocol.RemoveManagedSession -> managedSessionsRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, guestScope, caps)
 
             // session rename (issue #158): lands claude's own custom-title record (live daemon session:
             // the CLI appends it itself over a control_request; idle: a one-line transcript append) —
@@ -669,17 +629,14 @@ class RequestRouter(
             // A network round trip to Anthropic → off the inbound pump like FetchUsage, or the socket
             // would stall for every device while api.anthropic.com is slow.
             //
-            // OWNER-ONLY, guarded here as well as by the caps allow-lists: GuestCaps / BridgeCaps /
-            // CollaboratorCaps all default-deny an unlisted type, and this is the second door so a future
-            // ingress change cannot silently open the surface. "Owner" means all THREE credential classes
-            // are absent — a COLLABORATOR arrives with origin == null AND guestScope == null (only
-            // collabScope is set), so testing the first two alone is vacuous for exactly the weakest
-            // credential we hand out; [gitOwnerOnly] is that three-way judgement, shared rather than
+            // OWNER-ONLY, guarded here as well as by the caps allow-lists: GuestCaps / BridgeCaps both
+            // default-deny an unlisted type, and this is the second door so a future ingress change cannot
+            // silently open the surface. [gitOwnerOnly] is the owner judgement, shared rather than
             // re-derived. This is account-wide BILLING state for the machine's owner, strictly wider than
             // anything a scoped share covers, so a non-owner gets SILENCE (no reply frame at all) rather
             // than an empty snapshot that would read as "your allowance is fine".
             is ClaudeQuotaGet ->
-                if (gitOwnerOnly(origin, guestScope, collabScope)) {
+                if (gitOwnerOnly(origin, guestScope)) {
                     scope.launch {
                         // Dispatch by the REQUESTED backend (issue #348). The frame name stays
                         // `claude.quota.get` for wire compatibility; `agent` is the selector.
@@ -707,7 +664,7 @@ class RequestRouter(
                         sink.emit(tagged)
                     }
                 } else {
-                    quotaLog.info("quota REFUSED origin=$origin guest=${guestScope != null} collab=${collabScope != null}")
+                    quotaLog.info("quota REFUSED origin=$origin guest=${guestScope != null}")
                 }
 
             // installed skills/plugins browse page (issue #132): a disk scan → off the inbound pump like
@@ -728,7 +685,7 @@ class RequestRouter(
             // streams over-cap binaries as FileContentChunk frames (issue #134)
             is ReadFile -> scope.launch {
                 val observation = FileReadDiagnostics(frame.diagnostic?.validated()?.takeIf {
-                    caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
+                    caps?.supportsDiagnostics == true && origin == null && guestScope == null
                 }, sink::emit)
                 // the ok=false FileContent also settles a half-sent chunk stream (it supersedes the partial)
                 replyOnFailure(sink, { FileContent(frame.workdir, frame.sessionId, frame.path, ok = false, error = FILE_SURFACE_FAILED) }) {
@@ -746,7 +703,7 @@ class RequestRouter(
             // comes from the daemon's own registry so the gate can't be spoofed client-side.
             is ExportFile -> scope.launch {
                 val observation = FileReadDiagnostics(frame.diagnostic?.validated()?.takeIf {
-                    caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
+                    caps?.supportsDiagnostics == true && origin == null && guestScope == null
                 }, sink::emit)
                 replyOnFailure(sink, { FileContent(frame.workdir, frame.sessionId, frame.path, ok = false, error = FILE_SURFACE_FAILED) }) {
                     try { exports.run(frame, registry.modeOf(frame.convoId), observation::send) }
@@ -755,11 +712,8 @@ class RequestRouter(
             }
             // ---- Git panel (issue #280) + worktree management (issue #281) ----
             // OWNER-ONLY, and deliberately guarded HERE as well as by the caps allow-lists. GuestCaps /
-            // BridgeCaps / CollaboratorCaps default-deny already stops these types at the ingress; this is
-            // the second door, so a future ingress change cannot silently open the surface. Owner means all
-            // THREE credential classes are absent (RequestRouter.kt's SetSessionArchived note: a
-            // COLLABORATOR arrives with origin == null AND guestScope == null, so testing the first two
-            // alone is vacuous for exactly the weakest credential we hand out).
+            // BridgeCaps default-deny already stops these types at the ingress; this is the second door, so a
+            // future ingress change cannot silently open the surface ([gitOwnerOnly]).
             //
             // The READS are gated too, not just the writes: a guest's files/diff surface answers "what did
             // this session change", while git status answers "what does the whole repository look like" —
@@ -770,33 +724,33 @@ class RequestRouter(
             // device until git returned. The workdir goes through the SAME dirs.validateWorkdir() the
             // files surface uses — an arbitrary path is never handed to a git process.
             is FetchGitStatus -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
-                if (wd == null) sink.emit(GitStatus(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin, guestScope)
+                if (wd == null) sink.emit(GitStatus(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, guestScope, frame.workdir)))
                 else sink.emit(git.status(frame, wd))
             }
             is ReadGitDiff -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
-                if (wd == null) sink.emit(GitDiff(frame.convoId, frame.workdir, frame.path, frame.staged, ok = false, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin, guestScope)
+                if (wd == null) sink.emit(GitDiff(frame.convoId, frame.workdir, frame.path, frame.staged, ok = false, error = gitDenial(origin, guestScope, frame.workdir)))
                 else sink.emit(git.diff(frame, wd))
             }
             is GitAction -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
-                if (wd == null) sink.emit(GitActionResult(frame.convoId, frame.op, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin, guestScope)
+                if (wd == null) sink.emit(GitActionResult(frame.convoId, frame.op, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, frame.workdir)))
                 else sink.emit(git.act(frame, wd))
             }
             is ListWorktrees -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
-                if (wd == null) sink.emit(WorktreeList(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin, guestScope)
+                if (wd == null) sink.emit(WorktreeList(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, guestScope, frame.workdir)))
                 else sink.emit(git.listWorktrees(frame, wd))
             }
             is AddWorktree -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
-                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_ADD, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin, guestScope)
+                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_ADD, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, frame.workdir)))
                 else sink.emit(git.addWorktree(frame, wd))
             }
             is RemoveWorktree -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope, collabScope)
-                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_REMOVE, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, collabScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin, guestScope)
+                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_REMOVE, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, frame.workdir)))
                 else sink.emit(git.removeWorktree(frame, wd))
             }
 
@@ -843,7 +797,6 @@ class RequestRouter(
                     // ask does reach PermissionBridge, and on the ACP wire it even carries the tool's real
                     // `rawInput` now — but the walls a restricted session depends on all key on CLAUDE
                     // tool SPELLINGS, and dsh matches none of them:
-                    //   - `handoffWriteBanned` matches Write/Edit/… ; dsh's tools are `write` / `bash` / …
                     //   - the guest/bridge path wall reads `file_path`/`path`/`notebook_path` out of the
                     //     tool input; dsh happens to spell its write target `file_path`, but nothing keeps
                     //     the two vocabularies in step, so the match is a coincidence rather than a wall.
@@ -862,21 +815,15 @@ class RequestRouter(
                         sink.emit(PocketError("share_out_of_scope", "that folder is outside your shared folder"))
                     else -> {
                         dirs.noteRecent(wd.toString())
-                        // pathScope = the guest's roots (issue #115 §4) or a collaborator grant's
-                        // workdir+allowedRoots (SESSION-HANDOFF.md §8.3) → the conversation's
+                        // pathScope = the guest's roots (issue #115 §4) → the conversation's
                         // PermissionBridge denies any Read/Write/Edit outside them. Null for an owner.
                         val convoId = registry.open(
                             frame.copy(workdir = wd.toString()),
                             frame.diagnostic?.validated()?.takeIf {
-                                caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
+                                caps?.supportsDiagnostics == true && origin == null && guestScope == null
                             }?.let { SessionOpenDiagnostics(sink, it) } ?: sink,
                             origin,
-                            pathScope = guestScope?.roots ?: collabScope?.pathScope?.takeIf { it.isNotEmpty() },
-                            // non-null exactly for a COLLABORATOR open: the grant's operation ceiling.
-                            // Keys BOTH crypto MUST-FIX halves in registry.open — the hot→cold rebuild
-                            // (a reattach must not drop the grant walls) and the PermissionBridge's
-                            // REVIEW write-tool refusal (SESSION-HANDOFF.md §8.3).
-                            handoffAccess = collabScope?.access,
+                            pathScope = guestScope?.roots,
                             // null caps (legacy ingress / bridges) = undeclared, same as everywhere else here
                             peerSupportsOpencode = caps?.supportsOpencode == true,
                             peerSupportsKimi = caps?.supportsKimi == true,
@@ -893,42 +840,32 @@ class RequestRouter(
                 }
             }
 
-            // handoff drive gate (SESSION-HANDOFF.md §5.3 items 2/3): every input-shaped frame checks the
-            // controller lease FIRST — WAITING denies everyone, IN_PROGRESS only the lease-holding
-            // recipient drives. A Deny maps to a PocketError so the client can show why (never silence).
             is dev.ccpocket.protocol.HistoryApplied -> {
-                if (caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null)
+                if (caps?.supportsDiagnostics == true && origin == null && guestScope == null)
                     SessionOpenDiagnostics.applied(frame, sink)
             }
-            is SendPrompt -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
-                null -> if (!registry.sendPrompt(frame.copy(diagnostic = frame.diagnostic?.validated()?.takeIf {
-                    caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
-                }))) sink.emit(SessionGone(frame.convoId))
-                else -> sink.emit(handoffDenied(deny, frame.convoId))
-            }
-            // Verdicts pass the handoff drive gate first (question answers ride this same frame, so the
-            // lease covers them too), then resolve at ONE routing point — agent tool ask, bridge request
-            // approval, quick-shell command, file export — by (convoId, askId) in the ApprovalCoordinator
-            // (approval design M1), instead of being try-offered to each service's private pending map.
-            // An unknown/expired askId answers the TAPPING device honestly (issue #100): its optimistic
-            // card-clear must not read as success.
-            is PermissionVerdict -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
-                null -> if (!approvals.onVerdict(frame.copy(diagnostic = frame.diagnostic?.validated()?.takeIf {
-                    caps?.supportsDiagnostics == true && origin == null && guestScope == null && collabScope == null
-                }), diagnosticEmit = sink::emit)) {
-                    sink.emit(PocketError("ask_expired", "That approval expired before it reached your computer — ask the agent to try the action again.", frame.convoId))
-                }
-                else -> sink.emit(handoffDenied(deny, frame.convoId))
+            is SendPrompt -> if (!registry.sendPrompt(frame.copy(diagnostic = frame.diagnostic?.validated()?.takeIf {
+                caps?.supportsDiagnostics == true && origin == null && guestScope == null
+            }))) sink.emit(SessionGone(frame.convoId))
+            // Verdicts (question answers ride this same frame) resolve at ONE routing point — agent tool ask,
+            // bridge request approval, quick-shell command, file export — by (convoId, askId) in the
+            // ApprovalCoordinator (approval design M1), instead of being try-offered to each service's private
+            // pending map. An unknown/expired askId answers the TAPPING device honestly (issue #100): its
+            // optimistic card-clear must not read as success.
+            is PermissionVerdict -> if (!approvals.onVerdict(frame.copy(diagnostic = frame.diagnostic?.validated()?.takeIf {
+                caps?.supportsDiagnostics == true && origin == null && guestScope == null
+            }), diagnosticEmit = sink::emit)) {
+                sink.emit(PocketError("ask_expired", "That approval expired before it reached your computer — ask the agent to try the action again.", frame.convoId))
             }
             is SwitchMode -> registry.switchMode(frame)
             is SwitchServiceTier -> registry.switchServiceTier(frame)
             // dsh incomplete-install one-tap repair (rides [PocketError.repair]): reinstall the CLI whose
             // broken npm install crashed the session, then the next prompt respawns it clean. OWNER-only —
-            // a global `npm i -g` is a machine-wide side effect no guest/bridge/collaborator credential may
+            // a global `npm i -g` is a machine-wide side effect no guest/bridge credential may
             // trigger (their capability whitelists already default-deny this unknown frame; this is the
             // in-router echo of that boundary). Off the inbound loop like RunShellCommand: the reinstall
             // takes minutes and must never wedge the shared socket.
-            is AgentRepairStart -> if (origin == null && guestScope == null && collabScope == null) {
+            is AgentRepairStart -> if (isOwner(origin, guestScope)) {
                 if (frame.agent == AgentKind.DSH) {
                     scope.launch(Dispatchers.IO) { DshRepairService.repair(frame.convoId, sink::emit) }
                 } else {
@@ -1010,10 +947,7 @@ class RequestRouter(
             // fan-out: only a REAL close (last attached client) drops the quick-terminal state with it
             // (exports keep NO cross-request state to drop: every export ask is one-off, never remembered)
             is CloseSession -> { if (registry.close(frame.convoId, sink, frame.force)) shell.forget(frame.convoId) }
-            is CancelTurn -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
-                null -> registry.cancelTurn(frame)
-                else -> sink.emit(handoffDenied(deny, frame.convoId))
-            }
+            is CancelTurn -> registry.cancelTurn(frame)
             // task panel "stop" (issue #80): interrupt the agent's work for this job + settle its row killed
             is StopBackgroundJob -> registry.stopBackgroundJob(frame)
             // workflow detail sheet (issue #106): read one agent's full prompt/return off disk —
@@ -1023,24 +957,19 @@ class RequestRouter(
             // the requesting sink only (never fanned out to other attached clients)
             is FetchHistoryPage -> scope.launch { registry.fetchHistoryPage(frame, sink) }
             // rewind / fork (issue #282): a transcript parse plus (on execute) a conversation swap, so
-            // off the inbound loop like the other disk-bound frames. Gated on the SAME handoff drive
-            // lease as a prompt: cutting a session's history is the most consequential input there is,
-            // and a device the lease denies must not be able to do it just because it is not "a prompt".
-            // Answered to the requesting sink only — the registry never fans a rewind reply out.
-            is dev.ccpocket.protocol.RewindSession -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
-                null -> scope.launch { registry.rewind(frame, sink) }
-                else -> sink.emit(handoffDenied(deny, frame.convoId))
-            }
+            // off the inbound loop like the other disk-bound frames. Answered to the requesting sink only —
+            // the registry never fans a rewind reply out.
+            is dev.ccpocket.protocol.RewindSession -> scope.launch { registry.rewind(frame, sink) }
 
             // voice memo → tasks: OWNER-ONLY and deliberately NOT launched — a start must be registered before its
             // chunks, and both transports hand frames over in receive order. Restricted credentials never reach
-            // here (GuestCaps / BridgeCaps / CollaboratorCaps / ExecutionCaps default-deny all four types); the
+            // here (GuestCaps / BridgeCaps / ExecutionCaps default-deny all four types); the
             // checks in [voiceMemoRequest] are the second door.
             is dev.ccpocket.protocol.VoiceMemoStart,
             is dev.ccpocket.protocol.VoiceMemoAudio,
             is dev.ccpocket.protocol.VoiceMemoGet,
             is dev.ccpocket.protocol.VoiceMemoCancel ->
-                voiceMemoRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, guestScope, collabScope, caps, deviceId)
+                voiceMemoRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, guestScope, caps, deviceId)
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)
@@ -1119,212 +1048,21 @@ class RequestRouter(
                 })
             }
 
-            // ---- Session Handoff control frames (SESSION-HANDOFF.md §9.1). Owner-plane except for the
-            // recipient-side trio (accept/decline/return) + a filtered listing, which a COLLABORATOR link
-            // credential may use for ITS OWN offers only (§4.1): bridges/guests never reach here (their
-            // ingress caps default-deny), the origin/guestScope re-check below is defence in depth, and a
-            // collaborator caller is marked by [collabScope] (its ingress already passed CollaboratorCaps
-            // + CollaboratorGuard). The executing device identity is ALWAYS the transport's [dev].
-            is CreateHandoff -> {
-                val svc = registry.handoffs
-                when {
-                    svc == null -> sink.emit(HandoffCreated(ok = false, error = "handoffs are not available on this daemon"))
-                    origin != null || guestScope != null || collabScope != null ->
-                        sink.emit(PocketError("handoff_forbidden", "not permitted for a restricted credential"))
-                    // CollaboratorGuard cannot open a ZCode grant yet. Refuse before the registry
-                    // persists WAITING, otherwise the owner can create an offer that only fails after
-                    // the recipient accepts and tries to enter the session.
-                    frame.agent == AgentKind.ZCODE -> sink.emit(
-                        HandoffCreated(
-                            ok = false,
-                            error = "ZCode sessions can't be handed off over a collaborator link yet",
-                            code = "handoff_agent_unsupported",
-                        ),
-                    )
-                    // Same for DSH — CollaboratorGuard fails its open closed (and still does after the #291
-                    // approval bridge; see the reason there), so creating the offer would only strand the
-                    // recipient at the door after they accepted.
-                    frame.agent == AgentKind.DSH -> sink.emit(
-                        HandoffCreated(
-                            ok = false,
-                            error = "DeepSeek Harness sessions can't be handed off over a collaborator link yet",
-                            code = "handoff_agent_unsupported",
-                        ),
-                    )
-                    else -> {
-                        // §4.1 preconditions live on the registry (it owns the live conversation state)
-                        val blocker = registry.handoffBlocker(frame.sessionId)
-                        val contacts = svc.collaborators
-                        val recipient = frame.recipientDeviceId
-                        if (blocker != null) sink.emit(HandoffCreated(ok = false, error = blocker))
-                        // recipient binding (§4.2 step 7): when the contact ledger is available, the named
-                        // device must be a live (non-removed, credential-backed) collaborator — a dead link
-                        // must fail the send, not mint an offer nobody can ever accept. With no ledger
-                        // (dev/local mode) the binding passes through and is still enforced at accept.
-                        // acceptsHandoff, not isActive: a live REVIEW peer (REVIEW-REQUEST.md §13.3) is a
-                        // colleague's DAEMON holding a task-context link. Binding a runtime handoff to it
-                        // would hand it a session drive lease its owner never agreed to.
-                        else if (recipient != null && contacts != null && !contacts.acceptsHandoff(recipient)) {
-                            sink.emit(HandoffCreated(ok = false, error = "that collaborator link is gone — reconnect before handing off"))
-                        } else when (
-                            val out = svc.registry.create(
-                                sourceSessionId = frame.sessionId,
-                                // resolve like OpenSession/ListSessions so the durable binding uses the real cwd
-                                workdir = groupWorkdir(frame.workdir),
-                                agent = frame.agent,
-                                initiatorDeviceId = dev,
-                                kind = frame.kind,
-                                access = frame.access,
-                                brief = frame.brief,
-                                allowedRoots = frame.allowedRoots,
-                                expiresInSec = frame.expiresInSec,
-                                // TODO: initiatorLabel could carry the daemon hostname / device label once
-                                // the router learns it; sourceEventSeq (the transcript cursor) is not on the
-                                // wire CreateHandoff yet — left 0 (recipient replays the full window).
-                                recipientLabel = frame.recipientLabel ?: recipient?.let { contacts?.labelOf(it) },
-                                sourceConvoId = frame.sourceConvoId,
-                                recipientDeviceId = recipient,
-                            )
-                        ) {
-                            is HandoffRegistry.HandoffOutcome.Ok -> {
-                                sink.emit(HandoffCreated(ok = true, handoff = out.handoff))
-                                svc.broadcast(listOf(out.handoff)) // includes the bound recipient's sink, if attached
-                                recipient?.let { contacts?.noteHandoff(it, out.handoff.createdAt) } // stats + CollaboratorUpdated
-                                // §4.2 step 9 / §3.4: nudge an OFFLINE bound recipient with a CONTENT-FREE,
-                                // device-TARGETED push. Self-gating (WAITING + bound + the relay can even
-                                // deliver one) lives in the service; when any of that is missing the offer
-                                // still arrives on the recipient's next connect/foreground pull.
-                                svc.announceOffer(out.handoff)
-                                svc.reconcile() // announce anything the create's internal sweep settled
-                            }
-                            // the refusal's machine-readable code rides along (§6: an unimplemented
-                            // kind/access combination answers `handoff_not_supported`, not just prose)
-                            is HandoffRegistry.HandoffOutcome.Refused ->
-                                sink.emit(HandoffCreated(ok = false, error = out.message, code = out.code))
-                        }
-                    }
-                }
-            }
-            is ListHandoffs -> {
-                val svc = registry.handoffs
-                when {
-                    svc == null -> sink.emit(HandoffListing())
-                    origin != null || guestScope != null -> sink.emit(PocketError("handoff_forbidden", "not permitted for a restricted credential"))
-                    else -> {
-                        var items = svc.registry.list(frame.workdir?.let { groupWorkdir(it) }, frame.sessionId)
-                        // a COLLABORATOR credential sees ONLY handoffs addressed to its own device (§4.1:
-                        // offers + their history — never the owner's other handoffs); owners see everything
-                        if (collabScope != null) items = items.filter { it.recipientDeviceId == collabScope.deviceId }
-                        sink.emit(HandoffListing(filterHandoffs(items, caps)))
-                    }
-                }
-            }
-            is AcceptHandoff -> handoffMutation(sink, origin, guestScope, collabScope, recipientSide = true, handoffId = frame.handoffId) {
-                // a collaborator's accept stamps its contact label (owner devices resolve to null → the
-                // registry keeps the initiator's chosen recipientLabel)
-                it.accept(frame.handoffId, dev, deviceLabel = registry.handoffs?.collaborators?.labelOf(dev))
-            }
-            is DeclineHandoff -> handoffMutation(sink, origin, guestScope, collabScope, recipientSide = true, handoffId = frame.handoffId) { it.decline(frame.handoffId, dev, frame.reason) }
-            is CancelHandoff -> handoffMutation(sink, origin, guestScope, collabScope) { it.cancel(frame.handoffId, dev) }
-            // GRACEFUL RECALL (SESSION-HANDOFF.md §5.4): an idle session settles RECALLED at once; with a
-            // turn EXECUTING the daemon arms the hand-back (nobody may drive from this instant), pushes
-            // the recallPending row to both sides, then interrupts + waits for the stable point OFF this
-            // pump — awaiting it inline would wedge the whole socket for the length of the turn.
-            is RecallHandoff -> {
-                val svc = registry.handoffs
-                when {
-                    svc == null -> sink.emit(PocketError("handoff_unavailable", "handoffs are not available on this daemon"))
-                    origin != null || guestScope != null -> sink.emit(PocketError("handoff_forbidden", "not permitted for a restricted credential"))
-                    collabScope != null -> sink.emit(PocketError("handoff_forbidden", "not permitted for a collaborator link"))
-                    else -> when (val out = svc.beginRecall(frame.handoffId, dev)) {
-                        is HandoffService.RecallOutcome.Refused -> {
-                            sink.emit(PocketError(handoffCode(out.code), out.message))
-                            svc.reconcile() // the refusal's internal sweep may have settled the row itself
-                        }
-                        is HandoffService.RecallOutcome.Settled -> {
-                            sink.emit(HandoffUpdated(out.handoff))
-                            svc.broadcast(listOf(out.handoff))
-                            svc.reconcile()
-                        }
-                        is HandoffService.RecallOutcome.Pending -> {
-                            // both sides learn the recall is in flight NOW (the initiator waits instead of
-                            // typing, the recipient sees control being taken back); the terminal RECALLED
-                            // arrives as a second HandoffUpdated when the turn actually stops.
-                            sink.emit(HandoffUpdated(out.handoff))
-                            svc.broadcast(listOf(out.handoff))
-                            scope.launch { svc.settleRecall(frame.handoffId) }
-                        }
-                    }
-                }
-            }
-            is ReturnHandoff -> handoffMutation(sink, origin, guestScope, collabScope, recipientSide = true, handoffId = frame.handoffId) { it.returnHandoff(frame.handoffId, dev, frame.result) }
-            is CompleteHandoff -> handoffMutation(sink, origin, guestScope, collabScope) { it.complete(frame.handoffId, dev) }
-
-            // Review requests are retired: the three list requests answer an empty list of their own type
-            // ([retiredReviewListing]); every other frame not handled above, the other retired review
-            // requests included, answers `unsupported`.
+            // Retired features (review requests, session handoff, collaborator contacts): their list requests
+            // answer an empty list of their own type ([retiredFeatureListing]); every other frame not handled
+            // above, the other retired requests included, answers `unsupported`.
             else -> sink.emit(
-                retiredReviewListing(frame)
+                retiredFeatureListing(frame)
                     ?: PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"),
             )
         }
     }
 
-    /** A [HandoffGuard.Verdict.Deny] as the wire error the App keys on: code `handoff_<reason>`
-     *  (e.g. `handoff_waiting_locked`, `handoff_not_controller`), message = the guard's client copy. */
-    private fun handoffDenied(deny: HandoffGuard.Verdict.Deny, convoId: String?) =
-        PocketError("handoff_${deny.reason.name.lowercase()}", deny.message, convoId)
-
-    /**
-     * One handoff state-machine mutation through the router: run [op] against the registry, answer the
-     * caller with [HandoffUpdated] (success) or a `handoff_*`-coded [PocketError] (refusal), and fan the
-     * transition out to every other attached client. [reconcile] runs after a success so transitions the
-     * mutation's internal sweep settled (an expiry racing an accept) are announced too, not lost.
-     */
-    private suspend fun handoffMutation(
-        sink: OutboundSink,
-        origin: String?,
-        guestScope: GuestScope?,
-        collab: CollaboratorScope? = null,
-        /** True for the transitions a bound RECIPIENT may drive (accept/decline/return); false for the
-         *  initiator-side ones (cancel/recall/complete), which a collaborator may never touch. */
-        recipientSide: Boolean = false,
-        /** The targeted handoff — required to enforce a collaborator's own-offer binding. */
-        handoffId: String? = null,
-        op: (HandoffRegistry) -> HandoffRegistry.HandoffOutcome,
-    ) {
-        val svc = registry.handoffs
-        if (svc == null) { sink.emit(PocketError("handoff_unavailable", "handoffs are not available on this daemon")); return }
-        if (origin != null || guestScope != null) { sink.emit(PocketError("handoff_forbidden", "not permitted for a restricted credential")); return }
-        if (collab != null) {
-            if (!recipientSide) { sink.emit(PocketError("handoff_forbidden", "not permitted for a collaborator link")); return }
-            // own-offer binding (§4.1): a collaborator may act ONLY on a handoff addressed to its own
-            // device — an unbound (open-invite) or foreign handoff is refused before the state machine
-            // runs. "Doesn't exist" and "not yours" share one answer on purpose (no probe oracle).
-            val h = handoffId?.let { svc.registry.byId(it) }
-            if (h?.recipientDeviceId != collab.deviceId) {
-                sink.emit(PocketError("handoff_not_allowed", "this handoff is not addressed to you")); return
-            }
-        }
-        when (val out = op(svc.registry)) {
-            is HandoffRegistry.HandoffOutcome.Ok -> {
-                sink.emit(HandoffUpdated(out.handoff))
-                svc.broadcast(listOf(out.handoff))
-                svc.reconcile()
-            }
-            is HandoffRegistry.HandoffOutcome.Refused -> sink.emit(PocketError(handoffCode(out.code), out.message))
-        }
-    }
-
-    /** Registry refusal code → wire error code: already-namespaced codes (`handoff_not_supported`) ride
-     *  through, bare ones (`not_found`, `not_allowed`) get the `handoff_` prefix the App keys on. */
-    private fun handoffCode(code: String) = if (code.startsWith("handoff")) code else "handoff_$code"
-
     /**
      * One managed session list request (issue #360). Order of the gates matters:
      *  1. a connection that has not declared [ClientCapsHolder.supportsManagedSessions] gets SILENCE — no managed
      *     frame could reach it (egress gates on the same bit), and it must not learn anything else either;
-     *  2. a non-owner (bridge / guest / collaborator — the three-way test) gets `managed_forbidden` before the
+     *  2. a non-owner (bridge / guest — [isOwner]) gets `managed_forbidden` before the
      *     service is touched, so no directory, scan or store is read on its behalf;
      *  3. an unwired service answers `managed_unsupported`.
      * The service then validates agent / workdir / ids itself, runs reads off this pump, serializes mutations, and
@@ -1335,7 +1073,6 @@ class RequestRouter(
         sink: OutboundSink,
         origin: String?,
         guestScope: GuestScope?,
-        collab: CollaboratorScope?,
         caps: ClientCapsHolder?,
     ) {
         if (caps == null || !caps.supportsManagedSessions) return
@@ -1356,7 +1093,7 @@ class RequestRouter(
                 allAgents = (frame as? dev.ccpocket.protocol.ListManagedSessions)?.allAgents == true, error = code,
             )
         }
-        if (!isOwner(origin, guestScope, collab)) {
+        if (!isOwner(origin, guestScope)) {
             refuse(dev.ccpocket.protocol.ManagedSessionErrors.FORBIDDEN)?.let { sink.emit(it) }
             return
         }
@@ -1374,7 +1111,7 @@ class RequestRouter(
      * Voice memo admission. A memo holds a recording and its transcript, so the request is served only when ALL
      * of these hold, and is dropped in silence otherwise — a refusal frame would itself be a `pocket/memo.state`,
      * which an undeclared or restricted peer must never receive:
-     *  1. the three-way owner test (no bridge origin, no guest scope, no collaborator scope);
+     *  1. the owner test ([isOwner]: no bridge origin, no guest scope);
      *  2. a TRANSPORT-authenticated device id — in-process callers have none, and the [LOCAL_DEVICE_ID] fallback is not an identity a recording may be filed under;
      *  3. the connection declared [ClientCapsHolder.supportsVoiceMemo];
      *  4. the service is wired.
@@ -1386,11 +1123,10 @@ class RequestRouter(
         sink: OutboundSink,
         origin: String?,
         guestScope: GuestScope?,
-        collab: CollaboratorScope?,
         caps: ClientCapsHolder?,
         deviceId: String?,
     ) {
-        if (!isOwner(origin, guestScope, collab)) return
+        if (!isOwner(origin, guestScope)) return
         val device = deviceId?.takeIf { it.isNotBlank() && it != LOCAL_DEVICE_ID } ?: return
         if (caps == null || !caps.supportsVoiceMemo) return
         val service = voiceMemo ?: return
@@ -1402,7 +1138,7 @@ class RequestRouter(
 
     /**
      * One project-pin request (issue #362). Every authority fact comes from the transport, never the frame: the
-     * owner test is the three-way one, the cursor partition is the Noise-authenticated [deviceId], and the
+     * owner test is [isOwner], the cursor partition is the Noise-authenticated [deviceId], and the
      * connection facts — is it still current, which subscription did its accepted fetch register — come from
      * [pin], the transport's context for the connection the request arrived on. A caller without both — an
      * in-process caller — can neither subscribe nor mutate. A restricted caller
@@ -1419,12 +1155,11 @@ class RequestRouter(
         sink: OutboundSink,
         origin: String?,
         guestScope: GuestScope?,
-        collab: CollaboratorScope?,
         caps: ClientCapsHolder?,
         deviceId: String?,
         pin: dev.ccpocket.daemon.pins.ProjectPinConnection?,
     ) {
-        if (!isOwner(origin, guestScope, collab)) return
+        if (!isOwner(origin, guestScope)) return
         if (caps == null || !caps.supportsProjectPins) return
         val subscription = frame.subscriptionId.takeIf { dev.ccpocket.protocol.isValidProjectPinToken(it) }
         fun refusal(code: String, message: String) = dev.ccpocket.protocol.ProjectPinsState(
@@ -1636,8 +1371,7 @@ class RequestRouter(
     }
 }
 
-/** A FULL-POWER owner caller: none of the three restricted credential classes is present. Spelled out once
- *  so every owner-only op tests all three (a COLLABORATOR arrives with origin == null AND guestScope == null —
- *  testing only those two is vacuous for exactly the weakest credential this daemon hands out). */
-internal fun isOwner(origin: String?, guestScope: GuestScope?, collab: CollaboratorScope?) =
-    origin == null && guestScope == null && collab == null
+/** A FULL-POWER owner caller: no restricted credential is present — no bridge/share [origin] and no guest
+ *  [guestScope]. Spelled out once so every owner-only op tests the same thing. */
+internal fun isOwner(origin: String?, guestScope: GuestScope?) =
+    origin == null && guestScope == null

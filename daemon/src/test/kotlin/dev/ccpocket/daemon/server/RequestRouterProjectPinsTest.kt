@@ -10,8 +10,6 @@ import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
-import dev.ccpocket.daemon.handoff.CollaboratorCaps
-import dev.ccpocket.daemon.handoff.CollaboratorScope
 import dev.ccpocket.daemon.pins.MemoryProjectPinStore
 import dev.ccpocket.daemon.pins.PinStoreRead
 import dev.ccpocket.daemon.pins.PinStoreState
@@ -27,7 +25,6 @@ import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.ClientCaps
-import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ProjectPinErrors
 import dev.ccpocket.protocol.ProjectPinOp
@@ -280,8 +277,6 @@ class RequestRouterProjectPinsTest {
         val callers = listOf<suspend (OutboundSink, RequestRouter.ClientCapsHolder, Conn) -> Unit>(
             { s, c, p -> r.handle(fetch(), s, origin = "feishu-bridge", caps = c, deviceId = "devBridge", pinConnection = p) },
             { s, c, p -> r.handle(pinX(), s, guestScope = guest, caps = c, deviceId = "devGuest", pinConnection = p) },
-            // a collaborator arrives with origin == null AND guestScope == null — the vacuous two-term test's blind spot
-            { s, c, p -> r.handle(fetch(), s, caps = c, deviceId = "devCollab", collabScope = CollaboratorScope("devCollab"), pinConnection = p) },
         )
         for (call in callers) {
             val sink = Collect()
@@ -363,10 +358,6 @@ class RequestRouterProjectPinsTest {
         val state = ProjectPinsState("s", snapshot = ProjectPinsSnapshot("i", 1))
         assertFalse(GuestCaps.ingressAllowed(request)); assertFalse(GuestCaps.egressAllowed(state))
         assertFalse(BridgeCaps.ingressAllowed(request)); assertFalse(BridgeCaps.egressAllowed(state))
-        for (purpose in CollaboratorPurpose.entries) {
-            assertFalse(CollaboratorCaps.ingressAllowed(request, purpose), "collaborator ($purpose) ingress")
-            assertFalse(CollaboratorCaps.egressAllowed(state, purpose), "collaborator ($purpose) egress")
-        }
         assertNotNull(state.snapshot)
     }
 }

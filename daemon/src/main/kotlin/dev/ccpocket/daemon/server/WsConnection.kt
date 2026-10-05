@@ -83,11 +83,11 @@ class WsConnection(
     private val router: RequestRouter,
     private val registry: SessionRegistry,
     private val e2e: LanE2E,
-    /** The owner control planes (share #115 / bridge #91 / collaborator SESSION-HANDOFF §4.1) — served on
+    /** The owner control planes (share #115 / bridge #91) — served on
      *  the LAN transport too, because the desktop app on the daemon's own machine arrives HERE, not over
      *  the relay, and every LAN peer is a full-power owner by construction (restricted credentials can't
      *  pass the LAN gate). Null while the relay link is still coming up. */
-    private val ownerControls: (() -> Triple<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?, dev.ccpocket.daemon.handoff.CollaboratorControl?>)? = null,
+    private val ownerControls: (() -> Pair<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?>)? = null,
 ) {
     private val outbox = Channel<Envelope>(Channel.BUFFERED)
     private val nextId = AtomicLong(0)
@@ -366,8 +366,8 @@ class WsConnection(
                             // owner control planes first (share #115 / bridge #91) — the same dispatcher the
                             // relay transport uses, so the two paths can't drift. Falls through to the router
                             // for everything else (and when the controls aren't up yet).
-                            val (sc, bc, cc) = ownerControls?.invoke() ?: Triple(null, null, null)
-                            if (dispatchOwnerControl(env.body, sc, bc, cc) { sink.emit(it) }) return@launch
+                            val (sc, bc) = ownerControls?.invoke() ?: (null to null)
+                            if (dispatchOwnerControl(env.body, sc, bc) { sink.emit(it) }) return@launch
                             // gatedDeviceId = the LAN-gate-authenticated paired device (same identity space
                             // as the relay's)
                             router.handle(env.body, sink, caps = caps, deviceId = gatedDeviceId) { owned.add(it) }

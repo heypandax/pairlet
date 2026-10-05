@@ -1,7 +1,6 @@
 package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.protocol.CreateBridge
-import dev.ccpocket.protocol.CreateCollaboratorTicket
 import dev.ccpocket.protocol.CreateReviewInvite
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListBridges
@@ -27,7 +26,7 @@ import kotlin.test.fail
  * the duration.
  *
  * Minting is exactly that shape — `createTicket` suspends until the relay answers with a [PairTicket] —
- * which is why the share/bridge/collaborator mints run off the loop, selected by [isOwnerControlFrame].
+ * which is why the share/bridge mints run off the loop, selected by [isOwnerControlFrame].
  *
  * This models the loop rather than standing up a relay: the property under test is the DISPATCH DECISION,
  * and a socket would add nothing but flakiness.
@@ -57,7 +56,7 @@ class OwnerFrameDispatchTest {
             for (frame in inbound) {
                 when {
                     frame is PairTicket -> mint.ticket.complete(frame)
-                    frame is CreateBridge || frame is CreateCollaboratorTicket ->
+                    frame is CreateBridge ->
                         if (offReader(frame)) launch { mint.run() } else mint.run()
                     else -> handledInline += frame
                 }
@@ -112,11 +111,11 @@ class OwnerFrameDispatchTest {
     }
 
     /** The predicate itself: the ticket-minting owner frames take the off-loop path. A retired review
-     *  invite mints nothing any more — it goes to the router, which answers it inline. */
+     *  invite or collaborator ticket mints nothing any more — it goes to the router, which answers it inline. */
     @Test
     fun the_ticket_minting_owner_frames_take_the_off_reader_path() {
         assertTrue(isOwnerControlFrame(bridgeMint))
-        assertTrue(isOwnerControlFrame(CreateCollaboratorTicket()))
+        assertFalse(isOwnerControlFrame(dev.ccpocket.protocol.CreateCollaboratorTicket()))
         assertFalse(isOwnerControlFrame(CreateReviewInvite()))
     }
 }

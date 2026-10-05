@@ -4,9 +4,7 @@ import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.AuthorizedActionRecorded
-import dev.ccpocket.protocol.HandoffUpdated
 import dev.ccpocket.protocol.PermissionRiskUpdated
-import dev.ccpocket.protocol.SessionHandoff
 import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.UsageDay
 import dev.ccpocket.protocol.UsageModel
@@ -225,43 +223,6 @@ class ClientCapsFilterTest {
             assertFalse(RequestRouter.allowedForCaps(frame, legacy), "legacy sibling must not receive ${frame::class.simpleName}")
             assertTrue(RequestRouter.allowedForCaps(frame, modern), "modern sibling should receive ${frame::class.simpleName}")
         }
-    }
-
-    @Test
-    fun `handoff listings strip only zcode rows for an undeclared client`() {
-        val claude = SessionHandoff(id = "h-claude", sourceSessionId = "s-claude", agent = AgentKind.CLAUDE)
-        val zcode = SessionHandoff(id = "h-zcode", sourceSessionId = "s-zcode", agent = AgentKind.ZCODE)
-
-        assertEquals(
-            listOf(claude),
-            RequestRouter.filterHandoffs(listOf(zcode, claude), RequestRouter.ClientCapsHolder()),
-        )
-        assertEquals(
-            listOf(claude),
-            RequestRouter.filterHandoffs(listOf(zcode, claude), null),
-            "no caps holder is a legacy client and must fail closed",
-        )
-
-        val modern = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
-        assertEquals(listOf(zcode, claude), RequestRouter.filterHandoffs(listOf(zcode, claude), modern))
-    }
-
-    @Test
-    fun `zcode handoff updates are gated independently per connection`() {
-        val update = HandoffUpdated(SessionHandoff(id = "h-zcode", sourceSessionId = "s-zcode", agent = AgentKind.ZCODE))
-        val legacy = RequestRouter.ClientCapsHolder()
-        val modern = RequestRouter.ClientCapsHolder().apply { supportsZcode = true }
-
-        assertFalse(RequestRouter.allowedForCaps(update, legacy))
-        assertFalse(RequestRouter.allowedForCaps(update, null), "a legacy ingress without a holder must fail closed")
-        assertTrue(RequestRouter.allowedForCaps(update, modern))
-        assertTrue(
-            RequestRouter.allowedForCaps(
-                HandoffUpdated(SessionHandoff(id = "h-claude", sourceSessionId = "s-claude", agent = AgentKind.CLAUDE)),
-                legacy,
-            ),
-            "baseline-agent handoffs remain compatible",
-        )
     }
 
     // ── issue #258: the usage reply's by-model rows carry the same AgentKind vocabulary ──────────

@@ -175,12 +175,8 @@ class DaemonCore(
                 // bounded window, or issue #201's wait would pin a process per fire (repeating schedules).
                 headless = true,
             )
-            // the handoff drive gate covers scheduled fires too (SESSION-HANDOFF.md §5.3: a WAITING/
-            // handed-off session accepts input from its controller only — the scheduler is never that)
-            val handoffDeny = if (convoId.isEmpty()) null else registry.driveDenied(convoId, "scheduler")
             val failure = when {
                 convoId.isEmpty() -> "agent unavailable"
-                handoffDeny != null -> handoffDeny.message
                 !registry.sendPrompt(SendPrompt(convoId, entry.prompt, promptId = "sched-${entry.id}", diagnostic = execution.context)) ->
                     "session unavailable (live in another client?)"
                 else -> null
@@ -271,13 +267,8 @@ class DaemonCore(
     var shareControl: dev.ccpocket.daemon.relay.ShareControl? = null
     @Volatile
     var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl? = null
-    /** The Collaborator Link contact plane (SESSION-HANDOFF.md §4.1) — same install/lifetime terms as
-     *  the two above (minting a connect ticket needs the relay link). */
-    @Volatile
-    var collaboratorControl: dev.ccpocket.daemon.handoff.CollaboratorControl? = null
-
     /**
-     * #367 G1: the EXECUTION credential BIND hook — same install/lifetime terms as the three above
+     * #367 G1: the EXECUTION credential BIND hook — same install/lifetime terms as the two above
      * (approving a grant mints a connect ticket, which needs the relay link).
      *
      * [dev.ccpocket.daemon.relay.DeviceSessions] calls it at the ONE moment an execution link's first
@@ -301,7 +292,7 @@ class DaemonCore(
 
     /**
      * The #367 planes, installed by the relay wiring through [installExecution] once the link is up —
-     * same lifetime rule as [collaboratorControl] and for the same reason: approving a grant mints a relay
+     * same lifetime rule as [executionControl] and for the same reason: approving a grant mints a relay
      * ticket, and the source client dials the relay. Null on a LAN-only `serve` and before the link opens.
      */
     @Volatile

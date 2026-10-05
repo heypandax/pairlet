@@ -85,9 +85,6 @@ class DeviceSessions(
     var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl?
         get() = core.bridgeControl
         set(v) { core.bridgeControl = v }
-    var collaboratorControl: dev.ccpocket.daemon.handoff.CollaboratorControl?
-        get() = core.collaboratorControl
-        set(v) { core.collaboratorControl = v }
     /** #367: the execution-credential bind hook (see [DaemonCore.executionControl]). */
     var executionControl: dev.ccpocket.daemon.execution.ExecutionControl?
         get() = core.executionControl
@@ -714,11 +711,11 @@ class DeviceSessions(
                 return
             }
             else -> {
-                // FULL-POWER owner device: the share/bridge/collaborator control planes (mint / list /
-                // revoke) need handles the router lacks, so they're intercepted here — via the SAME
-                // dispatcher the LAN transport uses. A restricted credential never reaches this branch
-                // (its own whitelist denies these frames), so re-sharing the machine, minting another
-                // bridge, or inviting another collaborator is structurally impossible.
+                // FULL-POWER owner device: the share/bridge control planes (mint / list / revoke) need
+                // handles the router lacks, so they're intercepted here — via the SAME dispatcher the LAN
+                // transport uses. A restricted credential never reaches this branch (its own whitelist
+                // denies these frames), so re-sharing the machine or minting another bridge is
+                // structurally impossible.
                 // Also register as a handoff fan-out target (SESSION-HANDOFF.md): keyed per device, so each
                 // frame just refreshes the same slot; owner devices only (a restricted credential's egress
                 // whitelist would drop HandoffUpdated anyway — this keeps it out of the target set entirely).
@@ -765,7 +762,7 @@ class DeviceSessions(
                     // The direct-ws leg masked this for shares/bridges; the relay leg hits it every time.
                     val body = env.body
                     core.scope.launch {
-                        val handled = dispatchOwnerControl(body, shareControl, bridgeControl, collaboratorControl) { sink.emit(it) }
+                        val handled = dispatchOwnerControl(body, shareControl, bridgeControl) { sink.emit(it) }
                         // null control plane (daemon still wiring up / LAN-only serve) — surface it rather
                         // than vanish, mirroring what the router's fall-through used to produce
                         if (!handled) runCatching { sink.emit(PocketError("unsupported", "the daemon isn't ready for ${body::class.simpleName}", null)) }

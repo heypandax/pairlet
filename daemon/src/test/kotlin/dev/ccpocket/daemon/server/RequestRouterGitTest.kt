@@ -8,8 +8,6 @@ import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
-import dev.ccpocket.daemon.handoff.CollaboratorCaps
-import dev.ccpocket.daemon.handoff.CollaboratorScope
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
@@ -17,7 +15,6 @@ import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AddWorktree
-import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.FetchGitStatus
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.GIT_OP_STAGE
@@ -25,7 +22,6 @@ import dev.ccpocket.protocol.GitAction
 import dev.ccpocket.protocol.GitActionResult
 import dev.ccpocket.protocol.GitDiff
 import dev.ccpocket.protocol.GitStatus
-import dev.ccpocket.protocol.HandoffAccess
 import dev.ccpocket.protocol.ListWorktrees
 import dev.ccpocket.protocol.ReadGitDiff
 import dev.ccpocket.protocol.RemoveWorktree
@@ -46,15 +42,11 @@ import kotlin.test.assertTrue
 /**
  * The Git panel's OWNER-ONLY red line (#280 §3.1, #281 §5), tested at the router — the second door.
  *
- * The first door is the ingress capability whitelist (GuestCaps / BridgeCaps / CollaboratorCaps), which
- * default-denies anything not explicitly listed; [git_frames_are_denied_by_every_capability_whitelist]
- * pins that these types stayed off those lists. But a whitelist is a list someone can edit, so the
- * router re-checks all THREE credential classes at dispatch and refuses with a frame the app can render
- * rather than with silence.
- *
- * The collaborator case is the one that matters most: a Collaborator Link arrives with `origin == null`
- * AND `guestScope == null`, so the older two-term owner test would have waved through exactly the
- * weakest credential the product hands out.
+ * The first door is the ingress capability whitelist (GuestCaps / BridgeCaps), which default-denies
+ * anything not explicitly listed; [git_frames_are_denied_by_every_capability_whitelist] pins that these
+ * types stayed off those lists. But a whitelist is a list someone can edit, so the router re-checks the
+ * restricted credential classes at dispatch and refuses with a frame the app can render rather than with
+ * silence.
  */
 class RequestRouterGitTest {
 
@@ -84,13 +76,12 @@ class RequestRouterGitTest {
         frame: Frame,
         origin: String? = null,
         guestScope: GuestScope? = null,
-        collabScope: CollaboratorScope? = null,
     ): Frame = runBlocking {
         val got = CompletableDeferred<Frame>()
         router(CoroutineScope(Dispatchers.Default)).handle(
             frame,
             { f -> if (f is GitStatus || f is GitDiff || f is GitActionResult || f is WorktreeList) got.complete(f) },
-            origin = origin, guestScope = guestScope, collabScope = collabScope,
+            origin = origin, guestScope = guestScope,
         )
         withTimeout(10_000) { got.await() }
     }
@@ -98,10 +89,6 @@ class RequestRouterGitTest {
     private fun guest() = GuestScope(
         roots = listOf(workdir), ownedSessions = emptySet(),
         label = "alex", expiresAt = null, tier = AccessTier.COLLABORATE,
-    )
-
-    private fun collaborator() = CollaboratorScope(
-        deviceId = "dev-1", pathScope = listOf(workdir), access = HandoffAccess.REVIEW_READ_ONLY,
     )
 
     private fun refusalOf(f: Frame): String? = when (f) {
@@ -141,14 +128,6 @@ class RequestRouterGitTest {
     }
 
     @Test
-    fun a_collaborator_link_is_refused_even_though_its_origin_and_guestScope_are_both_null() {
-        for (req in everyGitRequest()) {
-            val r = reply(req, origin = null, guestScope = null, collabScope = collaborator())
-            assertEquals(RequestRouter.GIT_OWNER_ONLY, refusalOf(r), "${req::class.simpleName} must be refused for a collaborator")
-        }
-    }
-
-    @Test
     fun the_refusal_never_reveals_whether_the_path_exists() {
         // a directory oracle would be a real leak: a guest could probe the owner's disk by watching which
         // refusal came back. Both a real and an imaginary path must answer identically.
@@ -171,12 +150,10 @@ class RequestRouterGitTest {
     }
 
     @Test
-    fun the_owner_test_is_all_three_credential_classes() {
-        assertTrue(RequestRouter.gitOwnerOnly(null, null, null))
-        assertFalse(RequestRouter.gitOwnerOnly("feishu:g", null, null))
-        assertFalse(RequestRouter.gitOwnerOnly(null, guest(), null))
-        // the vacuous case the two-term test used to miss
-        assertFalse(RequestRouter.gitOwnerOnly(null, null, collaborator()))
+    fun the_owner_test_is_every_restricted_credential_class() {
+        assertTrue(RequestRouter.gitOwnerOnly(null, null))
+        assertFalse(RequestRouter.gitOwnerOnly("feishu:g", null))
+        assertFalse(RequestRouter.gitOwnerOnly(null, guest()))
     }
 
     @Test
@@ -185,12 +162,6 @@ class RequestRouterGitTest {
         for (f in requests) {
             assertFalse(GuestCaps.ingressAllowed(f), "guest ingress must not admit ${f::class.simpleName}")
             assertFalse(BridgeCaps.ingressAllowed(f), "bridge ingress must not admit ${f::class.simpleName}")
-            for (purpose in CollaboratorPurpose.entries) {
-                assertFalse(
-                    CollaboratorCaps.ingressAllowed(f, purpose),
-                    "collaborator ($purpose) ingress must not admit ${f::class.simpleName}",
-                )
-            }
         }
         // and the replies never leave for a restricted credential either — a refusal frame the router
         // built for an owner must not become a side channel if routing ever changes.
