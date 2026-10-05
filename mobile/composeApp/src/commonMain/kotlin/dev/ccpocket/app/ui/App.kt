@@ -310,21 +310,13 @@ fun App(scope: CoroutineScope) {
     // a fresh redeem shouldn't wait for the next launch to start listening — the offer that prompted the QR
     // is usually already sitting on the colleague's daemon
     remember { repo.onCollaboratorLinkAdded = { binding, ticket -> collabInbox.add(binding, ticket) } }
-    LaunchedEffect(Unit) {
-        dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.AppLaunch)
-        if (repo.paired.value != null) repo.startRelay() // already paired -> straight to the list
-    }
-    val pendingLink by dev.ccpocket.app.DeepLink.pending.collectAsState()
-    // §7: ONE parse for every entry point. A collaborator link parks in pendingCollabInvite for the
-    // fingerprint confirm screen below — a deep link must never redeem on sight.
-    LaunchedEffect(pendingLink) { pendingLink?.let { repo.handleIncomingLink(it); dev.ccpocket.app.DeepLink.pending.value = null } }
+    // app_launch, the paired computer's reconnect, an OS-delivered link and a tapped push — all held until the
+    // 5.1.2(i) data disclosure below is accepted (a route arriving earlier waits, it is not dropped)
+    ConsentGatedLaunchEffects(repo)
     // …and a review-contact link is addressed to the Review Center rather than the pairing door
     // (REVIEW-REQUEST.md §13.3): open it so the Center's join page can show the fingerprint. The ticket
     // is still redeemed by the DAEMON, and only after the human accepts these words.
     LaunchedEffect(repo.pendingReviewInvite.value) { if (repo.pendingReviewInvite.value != null) reviewsOpen = true }
-    // a tapped task-complete push deep-links straight into its session (connecting first if needed)
-    val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
-    LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
     // issue #382: publish the open chat's session so a foreground turn push about it can skip the banner
     LaunchedEffect(repo) { androidx.compose.runtime.snapshotFlow { dev.ccpocket.app.push.foregroundSessionOf(repo.sessionKey.value, repo.convoId.value, repo.connected.value) }.collect { dev.ccpocket.app.push.ForegroundSession.update(it) } }
     // a tapped OFFER push (§3.4) names only the handoff — it selects that offer in the doorway below, which
