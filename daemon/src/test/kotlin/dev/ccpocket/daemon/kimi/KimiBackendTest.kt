@@ -490,6 +490,28 @@ class KimiBackendTest {
         assertEquals(blocks("try again"), contentOf(prompts(w).single()), "the new process takes prompts normally")
     }
 
+    /** `session/new` sent but never answered: bounded like the handshake, the waiting prompt settles. */
+    @Test
+    fun `a session open that never answers settles the waiting prompt after the watchdog`() = runBlocking {
+        val w = mutableListOf<String>()
+        val injected = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val b = KimiBackend(null, handshakeTimeoutMs = 100)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}, inject = { injected += it }),
+            AgentSpec(Path.of("/repo"), resumeId = "k-session-1", mode = PermissionMode.DEFAULT),
+        )
+        b.sendPrompt("still there?", emptyList())
+        b.parse("""{"jsonrpc":"2.0","id":1,"result":$NO_CAPABILITIES}""") // → session/load, never answered
+        val deadline = System.currentTimeMillis() + 5_000
+        while (injected.isEmpty() && System.currentTimeMillis() < deadline) kotlinx.coroutines.delay(20)
+        val events = b.parse(injected.single())
+        assertEquals("still there?", assertIs<AgentEvent.UserReplay>(events[0]).text)
+        val text = assertIs<AgentEvent.AssistantText>(events[1]).text
+        assertTrue("could not resume" in text && "session/load" in text, text)
+        assertTrue(assertIs<AgentEvent.TurnResult>(events[2]).isError)
+        assertTrue(w.none { "\"session/new\"" in it }, "a hung resume must not mint a replacement session")
+    }
+
     // ---- session/update stamped with another session (behaviour aligned with DSH, audit 2026-10-04) ----
 
     /** A frame stamped with somebody else's session (a sub-agent's) must never enter this chat. */

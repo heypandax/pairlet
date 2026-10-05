@@ -38,7 +38,7 @@ import org.slf4j.Logger
  * so the settle IS the receipt — without it Conversation's ledger re-runs old prompts on every relaunch);
  * the synthetic frames ([AcpSynthetic]); approvals ([AcpApprovals]); `session/cancel`; `-32601` for every
  * server request we do not serve (an unanswered one hangs the agent's turn); and the startup-failure
- * terminal state with its handshake watchdog.
+ * terminal state with its watchdogs (an `initialize`, then a session open, that never answers).
  *
  * What stays in the backend ([Host]): what an open session announces, how `session/update` payloads become
  * events, what a permission card shows, and any requests of its own (dsh's config writes).
@@ -115,7 +115,8 @@ class AcpClient(
     private val approvals = AcpApprovals(rpc)
     private val synthetic = AcpSynthetic(config.tag)
 
-    /** Owns the handshake watchdog; the job is replaced on every [attach] and cancelled by [processEnded]. */
+    /** Owns the startup watchdog (handshake, then session open); the job is replaced on every [attach] and on
+     *  the session open, and cancelled by [processEnded]. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var watchdog: Job? = null
 
@@ -149,6 +150,13 @@ class AcpClient(
     /** Inside a history-replaying `session/load` (see [Resume.LOAD]): its `session/update`s are dropped. */
     @Volatile private var replaying = false
 
+    /** When the agent last wrote a line ([System.nanoTime]) — the session-open watchdog measures SILENCE, so a
+     *  long `session/load` replay that keeps streaming is never mistaken for a hang. */
+    @Volatile private var lastInboundNanos = 0L
+
+    /** The session-open watchdog gave up on this process (see [watchSessionOpen]); a late answer recovers. */
+    @Volatile private var openTimedOut = false
+
     // ---- lifecycle ----
 
     /** A fresh process: forget the previous one's protocol state and start the handshake. */
@@ -160,6 +168,7 @@ class AcpClient(
         openFailure = null
         if (!config.keepSessionOpenIdAcrossRelaunch) sessionOpenId = -1
         replaying = false
+        openTimedOut = false
         imagePrompts = false
         prompts.reset()
         approvals.clear()
@@ -192,6 +201,28 @@ class AcpClient(
         injectStartupFailure(config.stageHandshake, config.handshakeHint())
     }
 
+    /**
+     * A session open (`session/new`, `session/load`, `session/resume`) that never answers would otherwise park
+     * every prompt behind a gate that can never open — no terminal state, and a re-run on every relaunch.
+     * Bounded like the handshake, but by SILENCE: any line the agent writes re-arms it, so a long history
+     * replay or a slow-but-talking agent is never accused. If the answer does arrive after the watchdog gave
+     * up, the session is taken after all (see [onSessionOpenAnswered]) — it is the very session asked for.
+     */
+    private suspend fun watchSessionOpen(owner: AgentIo, openId: Long, method: String) {
+        val timeoutNanos = config.handshakeTimeoutMs * 1_000_000
+        while (true) {
+            if (io !== owner || sessionOpenId != openId || sessionId != null || openFailure != null) return
+            val left = timeoutNanos - (System.nanoTime() - lastInboundNanos)
+            if (left <= 0) break
+            delay((left + 999_999) / 1_000_000)
+        }
+        openTimedOut = true
+        injectStartupFailure(
+            if (resumeId != null) config.stageResume else config.stageNew,
+            "no answer to `$method` within ${config.handshakeTimeoutMs / 1000}s",
+        )
+    }
+
     // ---- inbound ----
 
     suspend fun parse(line: String): List<AgentEvent> {
@@ -201,6 +232,7 @@ class AcpClient(
             ?: return listOf(AgentEvent.Unparseable(t))
         // Frames we injected ourselves never travelled to the agent; they carry our own namespaced type.
         readSynthetic(root)?.let { return it }
+        lastInboundNanos = System.nanoTime()
         val method = root.str("method")
         val idEl = root["id"]?.takeIf { it !is JsonNull }
         return runCatching {
@@ -253,6 +285,7 @@ class AcpClient(
         if (id != null && id == initializeId) return failStartup(config.stageHandshake, why)
         if (id != null && id == sessionOpenId) {
             replaying = false
+            openTimedOut = false
             return failStartup(if (resumeId != null) config.stageResume else config.stageNew, why)
         }
         val consumed = id?.let { prompts.settle(it) }
@@ -263,23 +296,27 @@ class AcpClient(
 
     private suspend fun openSession() {
         val rid = resumeId
-        sessionOpenId = if (rid != null) {
-            replaying = config.resume.replaysHistory
-            rpc.request(config.resume.method, buildJsonObject {
-                put("sessionId", rid)
-                put("cwd", workdir)
-                putJsonArray("mcpServers") {}
-            })
-        } else {
-            rpc.request("session/new", buildJsonObject {
-                put("cwd", workdir)
-                putJsonArray("mcpServers") {}
-            })
-        }
+        val method = if (rid != null) config.resume.method else "session/new"
+        if (rid != null) replaying = config.resume.replaysHistory
+        val openId = rpc.request(method, buildJsonObject {
+            rid?.let { put("sessionId", it) }
+            put("cwd", workdir)
+            putJsonArray("mcpServers") {}
+        })
+        sessionOpenId = openId
+        val owner = io ?: return
+        watchdog?.cancel() // the handshake answered; from here the session open is what can hang
+        watchdog = scope.launch { watchSessionOpen(owner, openId, method) }
     }
 
     private suspend fun onSessionOpenAnswered(result: JsonObject?): List<AgentEvent> {
         replaying = false
+        if (openTimedOut) {
+            // the watchdog already settled what was waiting; the session the user asked for is here after all
+            openTimedOut = false
+            openFailure = null
+            log.info("${config.tag} session open answered after the watchdog gave up — taking it")
+        }
         // session/new answers {sessionId, …}; a resume answers for the id we sent. A session/new with no id is a
         // session nobody can address — the same dead end as an error answer, settled the same way.
         val sid = result?.str("sessionId") ?: resumeId
