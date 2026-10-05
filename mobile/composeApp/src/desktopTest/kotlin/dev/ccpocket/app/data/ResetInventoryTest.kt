@@ -13,9 +13,12 @@ import dev.ccpocket.protocol.ApprovalPrefs
 import dev.ccpocket.protocol.ArchivedSessions
 import dev.ccpocket.protocol.AuthState
 import dev.ccpocket.protocol.BridgeListing
+import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.PathEntries
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
@@ -237,6 +240,8 @@ class ResetInventoryTest {
         r.openSession("/inv/w", "inv-sid-1", agent = AgentKind.CLAUDE)
         r.receiveForTest(SessionLive("inv-c1", "/inv/w", "inv-sid-1", mode = PermissionMode.ACCEPT_EDITS, executing = false, model = "claude-opus", effort = "high",
             contextWindow = 200_000, contextUsed = 1_000, agent = AgentKind.CLAUDE, origin = "bot", title = "Fix it"))
+        // its replayed window: the cursor, the paging anchor and the replayed-rows snapshot a left session parks
+        r.receiveForTest(ConvoHistory("inv-c1", listOf(HistoryMessage(ChatRole.USER, "inv-q")), lastSeq = 9, firstSeq = 1, hasMore = true))
         r.sidePanes.open("/inv/w2", "inv-sid-pane", "Column", AgentKind.CLAUDE, PermissionMode.DEFAULT)
         r.receiveForTest(PermissionAsk("inv-c1", "ask1", "Bash", "rm -rf build"))
         r.receiveForTest(TurnDone("inv-c1", error = "usage limit reached|1720000000", usageLimitResetAt = 1_720_000_000_000))
@@ -320,7 +325,7 @@ class ResetInventoryTest {
         }
 
         /** Owned helper objects whose fields are inventoried individually, under this key prefix. */
-        val EXPANDED = mapOf("transcript" to "transcript", "sidePanes" to "sidePanes")
+        val EXPANDED = mapOf("transcript" to "transcript", "sidePanes" to "sidePanes", "sessionCache" to "sessionCache")
 
         /** Fields outside the inventory, each with the reason. Not state, or state owned by a helper. */
         val IGNORED: Map<String, String> = buildMap {
@@ -343,6 +348,7 @@ class ResetInventoryTest {
             listOf("scope", "send", "newPromptId", "daemonOwnsPromptRecovery", "diagnosticsSupported", "productDimensions",
                 "receiptExpired", "responseExpired", "receiptTimeoutMs", "turnTimeoutMs")
                 .forEach { put("sidePanes.$it", "SidePanes wiring / timeout configuration") }
+            listOf("maxEntries", "maxBytes").forEach { put("sessionCache.$it", "SessionHistoryCache bounds (constructor configuration)") }
         }
 
         /** Tabled fields the dirtying deliberately leaves at their initial value. */
@@ -390,6 +396,12 @@ class ResetInventoryTest {
         //              8 s safety timer for `switching`), and its screen is not reachable before that reply
         //   OK-从不清  no exit clears it: timedOutAskId only matches the exact (UUID convoId, askId); the single-slot
         //              changedFilesDeadline is cancelled by every new fetch and no-ops unless a fetch is loading
+        // The in-memory session cache (session-open latency plan #1), judged when it was added:
+        //   缓存-存    OPN/BCK/STP/DIR park the session being left (C: one entry more, bytes up). TKO keeps it: the same
+        //              session continues on screen, nothing is left
+        //   缓存-清    DSC/SWC clear it: disconnect() is every way off a computer (exit, unpair, cold switch, add-device,
+        //              leaving the demo). DEM clears it too: a headless satellite never shows a chat, so its entries
+        //              would only hold memory, once per satellite
         private val MATRIX = """
             # field                      D S D O B S T D
             #                            S W E P C T K I
@@ -514,6 +526,9 @@ class ResetInventoryTest {
             transcript.childCallIds      K K K R K K K K
             transcript.replayEcho        K K K R K K K K
             transcript.thinkStartMs      K K K R K K K K
+            transcript.cachedRows        R R R R R R R R
+            sessionCache.entries         R R R C C C K C  # 缓存-存 / 缓存-清
+            sessionCache.bytes           R R R C C C K C  # 缓存-存 / 缓存-清
             sidePanes.panes              R R R K K K K K
             sidePanes.paneSeq            K K K K K K K K
             sidePanes.focusedSlot        R R R K K K K K
@@ -616,6 +631,7 @@ class ResetInventoryTest {
             historySeq                   R R R R R R R R
             historySeqSession            R R R R R R R R
             historyFirstSeq              R R R R R R R R
+            historyRows                  R R R R R R R R
             historyHasMore               R R R R R R R R
             historyLoadingOlder          R R R R R R R R
             historyPageDeadline          R R R R R R R R

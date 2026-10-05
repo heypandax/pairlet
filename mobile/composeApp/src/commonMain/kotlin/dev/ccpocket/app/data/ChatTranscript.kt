@@ -46,8 +46,44 @@ class ChatTranscript {
     /** Clear rows and their metadata together, including callers that preserve other turn state. */
     fun clearMessages() {
         sessionNotice = null
+        cachedRows = 0
         messages.clear()
     }
+
+    /**
+     * How many rows at the head of [messages] (the session notice aside) came from the in-memory session
+     * cache ([SessionHistoryCache]) and have not been answered by a history reply yet — 0 on every
+     * conversation the cache did not seed. Those rows are the transcript up to the cursor the open echoed,
+     * so the reply can only CONTINUE them (a delta) or REPLACE them (a full window); [mergeHistoryUnchecked]
+     * keeps them out of the anchor search either way. Counted by position: everything that inserts or
+     * removes rows mid-list touches local-only rows (pending bubbles, memo bubbles, autorun chips), which
+     * the live stream only ever appends after this head; an older page lands in front and extends it.
+     */
+    private var cachedRows = 0
+
+    /** Seed a freshly reset conversation with a left session's cached rows, before its open goes out. NOT a
+     *  history arrival: the replay-echo dedupe stays disarmed and no receipt sees it — only the reply is. */
+    fun showCached(rows: List<ChatItem>) {
+        messages.addAll(rows)
+        cachedRows = rows.size
+        // the same capability read [mergeHistoryUnchecked] makes on a replay: these rows were replayed by
+        // this computer, so if they carry ordinary-tool outcomes its daemon reports them
+        if (!toolOutcomesLive.value && rows.any { it is ChatItem.Tool && it.ok != null && !isSubagentTool(it.tool) && it.workflowRunId == null }) {
+            toolOutcomesLive.value = true
+        }
+    }
+
+    /** One page of OLDER history in front of everything (issue #147). Part of a cached head when it lands
+     *  on one: those rows sit before the same cursor. */
+    fun prependHistory(older: List<ChatItem>) {
+        messages.addAll(0, older)
+        if (cachedRows > 0) cachedRows += older.size
+    }
+
+    /** The last row is still one of the cached head's — a live text block must not glue onto it: a delta
+     *  reply will carry that block as its own row, and glued it would show twice. */
+    private fun lastRowIsCached(): Boolean =
+        cachedRows > 0 && messages.size - (if (sessionNotice != null) 1 else 0) <= cachedRows
 
     /** Mid-turn right now. Kept here because [appendChunk] is what flips it on. */
     val streaming = mutableStateOf(false)
@@ -97,7 +133,7 @@ class ChatTranscript {
                 replayEcho = false
                 if (echo) return
                 val last = messages.lastOrNull()
-                if (last is ChatItem.Assistant) messages[messages.lastIndex] = last.copy(text = last.text + p.text)
+                if (last is ChatItem.Assistant && !lastRowIsCached()) messages[messages.lastIndex] = last.copy(text = last.text + p.text)
                 else messages.add(ChatItem.Assistant(p.text))
             }
             is StreamPiece.Thinking -> {
@@ -237,26 +273,50 @@ class ChatTranscript {
      * An empty delta means "already caught up" (the daemon normally does not even send one): nothing merges
      * and the echo dedupe is NOT armed — there was no replay to echo — but the cursor still advances, which
      * is the focused path's long-standing semantics and now the column's too.
+     *
+     * A head seeded by [showCached] is answered here too: a delta APPENDS past it (the cached rows sit at or
+     * before the cursor the open echoed, so none of them may anchor the delta — a repeated "继续" there would
+     * otherwise pull the tail onto an old twin and drop everything after it), and a full window REPLACES it.
+     * Either way the rows that arrived after the head are reconciled against the replay the way a cache miss
+     * reconciles them, so a hit ends on the rows a miss would have. [onReplay] receives the replay's own rows
+     * (empty for an empty delta) — what the repository's cursor snapshot is built from.
      */
     fun mergeHistory(
         f: ConvoHistory,
+        onReplay: (rows: List<ChatItem>) -> Unit = {},
         onMerged: (before: List<ChatItem>, after: List<ChatItem>) -> Unit = { _, _ -> },
     ): Long? = try {
-        mergeHistoryUnchecked(f, onMerged)
+        mergeHistoryUnchecked(f, onMerged, onReplay)
     } catch (error: Throwable) {
         Diagnostics.report(ErrorPath.HISTORY_APPLY, Stage.APPLY, ErrorCode.APPLY_FAILED, error,
             SafeMetrics(returnedCount = f.messages.size.toLong()))
         throw error
     }
 
-    private fun mergeHistoryUnchecked(f: ConvoHistory, onMerged: (List<ChatItem>, List<ChatItem>) -> Unit): Long? {
+    private fun mergeHistoryUnchecked(
+        f: ConvoHistory,
+        onMerged: (List<ChatItem>, List<ChatItem>) -> Unit,
+        onReplay: (List<ChatItem>) -> Unit,
+    ): Long? {
         // Metadata is neither a history anchor nor evidence that a pending prompt was delivered.
-        val local = messages.filterNot { it === sessionNotice }
+        val all = messages.filterNot { it === sessionNotice }
+        val cached = cachedRows.coerceAtMost(all.size)
+        val head = all.subList(0, cached)
+        val local = all.subList(cached, all.size)
+        val replay = f.messages.map(::historyItem)
+        // whatever the reply is, it answers the cached head: from here those rows are ordinary history.
+        // (Only once the replay decoded — a reply that threw leaves the head guarded for the retry.)
+        cachedRows = 0
         val merged = if (f.delta) {
-            if (f.messages.isEmpty()) return f.lastSeq
-            TranscriptMerge.mergeDelta(local, f.messages.map(::historyItem))
+            if (replay.isEmpty()) return f.lastSeq.also { onReplay(replay) }
+            // behind a cached head, [local] holds only what arrived since this open (live blocks racing the
+            // read, a prompt typed meanwhile) — rows the delta may already carry. They are reconciled exactly
+            // as a cache miss reconciles them against its full window ([TranscriptMerge.merge]: replay wins,
+            // pending input rescued); [TranscriptMerge.mergeDelta] would APPEND a live block it cannot anchor
+            // on the delta's first row, after the very row that already carries it.
+            if (cached > 0) head + TranscriptMerge.merge(local, replay) else TranscriptMerge.mergeDelta(local, replay)
         } else {
-            TranscriptMerge.merge(local, f.messages.map(::historyItem))
+            TranscriptMerge.merge(local, replay)
         }
         val displayed = sessionNotice?.let { listOf(it) + merged } ?: merged
         if (displayed != messages) {
@@ -269,7 +329,8 @@ class ChatTranscript {
         if (!toolOutcomesLive.value && f.messages.any { it.role == ChatRole.TOOL && it.ok != null && it.tool?.let(::isSubagentTool) != true && it.workflowRunId == null && it.answers == null }) {
             toolOutcomesLive.value = true
         }
-        onMerged(local, merged)
+        onMerged(all, merged)
+        onReplay(replay)
         replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
         return f.lastSeq
     }

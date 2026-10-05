@@ -1516,6 +1516,11 @@ class PocketRepository(
     // transcript it continues; a fresh open always replays in full.
     private var historySeq: Long? = null
     private var historySeqSession: String? = null
+    /** The rows the daemon REPLAYED into this conversation (full window + deltas + older pages, in order) —
+     *  the transcript from [historyFirstSeq] up to [historySeq], with nothing the live stream added. Null
+     *  whenever there is no cursor. Kept beside the cursor in lockstep, it is what a left session parks in
+     *  [sessionCache]: the live list itself also holds rows no delta could ever line up with. */
+    private var historyRows: List<ChatItem>? = null
     // older-history paging: the on-screen window's oldest cursor + whether more exists on disk
     private var historyFirstSeq: Long? = null
     val historyHasMore = mutableStateOf(false)
@@ -1545,12 +1550,42 @@ class PocketRepository(
     /** Forget the #147 cursors/paging — every place the transcript itself is dropped must call this,
      *  or a stale cursor would ask the daemon to continue a transcript we no longer hold. */
     private fun resetHistoryPaging() {
-        historySeq = null; historySeqSession = null; historyFirstSeq = null
+        historySeq = null; historySeqSession = null; historyFirstSeq = null; historyRows = null
         historyHasMore.value = false; historyLoadingOlder.value = false
         historyPageDeadline?.cancel(); historyPageDeadline = null
         historyPageAnchor = null
         lastHistoryPrependCount = 0
     }
+
+    // ── recently left sessions, kept in memory for a delta reopen (session-open latency, plan #1) ────────
+    /** The last few conversations this screen left: their replayed rows + cursor, so reopening one paints at
+     *  once and asks only for the delta. Per computer by key, and cleared wherever the computer's identity
+     *  goes ([disconnect] — which unpair, a cold switch, add-device and leaving the demo all run — plus
+     *  [demoteToSatellite], [enterDemo] and a relay AuthError). Memory only. */
+    private val sessionCache = SessionHistoryCache()
+
+    /** Which computer a cached history belongs to: the binding's relay, account, pinned daemon key and this
+     *  device's id (a re-pair mints a new device id, so even the same computer re-paired never matches an
+     *  entry from before). The credential stays out of it. Null = nothing may be cached or served: no binding,
+     *  or the demo, whose sessions are not any computer's. */
+    private fun historyCacheIdentity(): String? =
+        paired.value?.takeIf { !demoMode.value }?.let { "${it.relay}|${it.accountId}|${it.daemonPub}|${it.deviceId}" }
+
+    /** Park the conversation being left in [sessionCache] — call right BEFORE [resetHistoryPaging] on a path
+     *  that leaves a session for another view (open another, back to the list, stop). Only the replayed rows
+     *  and their cursor go in ([historyRows]), never the live list, so streaming text, pending prompts and
+     *  question/approval cards cannot be cached: a session left mid-turn parks its last replay, and the next
+     *  open's delta (or full fallback, when a late outcome patched an already-cached row) brings the rest. */
+    private fun stashHistory() {
+        val rows = historyRows ?: return
+        val sid = historySeqSession ?: return
+        val seq = historySeq ?: return
+        val identity = historyCacheIdentity() ?: return
+        sessionCache.put(SessionHistoryCache.Key(identity, sid), rows, seq, historyFirstSeq, historyHasMore.value)
+    }
+
+    /** Test seam: how many sessions are parked, and their accounted size. */
+    internal val sessionCacheSizeForTest: Pair<Int, Long> get() = sessionCache.size to sessionCache.totalBytes
 
     /** Scrolled to the top of the loaded window — fetch one page of OLDER history (issue #147). The
      *  deadline only COLLAPSES THE SPINNER (a stuck link shouldn't spin forever), it no longer disables
@@ -2078,7 +2113,8 @@ class PocketRepository(
             // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
             is PeerPresence -> { Diagnostics.connection(diagnosticConnectionId, f.connectionId?.validated()); val wasOffline = daemonOffline; daemonOffline = !f.online; if (f.online && wasOffline) onComputerBackOnline(); recomputePhase() }
-            is AuthError -> { pairingInvalid = true; retryJob?.cancel(); recomputePhase() }
+            // a refused credential (revoked / expired pairing) ends this binding's right to its transcripts too
+            is AuthError -> { pairingInvalid = true; sessionCache.clear(); retryJob?.cancel(); recomputePhase() }
             else -> {}
         }
     }
@@ -2614,7 +2650,7 @@ class PocketRepository(
             }, err, isError = err is ConnectWedgedException && appIsForeground.value)
         Telemetry.track(TelEvent.ConnFailed, mapOf(TelKey.Transport to transportName(), TelKey.Reason to reason, TelKey.Attempt to retryAttempts))
         if (err is RelayAuthException || pairingInvalid) { // expired/invalid pairing — re-pair, never auto-retry
-            pairingInvalid = true; recomputePhase(); return
+            pairingInvalid = true; sessionCache.clear(); recomputePhase(); return // same rule as a relay AuthError
         }
         if (hadReadyThisSession) startReconnectGrace(restart = false) // a blip holds Ready briefly before the banner (#28)
         status.value = StatusMsg(Res.string.status_conn_lost)
@@ -2861,6 +2897,10 @@ class PocketRepository(
         lastWorkingSessions = emptySet(); lastWorkingDirectories = emptyMap(); unseenSessions.value = emptySet()
         directories.clear(); sessions.clear(); transcript.clearMessages(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
         resetHistoryPaging() // #147: the transcript left with messages — so must its cursor
+        // …and the recently left sessions with it: every way off this computer comes through here (exit, unpair,
+        // a cold switch, add-device, leaving the demo). Keyed per computer anyway; cleared so no transcript of
+        // a computer we left stays in memory
+        sessionCache.clear()
         if (demoMode.value) Telemetry.track(TelEvent.DemoExited, mapOf(TelKey.Value to demoDepth)) // issue #342
         demoMode.value = false // leaving the demo returns to real pairing
         // #362: no pin frame from this link applies to whatever comes next, and a link retired here (a fleet
@@ -3024,6 +3064,9 @@ class PocketRepository(
         clearAskQueue()
         transcript.clearMessages(); pendingImages.clear()
         resetHistoryPaging() // #147
+        // a headless satellite never shows a chat, so its cached sessions would only hold memory — once per
+        // satellite in the fleet. Promoting it back opens on a full window, exactly as before the cache
+        sessionCache.clear()
         clearSessionPanels()
         allowRules.clear()
         slashCommands.clear()
@@ -3322,6 +3365,7 @@ class PocketRepository(
         // activation by [demoTag] — Connected/SessionOpened/PromptSent all run through the shared call sites.
         if (!demoMode.value) { Telemetry.track(TelEvent.DemoEntered); demoDepth = "none" }
         demoMode.value = true
+        sessionCache.clear() // the demo serves none (no identity, see historyCacheIdentity) and keeps none from before
         bindProjectPins() // #362: the demo's pins live in memory only
         // Demo has no handshake, so explicitly emulate a current daemon rather than inheriting the
         // disconnected socket's deny-by-default capability state.
@@ -4270,7 +4314,8 @@ class PocketRepository(
                 // the merge itself (full or #147 delta) + the #107 echo arming is [ChatTranscript.mergeHistory],
                 // shared with the split columns. Only the bookkeeping AROUND it is this conversation's:
                 // the receipt reconciliation and the session-keyed cursor / paging anchors.
-                val lastSeq = try { transcript.mergeHistory(f, ::reconcilePromptReceiptFromHistory) }
+                var replayRows: List<ChatItem> = emptyList()
+                val lastSeq = try { transcript.mergeHistory(f, onReplay = { replayRows = it }, onMerged = ::reconcilePromptReceiptFromHistory) }
                 catch (error: Exception) {
                     // mergeHistory already reported the failure. Skip the cursor bookkeeping below so the
                     // next reattach asks again from the last APPLIED seq; rethrowing only took the inbound
@@ -4281,10 +4326,13 @@ class PocketRepository(
                 openObservation?.takeIf { it.convoId == f.convoId }?.historyApplied(f.diagnostic)
                 if (f.delta) {
                     lastSeq?.let { historySeq = it; historySeqSession = currentSessionId }
+                    // a delta is exactly the rows past the cursor the snapshot ends at: it grows by them
+                    historyRows = historyRows?.let { if (replayRows.isEmpty()) it else it + replayRows }
                 } else {
                     // reattach cursor + paging anchors (issue #147); null fields = a pre-#147 daemon
                     historySeq = lastSeq
                     historySeqSession = if (lastSeq != null) currentSessionId else null
+                    historyRows = replayRows.takeIf { lastSeq != null }
                     historyFirstSeq = f.firstSeq
                     historyHasMore.value = f.hasMore && f.firstSeq != null
                     // a full replay re-anchors the window; a page still in flight against the OLD anchor
@@ -4304,7 +4352,8 @@ class PocketRepository(
                 historyLoadingOlder.value = false
                 val older = f.messages.map(::historyItem)
                 if (older.isNotEmpty()) {
-                    messages.addAll(0, older)
+                    transcript.prependHistory(older)
+                    historyRows = historyRows?.let { older + it } // the snapshot's window widens the same way
                     lastHistoryPrependCount = older.size
                     historyPrependGen.value++
                 }
@@ -5825,9 +5874,19 @@ class PocketRepository(
         // streaming), instead of the hand-rolled subset that used to live here: that subset left the
         // half-open thinking block and the streaming flag of the session we are LEAVING armed, so the next
         // session's first tool call could stamp a duration onto a block from a different conversation.
+        stashHistory() // the conversation we are leaving parks its replayed rows + cursor for a fast way back
         transcript.reset()
         convoId.value = null
         resetHistoryPaging() // #147: a fresh open replays in full — a stale cursor must not ask for a delta
+        // …unless we left this very session recently: its cached rows paint now, and their cursor (picked up by
+        // lastEventSeqFor below) asks the daemon only for what was appended since. The reply settles them —
+        // a delta appends, a full window replaces (ChatTranscript.mergeHistory) — so a miss and a hit end on
+        // the same rows. Taken, not copied: leaving this session again stores the fresher snapshot.
+        resumeId?.let { sid -> historyCacheIdentity()?.let { sessionCache.take(SessionHistoryCache.Key(it, sid)) } }?.let { hit ->
+            transcript.showCached(hit.rows)
+            historyRows = hit.rows; historySeq = hit.lastSeq; historySeqSession = resumeId
+            historyFirstSeq = hit.firstSeq; historyHasMore.value = hit.hasMore
+        }
         managedPriorSessionId = sessionKey.value // #360: a late echo of the session we are leaving must not pose as the new one
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
         managedOpeningNew = resumeId == null // #360: only a brand-new session's announce counts as "created here"
@@ -5906,7 +5965,8 @@ class PocketRepository(
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0,
             TelKey.Backend to openAgent.name.lowercase()) + demoTag()) // resume=0 + backend = which agent a NEW session picked
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
-        // declares this client delta-capable so an observe view tails with deltas (issue #147)
+        // declares this client delta-capable so an observe view tails with deltas (issue #147). A cache hit
+        // above is the one exception: it echoes the cached cursor and gets the delta.
         if (gen != openGen) return
         openDispatchedGen = gen // the matching SessionLive may own the view from here
         // Built ONCE and held: the auto-resend below replays these exact bytes. Re-deriving the request
@@ -7657,6 +7717,7 @@ class PocketRepository(
         // TurnDone no longer matches convoId), and the list's busy/finished poll skips while it reads true
         streaming.value = false
         transcript.clearMessages()
+        stashHistory() // back to the list is the commonest way out of a session — and back into it
         resetHistoryPaging() // #147
         pendingImages.clear()
         clearFileUploads()
@@ -7758,6 +7819,7 @@ class PocketRepository(
         convoId.value = null
         chatTitle.value = null
         transcript.clearMessages()
+        stashHistory() // stopping ends the process, not the transcript: the cursor stays good for a cold resume
         resetHistoryPaging() // #147
         pendingImages.clear()
         clearFileUploads()
