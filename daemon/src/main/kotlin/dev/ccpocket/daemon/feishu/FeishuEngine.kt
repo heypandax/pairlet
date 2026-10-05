@@ -70,6 +70,49 @@ internal suspend fun revokeAfterHandlerDrain(
     }
 }
 
+// Reply-slot bookkeeping for one ask() (audit F3). A conversation has ONE slot, but a request that outlived
+// ask()'s wait leaves its slot armed for the late result while the chat lock is already free — so the next
+// request on the same conversation installs over it. When that next request never reaches the agent (the
+// long turn still holds the conversation busy), the earlier slot is handed back instead of being dropped.
+// Callers hold the engine mutex.
+
+/** Install [mine] as [convoId]'s reply slot. Returns the slot it displaced when that one still owes a reply. */
+internal fun installReplySlot(
+    slots: MutableMap<String, FeishuEngine.ReplySlot>,
+    convoId: String,
+    mine: FeishuEngine.ReplySlot,
+): FeishuEngine.ReplySlot? = slots.put(convoId, mine)?.takeIf { !it.done }
+
+/** [mine]'s request never reached the agent: give the slot back to the request it displaced, if any. */
+internal fun restoreDisplacedReplySlot(
+    slots: MutableMap<String, FeishuEngine.ReplySlot>,
+    convoId: String,
+    mine: FeishuEngine.ReplySlot,
+    displaced: FeishuEngine.ReplySlot?,
+) {
+    if (slots[convoId] === mine && displaced != null && !displaced.done) slots[convoId] = displaced
+}
+
+/** ask()'s exit for [mine]: keep it while its sent request still owes a late reply, otherwise drop it — or,
+ *  when its request was never sent, restore the displaced one. Never touches a slot that isn't [mine]. */
+internal fun releaseReplySlot(
+    slots: MutableMap<String, FeishuEngine.ReplySlot>,
+    convoId: String,
+    mine: FeishuEngine.ReplySlot,
+    preserveLateReply: Boolean,
+    displaced: FeishuEngine.ReplySlot?,
+) {
+    if (slots[convoId] !== mine) return
+    when {
+        preserveLateReply && !mine.done -> {}
+        !preserveLateReply -> {
+            restoreDisplacedReplySlot(slots, convoId, mine, displaced)
+            if (slots[convoId] === mine) slots.remove(convoId)
+        }
+        else -> slots.remove(convoId)
+    }
+}
+
 /**
  * The Feishu event long-connection as the engine drives it — a seam so a test can stand in a link whose
  * [start] never returns, which is exactly what the SDK does while Feishu is unreachable.
@@ -221,7 +264,7 @@ class FeishuEngine internal constructor(
      *  归属门放行一切（等价旧行为）；非 null 时，只有拿到该 prompt 消费凭证之后的终态帧才允许结算它。
      *  [atUser]（#284）：群聊里这一轮的发起人 open_id，只在**完成回报**那一帖被拼成 @ 前缀；单聊为 null。
      *  存在槽位里而不是现算，是因为回报可能由分钟级之后的 late TurnDone 发出，那时 ask() 的栈早没了。 */
-    private data class ReplySlot(
+    internal data class ReplySlot(
         val target: FeishuReplyTarget,
         var done: Boolean = false,
         val promptId: String? = null,
@@ -1270,6 +1313,8 @@ class FeishuEngine internal constructor(
         var awaitingTerminalFrame = false
         var waiterInstalled = false
         var preserveLateReply = false
+        var mySlot: ReplySlot? = null
+        var displacedSlot: ReplySlot? = null
         try {
             // issue #285：为这条请求铸一个 promptId。它随 SendPrompt 进入会话的 prompt 账本，回复槽记住它，
             // 归属门（onFrame 的 TurnDone 分支）凭消费凭证把「遗留轮次的终态帧」和「这条请求的结果」分开。
@@ -1344,9 +1389,11 @@ class FeishuEngine internal constructor(
             val done = CompletableDeferred<TurnDone>()
             // #284: 只有群聊才需要 @ 定向（单聊本来就只发给他一个人），且 open_id 必须真的有值。
             val atUser = senderOpenId.takeIf { isGroup && it.isNotBlank() }
+            val slot = ReplySlot(replyTo, promptId = promptId, atUser = atUser)
+            mySlot = slot
             mutex.withLock {
                 turnWaiters[convoId] = done
-                replySlots[convoId] = ReplySlot(replyTo, promptId = promptId, atUser = atUser)
+                displacedSlot = installReplySlot(replySlots, convoId, slot)
             }
             // issue #285 的另一半窗口：遗留结算轮的终态帧若赶在槽位安装**之前**到达，上面的归属门看不到它
             // （expected==null 走了正常回收路径），释放任务已被武装——1 秒轮询的 closeIfIdle 会在我们的
@@ -1402,6 +1449,10 @@ class FeishuEngine internal constructor(
                 // the grant was minted but the hand-off lost a race (the conversation went busy) — the request
                 // is NOT running, and its permit/grant was consumed, so the requester must send it again.
                 // A reviewed pass is single-shot by the same rule: it may not be retried onto a later prompt.
+                // Audit F3: the turn keeping it busy may be an EARLIER request whose ask() gave up waiting
+                // (NUDGE_MS + TURN_TIMEOUT_MS) and left its slot armed for the late result — hand that slot
+                // back before anything else, or its result never reaches the chat.
+                mutex.withLock { restoreDisplacedReplySlot(replySlots, convoId, slot, displacedSlot) }
                 reply(
                     replyTo,
                     when {
@@ -1434,7 +1485,7 @@ class FeishuEngine internal constructor(
                     turnWaiters.remove(convoId)
                     // Once sent, preserve the slot for a late terminal frame unless it already posted. Before
                     // send, no late reply can arrive and the slot is discarded with the idle conversation.
-                    if (!preserveLateReply || replySlots[convoId]?.done == true) replySlots.remove(convoId)
+                    mySlot?.let { releaseReplySlot(replySlots, convoId, it, preserveLateReply, displacedSlot) }
                 }
             }
             if (!awaitingTerminalFrame) scheduleRelease(convoId)
