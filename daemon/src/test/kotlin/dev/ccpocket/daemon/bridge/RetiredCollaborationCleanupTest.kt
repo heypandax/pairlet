@@ -183,7 +183,7 @@ class RetiredCollaborationCleanupTest {
         restricted("dev-bridge", BridgeSpec("feishu-bot", listOf(ws.path)))
         restricted("dev-guest", BridgeSpec("guest", listOf(ws.path), kind = CredentialKind.GUEST, expiresAt = System.currentTimeMillis() + 3_600_000, tier = AccessTier.REVIEW))
         val ownerKeys = E2ECrypto.generateKeyPair()
-        harness.sessions.onMintedTicket("phone-ticket", headless = true) // headless: no #91 exclusion stamp
+        harness.sessions.onMintedTicket("phone-ticket") // interactive: the only kind that anchors a full-power device
         harness.sessions.onDevicePaired("owner-phone", b64.encodeToString(ownerKeys.publicRaw))
         exchange("owner-phone", assertNotNull(handshakeAs("owner-phone", ownerKeys, "phone-ticket")), ClientCaps())
         assertEquals(setOf("owner-phone"), PairedDevices.load(File(targetDir, "devices.json")).keys)

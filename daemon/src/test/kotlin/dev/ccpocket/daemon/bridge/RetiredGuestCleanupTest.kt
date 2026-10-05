@@ -163,7 +163,7 @@ class RetiredGuestCleanupTest {
         assertTrue(guestFirst.isEmpty(), "a guest's frame is refused and answered with nothing: $guestFirst")
         assertTrue(harness.bridges.isGuest(guestId), "precondition: the guest key is loaded (and refused)")
         val ownerKeys = E2ECrypto.generateKeyPair()
-        harness.sessions.onMintedTicket("phone-ticket", headless = true) // headless: no #91 exclusion stamp
+        harness.sessions.onMintedTicket("phone-ticket") // interactive: the only kind that anchors a full-power device
         harness.sessions.onDevicePaired("owner-phone", b64.encodeToString(ownerKeys.publicRaw))
         exchange("owner-phone", assertNotNull(handshakeAs("owner-phone", ownerKeys, "phone-ticket")), ClientCaps())
         val collabTombstones = setOf("dev-collab-1", "dev-collab-2")
