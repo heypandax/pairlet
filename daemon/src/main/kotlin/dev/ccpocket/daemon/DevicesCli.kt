@@ -122,6 +122,7 @@ private suspend fun LocalCmd.listDevices(client: LocalControlClient, json: Boole
     if (res.items.isEmpty()) {
         echo("  No devices paired with full access. Pair one with: pairlet pair")
         echo("")
+        echoRevocationsPending(res.revocationsPending)
         return
     }
     echo("  DEVICE      FINGERPRINT               PAIRED          LAST HANDSHAKE")
@@ -141,6 +142,17 @@ private suspend fun LocalCmd.listDevices(client: LocalControlClient, json: Boole
     echo("  \"Computer fingerprint\". Compare all five groups. Revoke any row that isn't one of yours:")
     echo("      pairlet devices revoke <device id or fingerprint prefix>")
     echo("  (Bridges are listed by `pairlet bridges`; remote-execution links by `pairlet agent grant list`.)")
+    echo("")
+    echoRevocationsPending(res.revocationsPending)
+}
+
+/** Revoked devices are no longer listed (they can't connect), but until the relay confirms the revoke it isn't
+ *  completely done — say so, in one line, at the end. */
+private fun LocalCmd.echoRevocationsPending(n: Int) {
+    if (n <= 0) return
+    val (what, they) = if (n == 1) "1 revoked device is" to "it" else "$n revoked devices are" to "they"
+    echo("  $what still waiting for the relay to confirm the revoke — $they can no longer connect here,")
+    echo("  and the daemon asks the relay again each time it connects.")
     echo("")
 }
 

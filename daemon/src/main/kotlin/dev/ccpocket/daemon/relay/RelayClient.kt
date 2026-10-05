@@ -361,10 +361,14 @@ class RelayClient(
 
     suspend fun ownerDevices() = sessions.ownerDevices()
 
-    /** Revoke a FULL-POWER device: pruned locally NOW (devices.json, live relay session, and — through the
-     *  allow-list epoch — a live direct-LAN socket), then the relay is told so the device's credential dies there
-     *  too (queued across a reconnect, like every control frame). The same two halves as [revokeBridge].
-     *  False when [deviceId] is not a full-power device. */
+    /** Revoked devices whose revoke the relay has not confirmed yet (`pairlet devices` mentions them). */
+    fun revocationsPendingCount() = sessions.revocationsPendingCount()
+
+    /** Revoke a FULL-POWER device: tombstoned on disk and pruned locally NOW (devices.json, live relay session,
+     *  and — through the allow-list epoch — a live direct-LAN socket), then the relay is told so the device's
+     *  credential dies there too (queued across a reconnect, like every control frame; and, while the tombstone
+     *  stands, re-sent after every attach by [revokeRetiredCredentials] — so a restart in between loses nothing).
+     *  The same two halves as [revokeBridge]. False when [deviceId] is not a full-power device. */
     suspend fun revokeOwnerDevice(deviceId: String): Boolean {
         if (!sessions.revokeOwnerDevice(deviceId)) return false
         controlOutbox.send(dev.ccpocket.protocol.RevokeDevice(deviceId))
@@ -535,7 +539,8 @@ class RelayClient(
     /**
      * Retired credentials (2026-10): Collaborator Links (session handoff / review contacts), whose keys were
      * cleared at startup, and folder-share guests (#115), retired here first ([DeviceSessions.retireLegacyGuests]:
-     * tombstone, access-ended notice to an online guest, key cleared). Each one is still a live device in this
+     * tombstone, access-ended notice to an online guest, key cleared) — and every full-power device the owner
+     * revoked ([revokeOwnerDevice]) whose revoke the relay has not confirmed yet. Each one is still a live device in this
      * account at the relay until revoked there. Ask once per attach, after the relay's device set is known; the
      * relay confirms each with `DeviceRevoked` ([DeviceSessions.onRelayDeviceRevoked]) or leaves it out of its next
      * authoritative replay, and either removes the tombstone. Queued on the control outbox like every other control

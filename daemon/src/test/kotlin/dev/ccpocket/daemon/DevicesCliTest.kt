@@ -41,6 +41,8 @@ class DevicesCliTest {
         override suspend fun revoke(deviceId: String) = rows.removeIf { it.deviceId == deviceId }.also { if (it) revoked += deviceId }
         override suspend fun awaitPairing(pairingId: String, waitMs: Long) = outcome
         override fun pairingRemainingMs(pairingId: String) = 1_000L
+        var pending = 0
+        override fun revocationsPending() = pending
     }
 
     /** A loopback server shaped like PairLoopback: the guarded legacy `/pair` plus the owner-device routes. */
@@ -103,6 +105,31 @@ class DevicesCliTest {
             assertEquals(0, confirmed.statusCode, confirmed.output)
             assertEquals(listOf(first.deviceId), plane.revoked)
             assertTrue(PairingFingerprint.of(first.pub) in confirmed.output, confirmed.output)
+        }
+    }
+
+    @Test
+    fun devices_ends_with_the_revokes_still_waiting_for_the_relay() {
+        val plane = FakePlane().apply { rows += row("AAAAaaaa1111") }
+        serving(plane) { port ->
+            val none = devicesCommand().test(listOf("--pair-port", "$port"))
+            assertTrue("waiting for the relay" !in none.output, "nothing pending, nothing said: ${none.output}")
+
+            plane.pending = 2
+            val two = devicesCommand().test(listOf("--pair-port", "$port"))
+            assertEquals(0, two.statusCode, two.output)
+            val lines = two.output.trimEnd().lines()
+            assertTrue("2 revoked devices are still waiting for the relay to confirm the revoke" in lines[lines.size - 2], two.output)
+            assertTrue("asks the relay again each time it connects" in lines.last(), two.output)
+
+            // …also when no device is left at all (the owner just revoked the only one)
+            plane.rows.clear(); plane.pending = 1
+            val empty = devicesCommand().test(listOf("--pair-port", "$port"))
+            assertTrue("No devices paired with full access" in empty.output, empty.output)
+            assertTrue("1 revoked device is still waiting for the relay to confirm the revoke — it can no longer connect here" in empty.output, empty.output)
+            // and the JSON form carries the count
+            val json = devicesCommand().test(listOf("--pair-port", "$port", "--json"))
+            assertTrue("\"revocationsPending\":1" in json.output, json.output)
         }
     }
 

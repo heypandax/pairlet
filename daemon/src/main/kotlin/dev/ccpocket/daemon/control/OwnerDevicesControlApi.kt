@@ -38,6 +38,9 @@ data class LocalOwnerDevicesRes(
     /** [PairingFingerprint] of THIS computer's key — what the App shows as "Computer fingerprint". */
     val computerFingerprint: String,
     val items: List<LocalOwnerDevice> = emptyList(),
+    /** Revoked devices (no longer in [items], no longer able to connect) whose revoke the relay has not
+     *  confirmed yet; the daemon asks again each time it connects. 0 from a daemon that predates the field. */
+    val revocationsPending: Int = 0,
 )
 
 /** Revoke by EXACT device id; prefix / fingerprint matching and the confirmation happen in the CLI, against
@@ -69,6 +72,8 @@ interface OwnerDevicesPlane {
     suspend fun revoke(deviceId: String): Boolean
     suspend fun awaitPairing(pairingId: String, waitMs: Long): OwnerPairingWatch.Outcome
     fun pairingRemainingMs(pairingId: String): Long
+    /** Revoked devices still waiting for the relay to confirm. */
+    fun revocationsPending(): Int = 0
 }
 
 class OwnerDeviceRow(val deviceId: String, val pub: ByteArray, val pairedAt: Long?, val firstContactPending: Boolean)
@@ -79,6 +84,7 @@ fun ownerDevicesPlaneOf(relay: RelayClient): OwnerDevicesPlane = object : OwnerD
     override suspend fun revoke(deviceId: String) = relay.revokeOwnerDevice(deviceId)
     override suspend fun awaitPairing(pairingId: String, waitMs: Long) = relay.awaitOwnerPairing(pairingId, waitMs)
     override fun pairingRemainingMs(pairingId: String) = relay.ownerPairingRemainingMs(pairingId)
+    override fun revocationsPending() = relay.revocationsPendingCount()
 }
 
 /** Longest single wait `GET pairing/{id}` holds the connection; the CLI simply asks again. */
@@ -101,7 +107,13 @@ fun Route.installOwnerDevicesControl(plane: OwnerDevicesPlane, token: String) {
                 lastHandshakeAt = seen?.at, lastHandshakeVia = seen?.via, firstContactPending = d.firstContactPending,
             )
         }
-        call.ok(LocalOwnerDevicesRes.serializer(), LocalOwnerDevicesRes(computerFingerprint = PairingFingerprint.of(plane.computerPub), items = items))
+        call.ok(
+            LocalOwnerDevicesRes.serializer(),
+            LocalOwnerDevicesRes(
+                computerFingerprint = PairingFingerprint.of(plane.computerPub), items = items,
+                revocationsPending = plane.revocationsPending(),
+            ),
+        )
     }
 
     post("$LOCAL_CONTROL_PREFIX/devices/revoke") {

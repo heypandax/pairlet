@@ -221,7 +221,10 @@ object CollaboratorKeyStore {
 /**
  * Tombstones of retired restricted credentials, device ids ONLY — no key, no spec, no kind. Two retired
  * features share it: the Collaborator Link (session handoff / review contacts) and the folder-share GUEST
- * (#115), both retired 2026-10. An id stays here from the moment its key is cleared until the relay has
+ * (#115), both retired 2026-10. A full-power device the owner revoked (`pairlet devices revoke`) is
+ * tombstoned here too, from just before it leaves devices.json: the list carries no kind because every
+ * entry means the same thing — "the relay may still honour this id; never let it in until it confirms".
+ * An id stays here from the moment its key is cleared until the relay has
  * confirmed the credential is revoked, and for that whole time the daemon treats the id as KNOWN: a relay
  * announce for it is never armed with a pairing ticket, so it can never be written into the full-power
  * devices.json during someone's pairing window. Written atomically, owner-only.
