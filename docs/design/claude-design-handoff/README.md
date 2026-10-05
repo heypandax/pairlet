@@ -53,7 +53,7 @@
 | `first-run-connect-pair` | [First Run · Connect + Pair handoff（#278 批次 2 A＋B）](first-run-connect-pair/README.md) |
 | `first-run-send-to-computer-v1` | [First Run · Send to Computer v1 — 首启「把设置链接发到电脑」与演示的下一步](first-run-send-to-computer-v1/README.md)（评审不通过，不实现） |
 | `fleet` | [Fleet 多机并行（Mobile · Desktop）设计落地记录](fleet.md) |
-| `folder-share` | [文件夹级共享 — owner 邀请 / 管理 / guest 加入 / 终态（设计 handoff）](folder-share/README.md) |
+| `folder-share` | [文件夹级共享 — owner 邀请 / 管理 / guest 加入 / 终态（设计 handoff）](folder-share/README.md)（功能已于 2026-10-05 下线，见[案例集](../../DECLINED-REQUIREMENTS.md) D4；仅作设计史保留） |
 | `gauge-rhythm` | [占用环视觉节奏修正设计交付](gauge-rhythm/README.md) |
 | `git-panel-280` | [git-panel-280 设计交付（批次 4）](git-panel-280/README.md) |
 | `help-learning-discovery` | [CC Pocket 帮助、学习与功能发现](help-learning-discovery/README.md) |
@@ -72,8 +72,8 @@
 | `readme-site-control-plane-20260816` | [CC Pocket README 与官网 2.0：跨设备 Agent 控制面（设计交付归档）](readme-site-control-plane-20260816/README.md) |
 | `rewind-fork-282` | [rewind-fork-282 设计交付（批次 4）](rewind-fork-282/README.md) |
 | `session-archive` | [会话归档（Session Archive）— 设计 handoff](session-archive/README.md) |
-| `session-handoff-contacts` | [协作联系人（Collaborator Link ＋ 直接选人）— 设计 handoff](session-handoff-contacts/README.md) |
-| `session-handoff` | [Session Handoff（协作接力）— 设计 handoff](session-handoff/README.md) |
+| `session-handoff-contacts` | [协作联系人（Collaborator Link ＋ 直接选人）— 设计 handoff](session-handoff-contacts/README.md)（功能已于 2026-10-05 下线，见[案例集](../../DECLINED-REQUIREMENTS.md) D3；仅作设计史保留） |
+| `session-handoff` | [Session Handoff（协作接力）— 设计 handoff](session-handoff/README.md)（功能已于 2026-10-05 下线，见[案例集](../../DECLINED-REQUIREMENTS.md) D3；仅作设计史保留） |
 | `session-switcher` | [跨项目会话切换器（issue #165）](session-switcher/README.md) |
 | `settings-bridges-ui-2.1` | [Settings + Bridges UI 2.1 handoff](settings-bridges-ui-2.1/README.md) |
 | `sidebar-ia-usage` | [桌面端侧栏信息架构 v2＋订阅用量展示 —— claude design 交付（2026-08-24）](sidebar-ia-usage/README.md) |

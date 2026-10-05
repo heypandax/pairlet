@@ -19,7 +19,7 @@
 | 主题 | 文档与适用范围 |
 |---|---|
 | 审批 | [统一审批方案](APPROVAL-SYSTEM.md)、[风险评估子设计](SMART-APPROVAL.md) |
-| 协作 | [异步评审请求](REVIEW-REQUEST.md)、[运行时接力](SESSION-HANDOFF.md)、[接力实现复审](SESSION-HANDOFF-IMPLEMENTATION-REVIEW.md)、[飞书评审信任](FEISHU-REVIEWED-TRUST.md) |
+| 协作 | [飞书评审信任](FEISHU-REVIEWED-TRUST.md)；已于 2026-10-05 下线、仅作设计史保留（见[案例集](../DECLINED-REQUIREMENTS.md) D3）：[异步评审请求](REVIEW-REQUEST.md)、[运行时接力](SESSION-HANDOFF.md)、[接力实现复审](SESSION-HANDOFF-IMPLEMENTATION-REVIEW.md) |
 | 后端 | [Codex 多 Agent](CODEX-MULTI-AGENT.md)、[DSH ACP](DSH-ACP-TRANSPORT.md)、[DSH 提问桥接](DSH-ASK-BRIDGE.md)、[Kimi 设计](kimi-backend-design.md) |
 | 工作区 | [Git 面板](GIT-PANEL.md)、[Worktree](WORKTREE-MANAGEMENT.md)、[回退与 fork](REWIND-FORK.md)、[桌面分屏](SPLIT-PANES.md) |
 | 输入 | [语音输入](VOICE-INPUT.md)、[语音备忘总体方案](VOICE-MEMO-TO-TASK.md)、[代码设计](VOICE-MEMO-CODE-DESIGN.md)、[UI 交接](claude-design-handoff/voice-memo-tasks/README.md)（UI v2.1 已验收，旧 v1 稿不采用；实现状态以代码为准） |

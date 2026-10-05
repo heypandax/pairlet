@@ -1,3 +1,5 @@
+> **已下线**：本功能已于 2026-10-05 下线，见 [`docs/DECLINED-REQUIREMENTS.md`](../../../DECLINED-REQUIREMENTS.md) 的 D4；以下内容仅作设计史保留。
+
 # 文件夹级共享 — owner 邀请 / 管理 / guest 加入 / 终态（设计 handoff）
 
 > 原型存档：本目录只维护设计说明；文中的 HTML/JSX、截图、校验清单及预览命令对应[清理前原件](https://github.com/heypandax/pairlet/tree/a5e1b8687185052b1c51f5269f18d62b9b29b826/docs/design/claude-design-handoff/folder-share)，需从存档恢复后使用。实现状态以当前源码为准。

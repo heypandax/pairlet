@@ -1,3 +1,5 @@
+> **已下线**：本功能已于 2026-10-05 下线，见 [`docs/DECLINED-REQUIREMENTS.md`](../DECLINED-REQUIREMENTS.md) 的 D3；以下内容仅作设计史保留。
+
 # Session Handoff 实现复审与修复清单
 
 > 日期：2026-08-02

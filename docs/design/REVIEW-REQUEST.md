@@ -1,3 +1,5 @@
+> **已下线**：本功能已于 2026-10-05 下线，见 [`docs/DECLINED-REQUIREMENTS.md`](../DECLINED-REQUIREMENTS.md) 的 D3；以下内容仅作设计史保留。
+
 # ReviewRequest —— 任务上下文的异步协作评审
 
 > 状态：**M1 daemon + CLI + 内置 Skill 已实现；等待双机实网验收**
