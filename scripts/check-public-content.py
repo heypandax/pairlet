@@ -22,10 +22,11 @@ Two exclusions are deliberate and must stay:
   * This file names the prohibited features as PATTERNS. That is what a gate is; the patterns are
     what makes it work.
   * `docs/design/**` is the internal design handoff, `marketing/**` is the generation pipeline, and
-    the retained user-manual pages under `site/manual/{en,zh}/share-a-folder/` are kept for the
-    users who already rely on them. None of those are public promotional surfaces, so none of them
-    are scanned. The manual pages must instead be `noindex` and absent from every public index —
-    scripts/check-site-seo.py enforces the sitemap half of that.
+    `site/manual/{en,zh}/share-a-folder/` are hand-written landing pages that only say the retired
+    feature is gone, so old in-app help links and bookmarks do not 404. The article itself was
+    removed from manual-content.json. None of those are public promotional surfaces, so none of
+    them are scanned. The landing pages must instead be `noindex` and absent from every public
+    index — scripts/check-site-seo.py enforces the sitemap half of that.
 
 Usage: python3 scripts/check-public-content.py  ->  exit 0 all green, exit 1 otherwise
 """
