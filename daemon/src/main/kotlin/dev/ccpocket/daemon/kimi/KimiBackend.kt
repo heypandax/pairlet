@@ -90,7 +90,7 @@ class KimiBackend(
             override suspend fun onSessionOpened(sessionId: String, result: JsonObject?) = sessionOpened(sessionId)
             override fun onUpdate(update: JsonObject) = handleUpdate(update)
             override fun permissionCard(params: JsonObject?) = approvalCard(params)
-            override fun onSyntheticFrame(type: String?, root: JsonObject) = taskSettled(type, root)
+            override suspend fun onSyntheticFrame(type: String?, root: JsonObject) = taskSettled(type, root)
         },
     )
 

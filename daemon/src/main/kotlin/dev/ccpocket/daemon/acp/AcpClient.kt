@@ -106,7 +106,7 @@ class AcpClient(
         suspend fun onErrorResponse(id: Long?, why: String): List<AgentEvent>? = null
 
         /** A synthetic frame of the host's own (one it injected); null when [type] is not the host's. */
-        fun onSyntheticFrame(type: String?, root: JsonObject): List<AgentEvent>? = null
+        suspend fun onSyntheticFrame(type: String?, root: JsonObject): List<AgentEvent>? = null
     }
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -349,6 +349,14 @@ class AcpClient(
         val stranded = prompts.drain()
         return if (stranded.isEmpty()) acpErrorEvents(message) else stranded.flatMap { acpErrorTurn(it.text, message) }
     }
+
+    /**
+     * A startup stage of the HOST's own failed — one it runs between the session opening and the prompt gate
+     * (dsh applies the launch-time model/effort there). The same terminal settlement as [failStartup]: every
+     * waiting prompt gets its error turn, later ones are refused with the message, nothing is retried. On the
+     * parse pump (the events are returned).
+     */
+    suspend fun failHostStartup(stage: String, why: String): List<AgentEvent> = failStartup(stage, why)
 
     /** [failStartup] for the watchdog, which is not on the parse pump: the same settlement, delivered through
      *  [AgentIo.inject] (only the pump may return events). */

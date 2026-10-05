@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -96,6 +97,8 @@ class DshBackend(
     private val dshBin: String?,
     private val catalog: DshCatalog = DshCatalog,
     private val sessionsRoot: () -> Path = DshPaths::sessionsRoot,
+    /** How long one `session/set_config_option` may go unanswered — see [watchConfig]. Injectable for tests. */
+    private val configTimeoutMs: Long = CONFIG_TIMEOUT_MS,
 ) : AgentBackend {
     private val log = logger("DshBackend")
 
@@ -147,6 +150,8 @@ class DshBackend(
                 configIds.remove(id)?.let { onConfigApplied(it, result) }
             override suspend fun onErrorResponse(id: Long?, why: String) =
                 configIds.remove(id ?: -1)?.let { onConfigFailed(it, why) }
+            override suspend fun onSyntheticFrame(type: String?, root: JsonObject) =
+                if (type == CONFIG_TIMEOUT_TYPE) onConfigTimedOut(root.long("id")) else null
         },
     )
 
@@ -387,11 +392,45 @@ class DshBackend(
     private suspend fun sendConfig(sid: String, write: ConfigWrite) {
         val id = client.rpc.nextId()
         configIds[id] = write
+        scope?.launch { watchConfig(id) }
         client.rpc.send(id, "session/set_config_option", buildJsonObject {
             put("sessionId", sid)
             put("configId", write.configId) // NOT optionId (fact 3)
             put("value", write.value)
         })
+    }
+
+    /**
+     * A config write that never answers would hold the prompt gate shut forever — the launch chain opens it only
+     * on the LAST write's response — leaving the opening prompt parked with no error and no terminal state. The
+     * same bounded wait as the handshake watchdog, on the same per-process scope (a relaunch cancels it). The
+     * verdict is delivered through the pump ([CONFIG_TIMEOUT_TYPE] → [onConfigTimedOut]) so it is ordered with
+     * the real answer: whichever reaches the pump first claims the write.
+     */
+    private suspend fun watchConfig(id: Long) {
+        delay(configTimeoutMs)
+        if (!configIds.containsKey(id)) return // answered in time
+        client.io?.inject?.invoke(
+            buildJsonObject { put("type", CONFIG_TIMEOUT_TYPE); put("id", id) }.toString(),
+        )
+    }
+
+    /**
+     * On the pump: [id] got no answer in time. A USER-driven switch is reported like a refused one and the chain
+     * moves on (the session is already running on a model the user saw announced). A LAUNCH-time write fails the
+     * session open instead: carrying on would run the opening turn on dsh's default model while the user believes
+     * their pick is in effect — so the waiting prompts are settled with an error naming the stage, and later ones
+     * are refused with it until a relaunch.
+     */
+    private suspend fun onConfigTimedOut(id: Long?): List<AgentEvent> {
+        val write = id?.let { configIds.remove(it) } ?: return emptyList() // already answered, or a previous process
+        val what = if (write.configId == DshConfigOptions.MODEL) "the model" else "the reasoning effort"
+        val why = "the DeepSeek Harness did not answer the request to set $what (${write.value}) " +
+            "within ${configTimeoutMs / 1000} s"
+        log.warn("dsh set_config_option(${write.configId}=${write.value}) unanswered after ${configTimeoutMs}ms")
+        if (write.announce) return onConfigFailed(write, why)
+        pendingConfig.clear()
+        return client.failHostStartup(STAGE_CONFIG, why)
     }
 
     /** dsh answers a config write with the COMPLETE resulting state — that read-back, never our request,
@@ -590,5 +629,16 @@ class DshBackend(
         /** Handshake watchdog: generous, because a cold Node start plus the profile compose can take a few
          *  seconds on a slow machine, and a false accusation of "your dsh is too old" is worse than waiting. */
         const val HANDSHAKE_TIMEOUT_MS = 30_000L
+
+        /** One config write's bound — the handshake watchdog's, for the same reason: a slow machine must not be
+         *  accused, and a `set_config_option` is a cheaper round trip than the handshake it follows. */
+        const val CONFIG_TIMEOUT_MS = HANDSHAKE_TIMEOUT_MS
+
+        /** The launch-time model/effort never landed: the session was not started on the user's choice. */
+        const val STAGE_CONFIG = "could not apply the chosen model settings to the DeepSeek Harness session — " +
+            "nothing was sent on a different model"
+
+        /** The pump-bound verdict of [watchConfig] (namespaced like [dev.ccpocket.daemon.acp.AcpSynthetic]'s). */
+        const val CONFIG_TIMEOUT_TYPE = "cc-pocket/dsh-config-timeout"
     }
 }
