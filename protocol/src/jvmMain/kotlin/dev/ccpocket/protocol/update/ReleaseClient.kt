@@ -30,7 +30,8 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The JVM half of the self-update plumbing shared by the daemon and the desktop app: read the latest GitHub
- * release (version + asset download URLs), fetch an asset, and verify it against the release's SHA256SUMS.
+ * release (version + asset download URLs), fetch an asset, and verify it — against the release's SHA256SUMS
+ * while no release key is configured, against the signed release manifest once one is ([verifyDownload]).
  * Both binaries publish under the same repo with one SHA256SUMS over every asset, so this reads identically
  * for either — the only thing that differs is which asset name each downloads (a daemon tarball vs a desktop
  * dmg/msi), which the caller decides. Kept dependency-light (java.net.http only) so pulling it into the
@@ -79,14 +80,17 @@ object ReleaseClient {
     }
 
     /** Parse the mirror's `latest.json` (`{"version":"1.6.2","assets":{"<name>":"<url>",…}}`).
-     *  Null on any shape mismatch, so a broken/foreign body degrades to the GitHub path. */
+     *  Null on any shape mismatch — including a version that is not a plain release version (it becomes a
+     *  directory name on install, so `..` or a separator never gets that far) — so a broken/foreign body
+     *  degrades to the GitHub path. */
     internal fun parseManifest(body: String): Release? = try {
         val obj = json.parseToJsonElement(body) as? JsonObject
         val version = (obj?.get("version") as? JsonPrimitive)?.contentOrNull?.removePrefix("v")
         val assets = (obj?.get("assets") as? JsonObject)?.mapNotNull { (name, url) ->
             ((url as? JsonPrimitive)?.contentOrNull)?.let { name to it }
         }?.toMap()
-        if (version.isNullOrBlank() || assets.isNullOrEmpty()) null else Release(version, assets)
+        if (version == null || !ReleaseSignature.isValidVersion(version) || assets.isNullOrEmpty()) null
+        else Release(version, assets)
     } catch (_: Exception) {
         null
     }
@@ -108,7 +112,7 @@ object ReleaseClient {
                     val url = (a["browser_download_url"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
                     name to url
                 }.toMap()
-                Release(tag.removePrefix("v"), assets)
+                tag.removePrefix("v").takeIf(ReleaseSignature::isValidVersion)?.let { Release(it, assets) }
             }
         }
     } catch (_: Exception) {
@@ -325,5 +329,58 @@ object ReleaseClient {
             "checksum mismatch for $asset\n  expected $expected\n  actual   $actual\n(corrupted download or tampered artifact — aborting)"
         }
         return true
+    }
+
+    /**
+     * The single verification entry point for a downloaded update ([file], published as [asset]).
+     *
+     * - [trustedKeys] EMPTY — NOT CONFIGURED (the state of this tree until the owner adds a release key):
+     *   exactly [verifyAgainstSums], unchanged — same fail-open on a missing SHA256SUMS entry, same return.
+     * - [trustedKeys] non-empty — ENFORCED: fetch the release's signed manifest + signature from the SAME
+     *   asset map (mirror or GitHub alike), then [ReleaseSignature.verify]. SHA256SUMS is never consulted.
+     *   Any failure throws [ReleaseSignature.RejectedException]; returns true only when everything verified.
+     *
+     * [currentVersion] is the running version: the signed manifest must be strictly newer (no downgrade).
+     * [highWaterFile] (ENFORCED only; untouched otherwise) remembers the newest manifest accepted so far and
+     * refuses anything older ([ReleaseHighWater]); null disables that memory (tests).
+     */
+    fun verifyDownload(
+        release: Release,
+        asset: String,
+        file: Path,
+        currentVersion: String,
+        onSkip: (String) -> Unit = {},
+        trustedKeys: List<String> = ReleaseTrustedKeys.KEYS,
+        highWaterFile: Path? = null,
+    ): Boolean {
+        if (trustedKeys.isEmpty()) return verifyAgainstSums(release, asset, file, onSkip)
+        val manifest = release.assetUrls[ReleaseSignature.MANIFEST_ASSET]
+            ?.let { fetchBounded(it, ReleaseSignature.MAX_MANIFEST_BYTES) }
+        val signature = release.assetUrls[ReleaseSignature.SIGNATURE_ASSET]
+            ?.let { fetchBounded(it, ReleaseSignature.MAX_SIGNATURE_BYTES) }
+        val mark = highWaterFile?.let { ReleaseHighWater.read(it, onSkip) }
+        val verified = ReleaseSignature.verifyManifest(manifest, signature, trustedKeys, release.version, currentVersion, mark)
+        // authentic and current: remember it even if this download turns out not to match, so an older
+        // signed release (e.g. the pre-hotfix manifest of the same version) is refused from now on
+        highWaterFile?.let { ReleaseHighWater.raise(it, mark, verified, onSkip) }
+        ReleaseSignature.checkAsset(verified, asset, sha256(file))
+        return true
+    }
+
+    /** GET [url] into memory, at most [limit] bytes. Null on a non-200, an oversized body or any I/O error:
+     *  in ENFORCED mode "could not fetch" and "not published" both refuse the update. */
+    private fun fetchBounded(url: String, limit: Int): ByteArray? = try {
+        val req = HttpRequest.newBuilder(URI(url)).header("User-Agent", "cc-pocket")
+            .timeout(Duration.ofSeconds(30)).build()
+        val res = http.send(req, HttpResponse.BodyHandlers.ofInputStream())
+        res.body().use { body ->
+            if (res.statusCode() != 200) null
+            else body.readNBytes(limit + 1).takeIf { it.size <= limit }
+        }
+    } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        null
+    } catch (_: Exception) {
+        null
     }
 }

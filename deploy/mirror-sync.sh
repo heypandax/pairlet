@@ -12,15 +12,26 @@
 #                       GitHub URL, so a Release parsed from here is interchangeable with one from
 #                       the GitHub API regardless of mirror scope (desktop updater included).
 #   dl/<tag>/<asset>    mirrored artifacts + SHA256SUMS (verified against GitHub before going live)
+#                       + release-manifest.json / .sig copied byte for byte when the release is signed
 #   dl/install.sh|.ps1  the one-line installers (raw.githubusercontent is slow/blocked in CN too)
 # latest.json is written LAST and atomically — it never references a half-mirrored version.
+#
+# Signed releases (docs/RELEASE.md「更新包签名」): the mirror holds no key and verifies no signature — the
+# clients do. It only carries the manifest + signature unchanged, refuses a half-signed release (one file
+# without the other), and refuses to serve a daemon artifact whose SHA256SUMS hash disagrees with the
+# manifest. MIRROR_REQUIRE_SIGNATURE=1 (set once signing is enforced) also refuses an unsigned release;
+# the default 0 keeps mirroring unsigned releases exactly as before.
 set -euo pipefail
 
 REPO="heypandax/cc-pocket"
-DEST="/var/www/cc-pocket-dl"
+DEST="${MIRROR_DEST:-/var/www/cc-pocket-dl}"          # overridable for the offline test only
 BASE_URL="https://pocket.ark-nexus.cc/dl"
 KEEP=2                                                # version dirs to retain
 MIRROR_RE='^cc-pocket-daemon-.*\.(tar\.gz|zip)$'      # daemon artifacts; SHA256SUMS handled explicitly
+MANIFEST="release-manifest.json"
+MANIFEST_SIG="release-manifest.json.sig"
+MANIFEST_SCHEMA="pairlet-release-manifest/1"
+REQUIRE_SIGNATURE="${MIRROR_REQUIRE_SIGNATURE:-0}"
 
 mkdir -p "$DEST"
 exec 9>"$DEST/.lock"; flock -n 9 || { echo "another sync is running"; exit 0; }
@@ -40,11 +51,37 @@ sums_url="$(jq -r '.assets[] | select(.name=="SHA256SUMS") | .browser_download_u
 [ -n "$sums_url" ] || { echo "release $tag has no SHA256SUMS — refusing to mirror unverifiable assets"; exit 1; }
 curl -fsSL --max-time 60 "$sums_url" -o "$tmp/SHA256SUMS"
 
+# The signed manifest is re-fetched every run too (a hotfix re-signs it under the same tag).
+manifest_url="$(jq -r --arg n "$MANIFEST" '.assets[] | select(.name==$n) | .browser_download_url' <<<"$api" | head -1)"
+sig_url="$(jq -r --arg n "$MANIFEST_SIG" '.assets[] | select(.name==$n) | .browser_download_url' <<<"$api" | head -1)"
+signed=0
+if [ -n "$manifest_url" ] && [ -n "$sig_url" ]; then
+  curl -fsSL --max-time 60 "$manifest_url" -o "$tmp/$MANIFEST"
+  curl -fsSL --max-time 60 "$sig_url" -o "$tmp/$MANIFEST_SIG"
+  jq -e --arg v "$ver" --arg s "$MANIFEST_SCHEMA" '.schema == $s and .version == $v and (.assets | type == "object")' \
+    "$tmp/$MANIFEST" >/dev/null 2>&1 ||
+    { echo "release $tag: $MANIFEST is not a $MANIFEST_SCHEMA manifest for $ver — refusing to mirror"; exit 1; }
+  [ -s "$tmp/$MANIFEST_SIG" ] || { echo "release $tag: $MANIFEST_SIG is empty — refusing to mirror"; exit 1; }
+  signed=1
+elif [ -n "$manifest_url" ] || [ -n "$sig_url" ]; then
+  echo "release $tag has only one of $MANIFEST / $MANIFEST_SIG — refusing to mirror a half-signed release"; exit 1
+elif [ "$REQUIRE_SIGNATURE" = "1" ]; then
+  echo "release $tag has no $MANIFEST / $MANIFEST_SIG and MIRROR_REQUIRE_SIGNATURE=1 — refusing to mirror an unsigned release"; exit 1
+else
+  echo "note: release $tag is unsigned (no $MANIFEST) — mirrored without one, as before"
+fi
+
 mkdir -p "$vdir"
 while IFS=$'\t' read -r name url; do
   [[ "$name" =~ $MIRROR_RE ]] || continue
   expected="$(awk -v a="$name" '$2==a || $2=="*"a {print tolower($1)}' "$tmp/SHA256SUMS" | head -1)"
   [ -n "$expected" ] || { echo "skip $name (no SHA256SUMS entry)"; continue; }
+  if [ "$signed" = 1 ]; then
+    # never serve bytes the signed manifest does not vouch for (e.g. SUMS refreshed before a re-sign landed)
+    signed_sha="$(jq -r --arg a "$name" '.assets[$a].sha256 // empty' "$tmp/$MANIFEST")"
+    [ "$signed_sha" = "$expected" ] ||
+      { echo "release $tag: $name is ${signed_sha:-not listed} in $MANIFEST but $expected in SHA256SUMS — refusing to mirror"; exit 1; }
+  fi
   if [ -f "$vdir/$name" ] && [ "$(sha256sum "$vdir/$name" | awk '{print tolower($1)}')" = "$expected" ]; then
     continue  # already mirrored and still matches the (possibly refreshed) sums
   fi
@@ -62,13 +99,20 @@ while IFS=$'\t' read -r name url; do
   mv -f "$part" "$vdir/$name"
 done < <(jq -r '.assets[] | [.name, .browser_download_url] | @tsv' <<<"$api")
 mv -f "$tmp/SHA256SUMS" "$vdir/SHA256SUMS"
+if [ "$signed" = 1 ]; then
+  mv -f "$tmp/$MANIFEST" "$vdir/$MANIFEST"
+  mv -f "$tmp/$MANIFEST_SIG" "$vdir/$MANIFEST_SIG"
+else
+  rm -f "$vdir/$MANIFEST" "$vdir/$MANIFEST_SIG"  # never leave an old signature beside refreshed assets
+fi
 
 # latest.json: complete asset map (mirrored → this host, the rest → GitHub), swapped in atomically
 jq -n --arg ver "$ver" --arg tag "$tag" --arg base "$BASE_URL" --arg re "$MIRROR_RE" \
+  --arg m "$MANIFEST" --arg s "$MANIFEST_SIG" --arg signed "$signed" \
   --argjson assets "$(jq '[.assets[] | {name, url: .browser_download_url}]' <<<"$api")" '
   {version: $ver,
    assets: ($assets | map(
-     if (.name | test($re)) or .name == "SHA256SUMS"
+     if (.name | test($re)) or .name == "SHA256SUMS" or ($signed == "1" and (.name == $m or .name == $s))
      then {(.name): ($base + "/" + $tag + "/" + .name)}
      else {(.name): .url} end) | add)}' > "$tmp/latest.json"
 # sanity: every asset latest.json claims we host must actually be on disk (a skipped/missing file

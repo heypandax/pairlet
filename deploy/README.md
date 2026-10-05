@@ -58,7 +58,10 @@ WebSocket endpoints (proxied automatically): `/v1/daemon`, `/v1/device`. REST: `
   shared `ReleaseClient`) read `dl/latest.json` first and fall back to GitHub. Provision /
   re-provision with `bash scripts/provision-relay-mirror.sh`; after cutting a release you can kick
   an immediate sync with `systemctl start cc-pocket-mirror-sync.service` instead of waiting for
-  the timer.
+  the timer. Signed releases: the mirror copies `release-manifest.json` + `.sig` byte for byte (it
+  holds no key; clients verify), refuses half-signed or SHA256SUMS-inconsistent releases, and with
+  `MIRROR_REQUIRE_SIGNATURE=1` in the unit also refuses unsigned ones — see docs/RELEASE.md
+  「更新包签名」. Changes to `mirror-sync.sh` or its unit only take effect after re-provisioning.
 
 ## Analytics ingress (optional)
 

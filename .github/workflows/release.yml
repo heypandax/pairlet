@@ -39,6 +39,10 @@ on:
         description: "Only run the Harmony job against an existing release (implies include_harmony): attaches the signed HAP + retains the AGC App Pack, then regenerates SHA256SUMS. Skips every other platform job so their published assets (and the Homebrew cask / Scoop sha256 pins) stay byte-identical. Must still be dispatched from the release tag."
         type: boolean
         default: false
+      allow_unvouched:
+        description: "Signed release manifest only: also sign assets that neither this run built nor an earlier signed manifest of this release lists (their hash would come from the downloaded copy alone). Leave off unless sign-manifest refused and you have checked the listed files — e.g. the first signing of an existing release. See docs/RELEASE.md「更新包签名」."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -170,6 +174,22 @@ jobs:
           echo "sha256: $(shasum -a 256 "$ARTIFACT" | awk '{print $1}')"
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
 
+      # Build-time sha256 of exactly what was uploaded, for the signed release manifest (sign-manifest job).
+      # Best effort: a missing record only weakens that job's cross-check, it never fails the release.
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        env:
+          VER: ${{ inputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: mkdir -p release-hashes && shasum -a 256 "cc-pocket-daemon-${VER}-macos-${ARCH}.tar.gz" > "release-hashes/macos-${ARCH}.sha256"
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hashes-macos-${{ matrix.arch }}
+          path: release-hashes/
+          retention-days: 7
+
   windows:
     needs: preflight
     if: ${{ !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony && !inputs.only_linux_desktop }}
@@ -207,6 +227,20 @@ jobs:
           $sha = (Get-FileHash -Algorithm SHA256 $artifact).Hash.ToLower()
           Write-Host "sha256: $sha"
           gh release upload "v${{ inputs.version }}" $artifact --clobber
+
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        shell: bash
+        env:
+          VER: ${{ inputs.version }}
+        run: mkdir -p release-hashes && sha256sum "cc-pocket-daemon-${VER}-windows-x86_64.zip" > release-hashes/windows.sha256
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hashes-windows
+          path: release-hashes/
+          retention-days: 7
 
   linux:
     needs: preflight
@@ -255,6 +289,20 @@ jobs:
           ARTIFACT="cc-pocket-daemon-${{ inputs.version }}-linux-${{ matrix.arch }}.tar.gz"
           echo "sha256: $(sha256sum "$ARTIFACT" | awk '{print $1}')"
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
+
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        env:
+          VER: ${{ inputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: mkdir -p release-hashes && sha256sum "cc-pocket-daemon-${VER}-linux-${ARCH}.tar.gz" > "release-hashes/linux-${ARCH}.sha256"
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hashes-linux-${{ matrix.arch }}
+          path: release-hashes/
+          retention-days: 7
 
   android:
     needs: preflight
@@ -344,6 +392,17 @@ jobs:
           cp "$SRC" "$ARTIFACT"
           echo "sha256: $(sha256sum "$ARTIFACT" | awk '{print $1}')"
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
+
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        run: mkdir -p release-hashes && sha256sum cc-pocket-android.apk > release-hashes/android.sha256
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hashes-android
+          path: release-hashes/
+          retention-days: 7
 
   macos-desktop:
     needs: preflight
@@ -457,6 +516,25 @@ jobs:
           cp "$VERSIONED" "${PREFIX}-macos-${ARCH}.dmg"
           gh release upload "v${VER}" "$VERSIONED" "${PREFIX}-macos-${ARCH}.dmg" --clobber
 
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        env:
+          VER: ${{ inputs.version }}
+          ARCH: ${{ matrix.arch }}
+          PREFIX: ${{ matrix.asset_prefix }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          mkdir -p release-hashes
+          shasum -a 256 "${PREFIX}-${VER}-macos-${ARCH}.dmg" "${PREFIX}-macos-${ARCH}.dmg" \
+            > "release-hashes/macos-desktop-${VARIANT}-${ARCH}.sha256"
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hashes-macos-desktop-${{ matrix.variant }}-${{ matrix.arch }}
+          path: release-hashes/
+          retention-days: 7
+
   windows-desktop:
     needs: preflight
     # The Compose Desktop APP (.msi installer) for Windows, attached to the release under a stable version-less
@@ -525,6 +603,18 @@ jobs:
           [ -n "$MSI" ] || { echo "::error::no MSI produced (WiX missing?)"; exit 1; }
           cp "$MSI" cc-pocket-desktop-windows-x86_64.msi
           gh release upload "v${{ inputs.version }}" cc-pocket-desktop-windows-x86_64.msi --clobber
+
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        shell: bash
+        run: mkdir -p release-hashes && sha256sum cc-pocket-desktop-windows-x86_64.msi > release-hashes/windows-desktop.sha256
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hashes-windows-desktop
+          path: release-hashes/
+          retention-days: 7
 
   linux-desktop:
     needs: preflight
@@ -626,6 +716,25 @@ jobs:
             echo "sha256: $(sha256sum "$asset" | awk '{print $1}')  $asset"
           done
           gh release upload "v$VER" "${ASSETS[@]}" --clobber
+
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        env:
+          VER: ${{ inputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p release-hashes
+          # the same set the upload step published (the AppImage only when it was produced)
+          for f in "cc-pocket-desktop-${VER}-linux-${ARCH}".{deb,rpm,AppImage} "cc-pocket-desktop-linux-${ARCH}".{deb,rpm,AppImage}; do
+            if [ -f "$f" ]; then sha256sum "$f"; fi
+          done > "release-hashes/linux-desktop-${ARCH}.sha256"
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hashes-linux-desktop-${{ matrix.arch }}
+          path: release-hashes/
+          retention-days: 7
 
   harmony:
     needs: preflight
@@ -800,6 +909,21 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      # Build-time sha256 of the uploaded HAP for the signed release manifest (sign-manifest job). Runs after
+      # the signing material is wiped, like the step above; best effort, never fails the Harmony release.
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        run: |
+          mkdir -p release-hashes
+          (cd harmony/release && shasum -a 256 "cc-pocket-harmony-${RELEASE_VERSION}-signed.hap") > release-hashes/harmony.sha256
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-hashes-harmony
+          path: release-hashes/
+          retention-days: 7
+
   # Keep the Scoop bucket (heypandax/scoop-bucket) on the release we just published: without this the
   # manifest stays pinned to an old version forever (its checkver/autoupdate fields are inert — no
   # excavator runs on a personal bucket), which stranded every Windows user on 1.1.9 (issue #25).
@@ -863,6 +987,74 @@ jobs:
           mkdir assets && cd assets
           gh release download "v${{ inputs.version }}" --repo "${{ github.repository }}" --pattern '*'
           rm -f SHA256SUMS
+          # the signed manifest is rewritten by sign-manifest AFTER this job; listing it here would leave a
+          # stale entry that fails every later `sha256sum --check` (daemon hotfix backup step)
+          rm -f release-manifest.json release-manifest.json.sig
           sha256sum * > SHA256SUMS
           gh release upload "v${{ inputs.version }}" SHA256SUMS --clobber --repo "${{ github.repository }}"
           echo "──"; cat SHA256SUMS
+
+  # Signed release manifest (docs/RELEASE.md「更新包签名」): release-manifest.json lists the sha256 of every
+  # asset of the FINAL release (whatever this run's mode rebuilt plus everything it left in place) and
+  # release-manifest.json.sig is its Ed25519 signature. Clients with a built-in release key install only what
+  # this signature covers. Hashes are cross-checked against the build jobs' records (assets rebuilt here) or
+  # the manifest this key signed earlier for the release (assets left in place); see release-manifest.py.
+  # Without the RELEASE_SIGNING_KEY secret this job only prints a warning — the rest of the release is
+  # unaffected. Runs in every mode, including only_android (which skips `checksums`).
+  # The key lives in the `release-signing` environment so its protection rules (allowed refs, required
+  # reviewers — configured by the owner in the repository settings) gate every use. An environment that does
+  # not exist yet is created by GitHub on first use WITHOUT protection; without the secret it only warns.
+  sign-manifest:
+    if: ${{ !cancelled() && !failure() }}
+    needs: [checksums, macos, windows, linux, android, macos-desktop, windows-desktop, linux-desktop, harmony]
+    runs-on: ubuntu-latest
+    environment: release-signing
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Is the release signing key configured?
+        id: key
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -n "$RELEASE_SIGNING_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect build-time sha256 records
+        if: steps.key.outputs.configured == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-hashes-*
+          path: build-hashes
+          merge-multiple: true
+
+      - name: Generate, sign and upload release-manifest.json for v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          VER: ${{ inputs.version }}
+          ALLOW_UNVOUCHED: ${{ inputs.allow_unvouched }}
+        run: |
+          mkdir -p assets
+          RELAX=()
+          if [ "$ALLOW_UNVOUCHED" = "true" ]; then RELAX=(--allow-unvouched); fi
+          if [ "${{ steps.key.outputs.configured }}" = "true" ]; then
+            gh release download "v$VER" --repo "$GITHUB_REPOSITORY" --pattern '*' --dir assets
+          else
+            # only to warn when an earlier signed manifest is now stale; absent on unsigned releases
+            gh release download "v$VER" --repo "$GITHUB_REPOSITORY" --pattern 'release-manifest.json' --dir assets 2>/dev/null || true
+          fi
+          # no key: prints the "NOT signed" warning and writes nothing
+          python3 scripts/release-manifest.py ci-sign --version "$VER" --asset-dir assets \
+            --build-hashes-dir build-hashes --out-dir signed "${RELAX[@]}"
+          if [ -f signed/release-manifest.json.sig ]; then
+            gh release upload "v$VER" signed/release-manifest.json signed/release-manifest.json.sig \
+              --clobber --repo "$GITHUB_REPOSITORY"
+            # read back what is now public and compare byte for byte with what was just verified
+            gh release download "v$VER" --repo "$GITHUB_REPOSITORY" --pattern 'release-manifest.json*' --dir readback
+            cmp signed/release-manifest.json readback/release-manifest.json
+            cmp signed/release-manifest.json.sig readback/release-manifest.json.sig
+          fi
