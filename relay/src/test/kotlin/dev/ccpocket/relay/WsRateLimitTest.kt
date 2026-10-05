@@ -26,7 +26,9 @@ class WsRateLimitTest {
 
     /** A socket that is turned away before authenticating (wrong first frame). */
     private fun RelayWsHarness.Peer.junk(): String {
-        sendControl(Ping(0))
+        // a socket refused as rate_limited is closed by the relay right after the upgrade; on Linux the close can
+        // land before this send, which then fails with "Output closed" — the close reason is what matters
+        runCatching { sendControl(Ping(0)) }
         return closed.get(5, TimeUnit.SECONDS).reason
     }
 
