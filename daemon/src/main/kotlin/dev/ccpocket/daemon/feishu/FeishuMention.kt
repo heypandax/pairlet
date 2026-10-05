@@ -24,4 +24,22 @@ internal object FeishuMention {
         if (id.isEmpty()) return text
         return "<at user_id=\"$id\"></at> $text"
     }
+
+    enum class GroupGate { ACCEPT, DROP, AWAIT_IDENTITY }
+
+    /**
+     * 群消息是否是发给机器人的（审计 F7）。没有 @ 一律不是；知道自己的 open_id 时只认 @ 了自己的；
+     * 还不知道时**不猜**——以前退化成「任意 @ 都算」，「@同事 看下」在完全信任的群里会被直接执行。
+     * 交给调用方等身份到手后再判（[AWAIT_IDENTITY]），而不是当场丢掉，免得启动瞬间的正常消息被吞。
+     */
+    fun groupGate(mentionedOpenIds: List<String?>, botOpenId: String?): GroupGate = when {
+        mentionedOpenIds.isEmpty() -> GroupGate.DROP
+        botOpenId == null -> GroupGate.AWAIT_IDENTITY
+        mentionedOpenIds.any { it == botOpenId } -> GroupGate.ACCEPT
+        else -> GroupGate.DROP
+    }
+
+    /** 取 open_id 失败后第 [attempt] 次（0 起）重试前的等待：5s 起翻倍，封顶 5 分钟。 */
+    fun botIdentityRetryDelayMs(attempt: Int): Long =
+        (5_000L shl attempt.coerceIn(0, 6)).coerceAtMost(5 * 60_000L)
 }

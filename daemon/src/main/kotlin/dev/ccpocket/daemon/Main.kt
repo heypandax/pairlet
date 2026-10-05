@@ -324,7 +324,9 @@ internal class RunCmd(
                 env = System.getenv("CC_POCKET_AUTO_UPDATE"),
                 pref = prefs.autoUpdate,
             )
-            dev.ccpocket.daemon.update.UpdateChecker.start(relayClient, auto)
+            dev.ccpocket.daemon.update.UpdateChecker.start(relayClient, auto) {
+                runBlocking { core.registry.hasActiveWork() }
+            }
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }
         } else {

@@ -960,6 +960,12 @@ class SessionRegistry(
         return hits.size
     }
 
+    /** Is any conversation doing or awaiting work that a daemon exit would destroy? The same keep-alive
+     *  predicate the reaper and closeIfIdle use ([Conversation.isBusy]): a streaming turn, a queued prompt,
+     *  running background jobs, an unanswered permission/question/bridge-request card, or the bounded
+     *  continuation grace. The auto-update gate (UpdateChecker) defers its restart while this holds. */
+    suspend fun hasActiveWork(): Boolean = mutex.withLock { convos.values.any { it.isBusy() } }
+
     /** cwds of live conversations with running background work — kept "active" in the project list even when idle. */
     suspend fun busyCwds(): Set<String> =
         mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.map { it.workdir.toString() }.toSet() }

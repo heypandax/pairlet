@@ -48,6 +48,16 @@ import kotlin.random.Random
 import io.ktor.websocket.Frame as WsFrame
 
 /**
+ * Start the autostart-marked managed adapters without holding up the relay loop (audit F1). An adapter's
+ * start() is blocking code — the Feishu SDK's one can sit in its reconnect loop until Feishu is reachable —
+ * and [RelayClient.run] lives on Main's single `runBlocking` thread, so a plain sibling `launch` would still
+ * freeze connectOnce(). Off that thread, a stuck adapter delays only itself.
+ */
+internal fun kotlinx.coroutines.CoroutineScope.launchBridgeAutostart(
+    runners: dev.ccpocket.daemon.bridge.BridgeRunners,
+): kotlinx.coroutines.Job = launch(kotlinx.coroutines.Dispatchers.IO) { runners.startAutostarted() }
+
+/**
  * The daemon's outbound connection to the cloud relay. Authenticates by signing the relay's challenge
  * with its Ed25519 static key, then runs end-to-end-encrypted [DeviceSessions] over the opaque BINARY
  * data plane (the relay only routes ciphertext) and a small TEXT control plane for pairing.
@@ -312,7 +322,7 @@ class RelayClient(
         }
         // Managed adapters come up only once the relay link exists: an external adapter started earlier
         // would just burn its redeem attempts against a daemon that can't yet carry its handshake.
-        bridgeRunners.startAutostarted()
+        launchBridgeAutostart(bridgeRunners)
         launch { reaperLoop() } // reclaim sessions abandoned while the phone is offline
         launch { guestExpiryLoop() } // cut + purge folder shares the instant they expire (issue #115 §6)
         val reconnect = ReconnectBackoff()
