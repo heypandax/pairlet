@@ -1,8 +1,10 @@
 package dev.ccpocket.daemon.dsh
 
+import dev.ccpocket.daemon.acp.AcpApprovals
 import dev.ccpocket.daemon.acp.AcpPrompt
 import dev.ccpocket.daemon.acp.AcpPromptFifo
 import dev.ccpocket.daemon.acp.AcpRpc
+import dev.ccpocket.daemon.acp.AcpSynthetic
 import dev.ccpocket.daemon.acp.acpErrorEvents
 import dev.ccpocket.daemon.acp.acpErrorTurn
 import dev.ccpocket.daemon.acp.acpImageRefusal
@@ -164,11 +166,10 @@ class DshBackend(
      *  can render a card a human can decide on. */
     private val toolCalls = ConcurrentHashMap<String, ToolInfo>()
 
-    /** askId → the JSON-RPC request id + the options it offered. */
-    private val pendingApprovals = ConcurrentHashMap<String, PendingApproval>()
+    private val approvals = AcpApprovals(rpc)
+    private val synthetic = AcpSynthetic("dsh")
 
     private data class ToolInfo(val title: String?, val input: JsonObject?)
-    private data class PendingApproval(val rpcId: JsonElement, val options: JsonArray)
 
     /** One pending `session/set_config_option`. [announce] marks a USER-driven switch, which is allowed to
      *  say out loud that it failed; a launch-time application stays quiet (a message before the first turn
@@ -226,7 +227,7 @@ class DshBackend(
         imagePrompts = false
         options = DshConfigOptions.EMPTY
         catalog.unpublish(this)
-        configIds.clear(); toolCalls.clear(); pendingApprovals.clear()
+        configIds.clear(); toolCalls.clear(); approvals.clear()
         prompts.reset()
         scope?.let { runCatching { it.cancel() } }
         val fresh = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -270,7 +271,7 @@ class DshBackend(
             // dsh keeps its logs on stderr, so an unparseable stdout line is genuinely unexpected.
             ?: return listOf(AgentEvent.Unparseable(t))
         // Frames we injected ourselves never travelled to dsh; they carry our own namespaced type.
-        synthetic(root)?.let { return it }
+        readSynthetic(root)?.let { return it }
         val method = root.str("method")
         val idEl = root["id"]?.takeIf { it !is JsonNull }
         return runCatching {
@@ -284,19 +285,15 @@ class DshBackend(
         }.getOrElse { log.warn("dsh parse failed: ${it.message}"); emptyList() }
     }
 
-    /** Our own injections (see [syntheticError] / [syntheticNotice] / [syntheticRefusal]) — the only frames on
-     *  this pump that dsh did not write. */
-    private suspend fun synthetic(root: JsonObject): List<AgentEvent>? {
+    /** Our own injections (see [AcpSynthetic]) — the only frames on this pump that dsh did not write. */
+    private suspend fun readSynthetic(root: JsonObject): List<AgentEvent>? {
         return when (root.str("type")) {
-            SYNTHETIC_ERROR -> listOf(
-                AgentEvent.AssistantText("⚠️ ${root.str("message").orEmpty()}"),
-                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
-            )
+            synthetic.errorType -> acpErrorEvents(root.str("message").orEmpty())
             // A message with no verdict about the turn — the turn itself is untouched (issue #291).
-            SYNTHETIC_NOTICE -> listOf(AgentEvent.AssistantText(root.str("message").orEmpty()))
+            synthetic.noticeType -> listOf(AgentEvent.AssistantText(root.str("message").orEmpty()))
             // A prompt [sendPrompt] reserved but refused settles here exactly once, like its error response. A
             // stale id (already settled, or reserved by a previous process) says nothing.
-            SYNTHETIC_REFUSAL -> root.long("id")?.let { prompts.settle(it) }
+            synthetic.refusalType -> root.long("id")?.let { prompts.settle(it) }
                 ?.let { failedPrompt(it, root.str("message").orEmpty()) }.orEmpty()
             else -> null
         }
@@ -389,14 +386,14 @@ class DshBackend(
         log.warn("dsh startup failed — $message")
         val stranded = prompts.drain()
         if (stranded.isEmpty()) {
-            io?.inject?.invoke(syntheticError(message))
+            io?.inject?.invoke(synthetic.error(message))
             return
         }
         // Each waiting prompt settles exactly like a refused one: reserve its id, then let the pump turn the
         // refusal into its error turn (UserReplay included, so the ledger entry goes away).
         for (prompt in stranded) {
             val id = prompts.reserve(prompt.text)
-            io?.inject?.invoke(syntheticRefusal(id, message))
+            io?.inject?.invoke(synthetic.refusal(id, message))
         }
     }
 
@@ -531,11 +528,9 @@ class DshBackend(
         idEl: JsonElement,
         params: JsonObject?,
     ): List<AgentEvent> {
-        val askId = (idEl as? JsonPrimitive)?.contentOrNull ?: idEl.toString()
         return when (method) {
             "session/request_permission" -> {
-                val options = params?.arr("options") ?: JsonArray(emptyList())
-                pendingApprovals[askId] = PendingApproval(idEl, options)
+                val askId = approvals.register(idEl, params)
                 // The request carries only toolCall.toolCallId (fact 4) — the subject comes from the
                 // tool_call update we recorded earlier in this turn.
                 val toolCallId = params?.obj("toolCall")?.str("toolCallId")
@@ -563,7 +558,7 @@ class DshBackend(
         // stage error that explains why, exactly like a refused prompt.
         openFailure?.let { why ->
             val id = prompts.reserve(text)
-            io?.inject?.invoke(syntheticRefusal(id, why))
+            io?.inject?.invoke(synthetic.refusal(id, why))
             return
         }
         // Gate still closed (session not open, or its launch config not landed), or a turn in flight — dsh
@@ -575,7 +570,7 @@ class DshBackend(
             // Refused through the pump, like an error response: the reservation holds everything sent after
             // it until the refusal settles. Waiting for channel room is safe here, off the pump — a refusal
             // the pump itself finds returns its events instead (see [flushQueuedPrompt]).
-            io?.inject?.invoke(syntheticRefusal(reserved, refuse(prompt)))
+            io?.inject?.invoke(synthetic.refusal(reserved, refuse(prompt)))
         }
     }
 
@@ -636,28 +631,12 @@ class DshBackend(
         updatedInput: String?,
         denyMessage: String?,
     ) {
-        val pending = pendingApprovals.remove(askId) ?: run {
-            log.info("dsh respondPermission($askId) had nothing pending — already resolved or withdrawn")
-            return
-        }
         // `remember` / `denyMessage` are deliberately unused: dsh offers allow-once / reject-once only
         // (probe 0.1.2-rc.1), so a remembered scope can never form and there is no place for a sentence.
-        val optionId = pickOption(pending.options, allow)
-        val outcome = if (optionId != null) {
-            buildJsonObject { put("outcome", "selected"); put("optionId", optionId) }
-        } else {
-            buildJsonObject { put("outcome", "cancelled") } // nothing matched → cancel beats guessing
+        // The answer is dsh's own option id (`allow-once`), never ours.
+        if (!approvals.respond(askId, allow, remember = false)) {
+            log.info("dsh respondPermission($askId) had nothing pending — already resolved or withdrawn")
         }
-        rpc.respondResult(pending.rpcId, buildJsonObject { put("outcome", outcome) })
-    }
-
-    /** The option whose `kind` matches the decision. Ids are dsh's own strings (`allow-once`), never ours. */
-    private fun pickOption(options: JsonArray, allow: Boolean): String? {
-        val byKind = options.mapNotNull { it as? JsonObject }
-            .mapNotNull { o -> o.str("optionId")?.let { (o.str("kind") ?: "") to it } }
-        fun of(vararg kinds: String): String? =
-            kinds.firstNotNullOfOrNull { k -> byKind.firstOrNull { it.first == k }?.second }
-        return if (allow) of("allow_once", "allow_always") else of("reject_once", "reject_always")
     }
 
     // ---- outbound: model / effort ----
@@ -677,7 +656,7 @@ class DshBackend(
             if (value == null) {
                 // The id is not in dsh's catalogue: say so rather than sending a value it will reject.
                 log.warn("dsh has no model option for $wanted — leaving the session's own selection")
-                if (announce) io?.inject?.invoke(syntheticNotice("⚠️ DeepSeek Harness has no model $wanted"))
+                if (announce) io?.inject?.invoke(synthetic.notice("⚠️ DeepSeek Harness has no model $wanted"))
             } else {
                 writes += ConfigWrite(DshConfigOptions.MODEL, value, announce, flushAfter = false)
             }
@@ -722,7 +701,7 @@ class DshBackend(
         // Only a user-driven switch says so out loud (see [ConfigWrite.announce]).
         if (write.announce) {
             val what = if (write.configId == DshConfigOptions.MODEL) "the model" else "the reasoning effort"
-            io?.inject?.invoke(syntheticNotice("⚠️ could not switch $what: $why"))
+            io?.inject?.invoke(synthetic.notice("⚠️ could not switch $what: $why"))
         }
         return continueConfigChain(write)
     }
@@ -882,19 +861,6 @@ class DshBackend(
         return if (m == null && e == null && w == null) null else AgentEvent.RuntimeMeta(m, e, w)
     }
 
-    private fun syntheticError(message: String): String =
-        buildJsonObject { put("type", SYNTHETIC_ERROR); put("message", message) }.toString()
-
-    /** Like [syntheticError] but WITHOUT a TurnResult: something went wrong while the turn's own state is
-     *  untouched (a refused config write leaves the session perfectly alive). */
-    private fun syntheticNotice(message: String): String =
-        buildJsonObject { put("type", SYNTHETIC_NOTICE); put("message", message) }.toString()
-
-    /** The refusal of the prompt reserved as [id] (see [sendPrompt]) — settled on the pump like its error
-     *  response would be. */
-    private fun syntheticRefusal(id: Long, message: String): String =
-        buildJsonObject { put("type", SYNTHETIC_REFUSAL); put("id", id); put("message", message) }.toString()
-
     private companion object {
         /** ACP v1. dsh answers `protocolVersion: 1` (probe 0.1.2-rc.1). */
         const val ACP_PROTOCOL_VERSION = 1
@@ -915,11 +881,6 @@ class DshBackend(
 
         /** `error.data` is summarized, not quoted whole: it can carry a full stack, and this lands in a chat. */
         const val MAX_ERROR_DETAIL_CHARS = 300
-
-        /** Namespaced so they can never collide with a real dsh frame. */
-        const val SYNTHETIC_ERROR = "cc-pocket/dsh-error"
-        const val SYNTHETIC_NOTICE = "cc-pocket/dsh-notice"
-        const val SYNTHETIC_REFUSAL = "cc-pocket/dsh-prompt-refused"
 
         /** Handshake watchdog: generous, because a cold Node start plus the profile compose can take a few
          *  seconds on a slow machine, and a false accusation of "your dsh is too old" is worse than waiting. */

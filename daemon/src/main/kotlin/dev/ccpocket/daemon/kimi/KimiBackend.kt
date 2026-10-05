@@ -1,8 +1,10 @@
 package dev.ccpocket.daemon.kimi
 
+import dev.ccpocket.daemon.acp.AcpApprovals
 import dev.ccpocket.daemon.acp.AcpPrompt
 import dev.ccpocket.daemon.acp.AcpPromptFifo
 import dev.ccpocket.daemon.acp.AcpRpc
+import dev.ccpocket.daemon.acp.AcpSynthetic
 import dev.ccpocket.daemon.acp.acpErrorEvents
 import dev.ccpocket.daemon.acp.acpErrorTurn
 import dev.ccpocket.daemon.acp.acpImageRefusal
@@ -110,8 +112,8 @@ class KimiBackend(
     // not live turn output, and the daemon replays history from disk separately, so drop them in that window.
     @Volatile private var suppressReplayUpdates = false
 
-    // askId → (JSON-RPC request id, permission options) — options carry the optionIds we answer with
-    private val pendingApprovals = ConcurrentHashMap<String, PendingApproval>()
+    private val approvals = AcpApprovals(rpc)
+    private val synthetic = AcpSynthetic("kimi")
 
     // MID-TURN PROMPT QUEUE (probe 0.34.0): ACP rejects a second session/prompt while a turn runs
     // (-32600 turn.agent_busy "another turn is already in progress"), so at most one is in flight and the
@@ -142,7 +144,6 @@ class KimiBackend(
     private val taskScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val taskWatchers = ConcurrentHashMap<String, Job>()
 
-    private data class PendingApproval(val rpcId: JsonElement, val options: JsonArray)
 
     override val kind: AgentKind = AgentKind.KIMI
 
@@ -163,7 +164,7 @@ class KimiBackend(
         suppressReplayUpdates = false
         imagePrompts = false
         prompts.reset()
-        pendingApprovals.clear(); toolCalls.clear()
+        approvals.clear(); toolCalls.clear()
         stopTaskWatchers() // the previous process's tasks are no longer this conversation's jobs
         handshakeWatch?.cancel()
         // kick off the ACP handshake — session open happens when the initialize response lands
@@ -197,13 +198,8 @@ class KimiBackend(
         val root = runCatching { json.parseToJsonElement(t) }.getOrNull() as? JsonObject
             ?: return listOf(AgentEvent.Unparseable(t))
         // our own refusal (see sendPrompt) — the one frame on this pump kimi did not write
-        if (root.str("type") == SYNTHETIC_REFUSAL) return settleRefusal(root)
-        if (root.str("type") == SYNTHETIC_ERROR) {
-            return listOf(
-                AgentEvent.AssistantText("⚠️ ${root.str("message").orEmpty()}"),
-                AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
-            )
-        }
+        if (root.str("type") == synthetic.refusalType) return settleRefusal(root)
+        if (root.str("type") == synthetic.errorType) return acpErrorEvents(root.str("message").orEmpty())
         if (root.str("type") == SYNTHETIC_TASK_SETTLED) {
             val taskId = root.str("taskId") ?: return emptyList()
             return listOf(AgentEvent.BackgroundTaskUpdated(taskId, root.str("status")))
@@ -284,12 +280,12 @@ class KimiBackend(
         log.warn("kimi startup failed — $message")
         val stranded = prompts.drain()
         if (stranded.isEmpty()) {
-            io?.inject?.invoke(buildJsonObject { put("type", SYNTHETIC_ERROR); put("message", message) }.toString())
+            io?.inject?.invoke(synthetic.error(message))
             return
         }
         for (prompt in stranded) {
             val id = prompts.reserve(prompt.text)
-            io?.inject?.invoke(syntheticRefusal(id, message))
+            io?.inject?.invoke(synthetic.refusal(id, message))
         }
     }
 
@@ -415,12 +411,10 @@ class KimiBackend(
     // ---- inbound: server→client requests (approvals + fs/terminal we decline) ----
 
     private suspend fun handleServerRequest(method: String, idEl: JsonElement, params: JsonObject?): List<AgentEvent> {
-        val askId = (idEl as? JsonPrimitive)?.contentOrNull ?: idEl.toString()
         return when (method) {
             "session/request_permission" -> {
+                val askId = approvals.register(idEl, params)
                 val toolCall = params?.obj("toolCall")
-                val options = params?.arr("options") ?: JsonArray(emptyList())
-                pendingApprovals[askId] = PendingApproval(idEl, options)
                 val name = ToolNameMapper.map(
                     toolCall?.str("kind") ?: toolCall?.str("title") ?: "tool",
                 )
@@ -448,7 +442,7 @@ class KimiBackend(
         // land — settle it with the stage error instead, exactly like a refused prompt
         openFailure?.let { why ->
             val id = prompts.reserve(text)
-            io?.inject?.invoke(syntheticRefusal(id, why))
+            io?.inject?.invoke(synthetic.refusal(id, why))
             return
         }
         // no session yet, or a turn in flight (ACP has no mid-turn stdin queue — -32600 turn.agent_busy, probe
@@ -460,7 +454,7 @@ class KimiBackend(
             // refused through the pump, like an error response: the reservation holds everything sent after it
             // until the refusal settles. Waiting for channel room is safe here, off the pump — a refusal the
             // pump itself finds returns its events instead (see flushQueuedPrompt).
-            io?.inject?.invoke(syntheticRefusal(reserved, refuse(prompt)))
+            io?.inject?.invoke(synthetic.refusal(reserved, refuse(prompt)))
         }
     }
 
@@ -514,27 +508,8 @@ class KimiBackend(
         updatedInput: String?,
         denyMessage: String?,
     ) {
-        val pending = pendingApprovals.remove(askId) ?: return
-        val optionId = pickOption(pending.options, allow, remember)
-        val outcome = if (optionId != null) {
-            buildJsonObject { put("outcome", "selected"); put("optionId", optionId) }
-        } else {
-            buildJsonObject { put("outcome", "cancelled") } // no matching option → treat as cancel/deny
-        }
-        rpc.respondResult(pending.rpcId, buildJsonObject { put("outcome", outcome) })
-    }
-
-    /** Choose the ACP permission option matching the decision. Options carry a `kind` ∈
-     *  allow_once/allow_always/reject_once/reject_always (ACP spec). remember → the *_always variant. */
-    private fun pickOption(options: JsonArray, allow: Boolean, remember: Boolean): String? {
-        val byKind = options.mapNotNull { it as? JsonObject }
-            .mapNotNull { o -> o.str("optionId")?.let { (o.str("kind") ?: "") to it } }
-        fun of(vararg kinds: String): String? = kinds.firstNotNullOfOrNull { k -> byKind.firstOrNull { it.first == k }?.second }
-        return if (allow) {
-            if (remember) of("allow_always", "allow_once") else of("allow_once", "allow_always")
-        } else {
-            of("reject_once", "reject_always")
-        }
+        // remember → the `_always` option (kimi offers both); nothing matching → cancelled
+        approvals.respond(askId, allow, remember)
     }
 
     // Model is chosen at session/new (ACP has no mid-session model swap) → relaunch to change it.
@@ -600,16 +575,9 @@ class KimiBackend(
 
     override fun defaultModel(workdir: String): String? = KimiDefaultModel.resolve()
 
-    /** The refusal of the prompt reserved as [id] (see [sendPrompt]) — settled on the pump like its error
-     *  response would be. */
-    private fun syntheticRefusal(id: Long, message: String): String =
-        buildJsonObject { put("type", SYNTHETIC_REFUSAL); put("id", id); put("message", message) }.toString()
-
     internal companion object {
-        /** Namespaced so it can never collide with a real kimi frame. */
-        private const val SYNTHETIC_REFUSAL = "cc-pocket/kimi-prompt-refused"
+        /** Namespaced like [AcpSynthetic]'s frames so it can never collide with a real kimi frame. */
         private const val SYNTHETIC_TASK_SETTLED = "cc-pocket/kimi-task-settled"
-        private const val SYNTHETIC_ERROR = "cc-pocket/kimi-error"
         const val TASK_POLL_MS = 2_000L
 
         /** The startup stages a failure can land in — each asks the user for something different. */
