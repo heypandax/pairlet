@@ -750,25 +750,6 @@ class ResetInventoryTest {
             collaboratorError            K K K K K K K K  # GAP-交接
             lastCollaboratorConnected    K K K K K K K K  # GAP-交接
             collaboratorsLoaded          R R K K K K K K  # FIX-交接
-            reviewsSent                  R R K K K K K K
-            reviewsReceived              R R K K K K K K
-            reviewContacts               R R K K K K K K
-            reviewsSentLoaded            R R K K K K K K
-            reviewInboxLoaded            R R K K K K K K
-            reviewContactsLoaded         R R K K K K K K
-            reviewUnsupported            R R K K K K K K
-            reviewError                  R R K K K K K K
-            reviewSending                R R K K K K K K
-            reviewLastCreated            R R K K K K K K
-            reviewActing                 R R K K K K K K
-            reviewPreparing              R R K K K K K K
-            reviewBundle                 R R K K K K K K
-            reviewLastActed              R R K K K K K K
-            reviewInvite                 R R K K K K K K
-            reviewInviteTtlSec           R R K K K K K K
-            reviewInviteCreating         R R K K K K K K
-            reviewJoining                R R K K K K K K
-            pendingReviewInvite          K K K K K K K K
             collaboratorLinks            K K K K K K K K  # GAP-交接
             collabRedeeming              K K K K K K K K  # GAP-交接
             collabRedeemError            K K K K K K K K  # GAP-交接

@@ -132,36 +132,6 @@ import dev.ccpocket.protocol.CollaboratorUpdated
 import dev.ccpocket.protocol.CreateCollaboratorTicket
 import dev.ccpocket.protocol.ListCollaborators
 import dev.ccpocket.protocol.RemoveCollaborator
-import dev.ccpocket.protocol.ActOnReviewInbox
-import dev.ccpocket.protocol.ArtifactRef
-import dev.ccpocket.protocol.CancelReviewRequest
-import dev.ccpocket.protocol.CloseReviewRequest
-import dev.ccpocket.protocol.CollaboratorDirection
-import dev.ccpocket.protocol.CreateReviewInvite
-import dev.ccpocket.protocol.CreateReviewRequest
-import dev.ccpocket.protocol.JoinReviewContact
-import dev.ccpocket.protocol.ListReviewContacts
-import dev.ccpocket.protocol.ListReviewInbox
-import dev.ccpocket.protocol.ListReviewRequests
-import dev.ccpocket.protocol.PrepareReviewRequest
-import dev.ccpocket.protocol.RemoveReviewContact
-import dev.ccpocket.protocol.ReviewBrief
-import dev.ccpocket.protocol.ReviewContact
-import dev.ccpocket.protocol.ReviewContactUpdated
-import dev.ccpocket.protocol.ReviewContactsListing
-import dev.ccpocket.protocol.ReviewExecutionBundle
-import dev.ccpocket.protocol.ReviewInboxActed
-import dev.ccpocket.protocol.ReviewInboxAction
-import dev.ccpocket.protocol.ReviewInboxItem
-import dev.ccpocket.protocol.ReviewInboxListing
-import dev.ccpocket.protocol.ReviewInviteCreated
-import dev.ccpocket.protocol.ReviewListing
-import dev.ccpocket.protocol.ReviewPrepared
-import dev.ccpocket.protocol.ReviewRequest
-import dev.ccpocket.protocol.ReviewRequestCreated
-import dev.ccpocket.protocol.ReviewResult
-import dev.ccpocket.protocol.ReviewStatus
-import dev.ccpocket.protocol.ReviewUpdated
 import dev.ccpocket.protocol.CompleteHandoff
 import dev.ccpocket.protocol.CreateHandoff
 import dev.ccpocket.protocol.DeclineHandoff
@@ -2908,7 +2878,6 @@ class PocketRepository(
         diagnosticConnectionId = null
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
-        clearReviewState() // a review ledger belongs to one machine — never show the last daemon's inbox
         // The frozen features' cached LISTINGS of this daemon's truth (their logic is not touched here). Each is
         // re-pulled from the next daemon when its surface opens (chat → ListHandoffs, contacts → ListCollaborators,
         // bridges page → ListBridges, shares page → ListShares). Kept, they crossed machines — and activeHandoff,
@@ -4643,64 +4612,8 @@ class PocketRepository(
                 upsertCollaborator(f.collaborator)
                 lastCollaboratorConnected.value = f.collaborator // flips "waiting for scan…" → Connected
             }
-            // ── ReviewRequest (REVIEW-REQUEST.md §12): daemon snapshots replace, pushes upsert ──
-            // Any reply at all clears [reviewUnsupported]: it only ever meant "nothing came back".
-            is ReviewListing -> {
-                // ONLY an owner connection's listing is this machine's sent ledger. A collaborator-inbox
-                // link is somebody else's account, and its rows are requests addressed TO this device —
-                // filing those under "I sent these" would be a straightforward lie about who asked whom.
-                if (!isCollaboratorInbox) {
-                    replace(reviewsSent, f.items.sortedByDescending { it.createdAt })
-                    reviewsSentLoaded.value = true
-                }
-                reviewUnsupported.value = false
-            }
-            is ReviewInboxListing -> {
-                replace(reviewsReceived, f.items)
-                reviewInboxLoaded.value = true; reviewUnsupported.value = false
-            }
-            is ReviewContactsListing -> {
-                replace(reviewContacts, f.items)
-                reviewContactsLoaded.value = true; reviewUnsupported.value = false
-            }
-            // same reason as the listing above: on a collaborator-inbox link this push is a request
-            // addressed to us, not one we sent
-            is ReviewUpdated -> if (!isCollaboratorInbox) upsertReview(f.request)
-            is ReviewRequestCreated -> {
-                reviewSending.value = false; reviewUnsupported.value = false
-                val r = f.request
-                if (f.ok && r != null) { reviewError.value = null; reviewLastCreated.value = r; upsertReview(r) }
-                else reviewError.value = f.error
-            }
-            is ReviewInviteCreated -> {
-                reviewInviteCreating.value = false; reviewUnsupported.value = false
-                if (f.ok && f.invite != null) {
-                    reviewInvite.value = f.invite; reviewInviteTtlSec.value = f.ttlSec; reviewError.value = null
-                } else reviewError.value = f.error
-            }
-            is ReviewContactUpdated -> {
-                reviewJoining.value = false; reviewUnsupported.value = false
-                if (f.ok) {
-                    reviewError.value = null
-                    // re-list rather than patch: a join starts an inbox connection and a remove settles
-                    // an outbox, so the daemon's next snapshot says more than the single row does
-                    refreshReviewContacts()
-                } else reviewError.value = f.error
-            }
-            is ReviewPrepared -> {
-                reviewPreparing.value = null; reviewUnsupported.value = false
-                if (f.ok && f.bundle != null) { reviewBundle.value = f.bundle; reviewError.value = null }
-                else reviewError.value = f.error
-            }
-            is ReviewInboxActed -> {
-                reviewActing.value = null; reviewUnsupported.value = false
-                reviewLastActed.value = f
-                if (f.ok) {
-                    reviewError.value = null
-                    // the daemon owns `pending`; re-read it instead of guessing what the queue now holds
-                    refreshReviewInbox()
-                } else reviewError.value = f.error
-            }
+            // everything else is dropped silently — including the frames of features this build retired
+            // (ReviewRequest: ReviewListing, ReviewUpdated, …), which an older daemon may still push
             else -> {}
         }
     }
@@ -5613,7 +5526,7 @@ class PocketRepository(
     }
 
     /**
-     * The "update the daemon" copy every handoff / collaborator / review timeout below reaches for.
+     * The "update the daemon" copy every handoff / collaborator timeout below reaches for.
      *
      * Issue #251: these all run inside a detached `scope.launch { delay(8000); … }`, where a throwing
      * resource lookup has no handler and takes the desktop window down with an unnamed native error
@@ -5740,229 +5653,6 @@ class PocketRepository(
 
     fun declineHandoff(id: String, reason: String? = null) = scope.launch { runCatching { send(DeclineHandoff(id, reason)) } }
     fun returnHandoff(id: String, result: HandoffResult?) = scope.launch { runCatching { send(ReturnHandoff(id, result)) } }
-
-    // ── ReviewRequest (REVIEW-REQUEST.md §12): the Review Center's daemon-backed state ──
-    //
-    // Every list here is a MIRROR of a daemon snapshot, never a second source of truth. The daemon owns
-    // the state machine, the retry, the dedupe and the history; closing this UI for a week changes
-    // nothing about any of them (§3.3). So the rules are narrow on purpose:
-    //  - a listing REPLACES its list wholesale (that is how a reconnect heals);
-    //  - a single-row push UPSERTS, and only when its revision is not older than what we hold;
-    //  - nothing here invents a transition, and "queued" is rendered as queued, never as delivered.
-
-    /** Requests THIS machine sent. The sender's row is authoritative, so this is real state. */
-    val reviewsSent = mutableStateListOf<ReviewRequest>()
-
-    /** Requests THIS machine received — the daemon's local mirror of each peer's authoritative row,
-     *  plus the peer label and the actions still queued toward them. */
-    val reviewsReceived = mutableStateListOf<ReviewInboxItem>()
-
-    /** Review contacts, both directions, removed ones included (terminal group like collaborators). */
-    val reviewContacts = mutableStateListOf<ReviewContact>()
-
-    /** Set once each listing lands — what distinguishes "you have none" from "the daemon never answered".
-     *  Without them an empty Review Center and a broken one look identical. */
-    val reviewsSentLoaded = mutableStateOf(false)
-    val reviewInboxLoaded = mutableStateOf(false)
-    val reviewContactsLoaded = mutableStateOf(false)
-
-    /** The bounded wait elapsed with no reply: an older daemon silently drops an unknown frame, so the UI
-     *  must say "update the computer's daemon" instead of spinning forever (§10). */
-    val reviewUnsupported = mutableStateOf(false)
-
-    /** The daemon's own words for the last refusal. Cleared by the next successful operation. */
-    val reviewError = mutableStateOf<String?>(null)
-
-    val reviewSending = mutableStateOf(false)
-    /** The created row, as proof of a send — the id the user can quote back. */
-    val reviewLastCreated = mutableStateOf<ReviewRequest?>(null)
-
-    /** requestId of the action/prepare in flight, so a row spinner is per-row rather than global. */
-    val reviewActing = mutableStateOf<String?>(null)
-    val reviewPreparing = mutableStateOf<String?>(null)
-
-    /** The last prepare bundle. Held so the detail screen can show and copy the daemon's recommended
-     *  prompt; the App neither launches an agent nor opens anything from it. */
-    val reviewBundle = mutableStateOf<ReviewExecutionBundle?>(null)
-
-    /** The honest answer to the last queued action — `queued=false` means it was already in that state. */
-    val reviewLastActed = mutableStateOf<ReviewInboxActed?>(null)
-
-    val reviewInvite = mutableStateOf<String?>(null)
-    val reviewInviteTtlSec = mutableStateOf(0)
-    val reviewInviteCreating = mutableStateOf(false)
-    val reviewJoining = mutableStateOf(false)
-
-    /**
-     * A scanned/opened `ccpocket://review-contact#…` waiting for the Review Center's join confirmation
-     * (REVIEW-REQUEST.md §13.3) — the Review twin of [pendingCollabInvite], and held as the RAW line
-     * because this App never redeems it: the daemon does, which is what keeps reviews arriving with the
-     * app closed. Cleared when the join page is left or the join is submitted; a deep link therefore
-     * never burns a ticket on sight.
-     */
-    val pendingReviewInvite = mutableStateOf<String?>(null)
-
-    /** Received requests still waiting on this machine — the badge count. Terminal and already-responded
-     *  rows are history, not work. */
-    val reviewPendingCount: Int
-        get() = reviewsReceived.count { !it.request.status.isTerminal && it.request.status != ReviewStatus.RESPONDED }
-
-    /** Contacts a NEW request may be addressed to. `canSend` is the DAEMON's answer (purpose, direction
-     *  and liveness all folded in), so the picker cannot drift from what the send path will accept. */
-    fun reviewRecipients(): List<ReviewContact> = reviewContacts.filter { it.canSend }
-
-    /** Replace by id, but never regress: a late replay of an older revision must not undo a newer state. */
-    private fun upsertReview(r: ReviewRequest) {
-        val i = reviewsSent.indexOfFirst { it.id == r.id }
-        if (i >= 0) { if (r.revision >= reviewsSent[i].revision) reviewsSent[i] = r } else reviewsSent.add(0, r)
-        // the same row may also be one we RECEIVED (an App attached as a collaborator of the sender):
-        // keep that mirror in step under the same revision rule rather than letting the two disagree
-        val j = reviewsReceived.indexOfFirst { it.request.id == r.id }
-        if (j >= 0 && r.revision >= reviewsReceived[j].request.revision) {
-            reviewsReceived[j] = reviewsReceived[j].copy(request = r)
-        }
-    }
-
-    /**
-     * Pull the whole Review Center from the active daemon. Three bounded snapshots rather than a cursor:
-     * per-request revisions are not a global sequence (§10), so a complete listing is what a reconnect
-     * heals from. Safe to call on open, on ⌘R and after a daemon switch.
-     */
-    fun refreshReviews() {
-        reviewError.value = null
-        scope.launch {
-            runCatching { send(ListReviewRequests()) }
-            runCatching { send(ListReviewInbox()) }
-            runCatching { send(ListReviewContacts) }
-            delay(REVIEW_REPLY_TIMEOUT_MS)
-            // an old daemon drops all three silently; one arriving is enough to prove it understands us
-            if (!reviewsSentLoaded.value && !reviewInboxLoaded.value && !reviewContactsLoaded.value) {
-                reviewUnsupported.value = true
-            }
-        }
-    }
-
-    /** Just the inbox — what an action's aftermath re-reads, so `pending` comes from the daemon and is
-     *  never guessed locally. */
-    fun refreshReviewInbox() = scope.launch { runCatching { send(ListReviewInbox()) } }
-
-    fun refreshReviewContacts() = scope.launch { runCatching { send(ListReviewContacts) } }
-
-    /** Mint a one-time REVIEW-peer invite. The URI is establishment material: shown once, never logged. */
-    fun createReviewInvite(label: String? = null) {
-        reviewInvite.value = null; reviewInviteCreating.value = true; reviewError.value = null
-        scope.launch {
-            runCatching { send(CreateReviewInvite(label)) }
-            delay(REVIEW_REPLY_TIMEOUT_MS)
-            if (reviewInviteCreating.value) {
-                reviewInviteCreating.value = false
-                reviewError.value = daemonTooOldText()
-            }
-        }
-    }
-
-    /**
-     * Hand a scanned/pasted invite to the ACTIVE DAEMON to redeem. Deliberately not [redeemCollaboratorInvite]:
-     * that one stores a restricted binding on THIS PHONE for Session Handoff. A review peer link has to
-     * live on the always-on daemon, or delivery and retry would stop the moment the app is closed.
-     */
-    fun joinReviewContact(invite: String, label: String? = null) {
-        reviewJoining.value = true; reviewError.value = null
-        scope.launch {
-            runCatching { send(JoinReviewContact(invite, label)) }
-            delay(REVIEW_REPLY_TIMEOUT_MS)
-            if (reviewJoining.value) {
-                reviewJoining.value = false
-                reviewError.value = daemonTooOldText()
-            }
-        }
-    }
-
-    fun removeReviewContact(id: String, direction: CollaboratorDirection) {
-        reviewError.value = null
-        scope.launch { runCatching { send(RemoveReviewContact(id, direction)) } }
-    }
-
-    /** Send a review. The daemon validates and is authoritative; the form's own checks are only for
-     *  fast feedback. Success proof is the returned row's id/status, not the absence of an error. */
-    fun sendReview(
-        recipientDeviceId: String,
-        title: String,
-        brief: ReviewBrief,
-        artifacts: List<ArtifactRef>,
-        dueAt: Long? = null,
-        expiresAt: Long? = null,
-    ) {
-        useFeature(ProductFeature.REVIEW_REQUEST)
-        reviewSending.value = true; reviewError.value = null; reviewLastCreated.value = null
-        scope.launch {
-            runCatching { send(CreateReviewRequest(recipientDeviceId, title, brief, artifacts, dueAt, expiresAt)) }
-            delay(REVIEW_REPLY_TIMEOUT_MS)
-            if (reviewSending.value) {
-                reviewSending.value = false
-                reviewError.value = daemonTooOldText()
-            }
-        }
-    }
-
-    /** Ask the daemon to build the safe execution bundle. It opens nothing and runs nothing — the
-     *  recommended prompt is for the user's OWN agent, on their own machine, under their own policy. */
-    fun prepareReview(requestId: String) {
-        reviewPreparing.value = requestId; reviewBundle.value = null; reviewError.value = null
-        scope.launch {
-            runCatching { send(PrepareReviewRequest(requestId)) }
-            delay(REVIEW_REPLY_TIMEOUT_MS)
-            if (reviewPreparing.value == requestId) {
-                reviewPreparing.value = null
-                reviewError.value = daemonTooOldText()
-            }
-        }
-    }
-
-    fun clearReviewBundle() { reviewBundle.value = null }
-
-    /** Queue a recipient-side action on the active daemon. The reply says whether it was RECORDED. */
-    fun actOnReview(
-        requestId: String,
-        action: ReviewInboxAction,
-        reason: String? = null,
-        result: ReviewResult? = null,
-    ) {
-        if (reviewActing.value == requestId) return // a double-tap is not a second action
-        useFeature(ProductFeature.REVIEW_REQUEST)
-        reviewActing.value = requestId; reviewError.value = null; reviewLastActed.value = null
-        scope.launch {
-            runCatching { send(ActOnReviewInbox(requestId, action, reason, result)) }
-            delay(REVIEW_REPLY_TIMEOUT_MS)
-            if (reviewActing.value == requestId) {
-                reviewActing.value = null
-                reviewError.value = daemonTooOldText()
-            }
-        }
-    }
-
-    fun cancelReview(id: String) {
-        reviewError.value = null
-        scope.launch { runCatching { send(CancelReviewRequest(id)) } }
-    }
-
-    fun closeReview(id: String) {
-        reviewError.value = null
-        scope.launch { runCatching { send(CloseReviewRequest(id)) } }
-    }
-
-    /** Drop every review mirror. Called from [disconnect] — a review ledger belongs to ONE machine, and
-     *  showing the previous daemon's inbox after a fleet switch would be a lie about whose work it is. */
-    private fun clearReviewState() {
-        reviewsSent.clear(); reviewsReceived.clear(); reviewContacts.clear()
-        reviewsSentLoaded.value = false; reviewInboxLoaded.value = false; reviewContactsLoaded.value = false
-        reviewUnsupported.value = false; reviewError.value = null
-        reviewSending.value = false; reviewLastCreated.value = null
-        reviewActing.value = null; reviewPreparing.value = null
-        reviewBundle.value = null; reviewLastActed.value = null
-        reviewInvite.value = null; reviewInviteTtlSec.value = 0
-        reviewInviteCreating.value = false; reviewJoining.value = false
-    }
 
     /** Guest: redeem a scanned/pasted folder-share invite — the same relay redeem as pairing a computer,
      *  but the daemon scopes this binding to the one shared folder (issue #115). */
@@ -8617,11 +8307,6 @@ class PocketRepository(
          *  DROPS the unknown accept frame entirely, and a permanent spinner would read as success. */
         const val ACCEPT_TIMEOUT_MS = 12_000L
 
-        /** How long a Review Center call waits for daemon truth before it says "update the daemon"
-         *  (REVIEW-REQUEST.md §10). Every pocket/review.* frame is a NEW discriminator an older daemon
-         *  silently drops, so the alternative to a bounded wait is an infinite spinner. Longer than the
-         *  accept window because a mint or a join round-trips the relay, not just the local process. */
-        const val REVIEW_REPLY_TIMEOUT_MS = 15_000L
         const val SOCKET_RETIRE_TIMEOUT_MS = 3_000L // #142: bounded wait for the old socket to really close before dialing anew
         const val TRANSPORT_COALESCE_MS = 3_000L    // #143: reconnect triggers within this of an in-flight attempt merge into it
         const val STABLE_LINK_RESET_MS = 60_000L    // #144: the retry ladder resets only after the link stays up this long
