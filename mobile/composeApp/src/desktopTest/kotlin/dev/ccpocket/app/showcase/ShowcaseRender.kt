@@ -483,7 +483,7 @@ class ShowcaseRender {
                     workdir = dir,
                 ),
             ),
-            // 04 · one-off / review shell: Deny + Allow once only, and the record band explains why
+            // 04 · one-off (the daemon's neverRemember): Deny + Allow once only, whatever scopes it offered
             ApprovalFrame(
                 "oneoff", dark = true,
                 approvalUi(
@@ -491,8 +491,9 @@ class ShowcaseRender {
                         "ap-4", "Bash", "Run command",
                         "ssh deploy@build-01.internal 'sudo systemctl restart ccpocket-relay'",
                         rule = "Bash(ssh:*)", grants = listOf("once", "task", "session"), timeoutSec = 45,
+                        neverRemember = true,
                     ),
-                    workdir = dir, risk = risk("ap-4", "medium", "remote host"), handoffReview = true,
+                    workdir = dir, risk = risk("ap-4", "medium", "remote host"),
                 ),
             ),
             // 05 · noAutoDeny: no ring, no number, no ∞ — a truthful waiting state; V2 with only `once`

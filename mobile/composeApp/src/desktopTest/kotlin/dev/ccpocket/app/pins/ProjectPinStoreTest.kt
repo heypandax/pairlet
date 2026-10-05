@@ -519,7 +519,8 @@ class ProjectPinStoreTest {
         assertNotEquals(PinScopeKey.Owner("abc").storageName, PinScopeKey.Guest("abc").storageName)
         assertEquals(PinScopeKey.Owner("acct"), PinScopeKey.of(owner("acct"), demo = false))
         assertEquals(PinScopeKey.Guest("acct"), PinScopeKey.of(guest("acct"), demo = false))
-        assertEquals(PinScopeKey.Inbox, PinScopeKey.of(owner("acct").copy(role = BindingRole.COLLABORATOR), demo = false))
+        // the retired COLLABORATOR role never reaches a repository; were one handed in, nothing is written
+        assertEquals(PinScopeKey.Demo, PinScopeKey.of(owner("acct").copy(role = BindingRole.COLLABORATOR), demo = false))
         assertEquals(PinScopeKey.Demo, PinScopeKey.of(owner("acct"), demo = true))
         assertEquals(PinScopeKey.Unpaired, PinScopeKey.of(null, demo = false))
         assertTrue(PinScopeKey.Owner("abc").synced && !PinScopeKey.Guest("abc").synced)

@@ -6,15 +6,13 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 /**
- * Binding roles and the two SEPARATE stores (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.2.1-2).
+ * Binding roles in the paired-computer store (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.2.1-2).
  *
  * The bug being fenced off: the paired list was keyed on accountId alone, so redeeming ANY second
- * credential for a daemon you already had — a folder-share guest invite, or (before it moved out entirely)
- * a collaborator link — silently replaced the owner binding. One QR scan could downgrade a whole computer
- * to one folder, or to an inbox with no session access at all.
+ * credential for a daemon you already had — a folder-share guest invite — silently replaced the owner
+ * binding. One QR scan could downgrade a whole computer to one folder.
  */
 class BindingRoleStoreTest {
 
@@ -115,55 +113,33 @@ class BindingRoleStoreTest {
         assertEquals("dev-owner", Pairing.active()?.deviceId, "\"switch to that computer\" means the richer credential")
     }
 
-    // ── §3.2.2: collaborator links are a separate store — an inbox, never a computer ──────────────
+    // ── Collaborator Links are retired: an older build's data decodes, is ignored, and is left alone ──
 
+    /** An older build kept Collaborator Links in their own `collab_links` entry. This build neither reads it
+     *  into anything (no computer, no active account) nor rewrites or clears it. */
     @Test
-    fun collaboratorLinksNeverEnterTheComputerList() {
+    fun aStoredCollaboratorLinkIsIgnoredAndLeftAsItWas() {
+        val legacy = """[{"relay":"wss://r","accountId":"acct-colleague","daemonPub":"pk","deviceId":"dev-collab",""" +
+            """"credential":"c","role":"collaborator"}]"""
+        SecureStore.putString("collab_links", legacy)
         Pairing.upsert(binding("acct-mine", "dev-owner", BindingRole.OWNER))
         Pairing.setActive("acct-mine")
-        Pairing.upsertCollaborator(binding("acct-colleague", "dev-collab", BindingRole.COLLABORATOR))
 
         assertEquals(listOf("acct-mine"), Pairing.loadAll().map { it.accountId }, "a contact is not a machine")
-        assertEquals(listOf("acct-colleague"), Pairing.collaboratorLinks().map { it.accountId })
-        assertEquals("acct-mine", Pairing.active()?.accountId, "connecting a colleague must not switch your active computer")
-    }
-
-    @Test
-    fun aCollaboratorLinkForADaemonYouAlsoOwnLeavesTheOwnerBindingAlone() {
-        Pairing.upsert(binding("acct-a", "dev-owner", BindingRole.OWNER))
-        Pairing.upsertCollaborator(binding("acct-a", "dev-collab", BindingRole.COLLABORATOR))
-        assertEquals(BindingRole.OWNER, Pairing.loadAll().single().role)
-        assertEquals("dev-collab", Pairing.collaboratorLinks().single().deviceId)
-    }
-
-    @Test
-    fun reScanningAContactSupersedesTheDeadCredential() {
-        Pairing.upsertCollaborator(binding("acct-colleague", "dev-1", BindingRole.COLLABORATOR))
-        Pairing.upsertCollaborator(binding("acct-colleague", "dev-2", BindingRole.COLLABORATOR))
-        val links = Pairing.collaboratorLinks()
-        assertEquals(1, links.size, "the old credential is dead the moment the new one exists")
-        assertEquals("dev-2", links.single().deviceId)
-    }
-
-    @Test
-    fun theStoredRoleIsForcedEvenIfTheCallerPassesTheWrongOne() {
-        Pairing.upsertCollaborator(binding("acct-x", "dev-x", BindingRole.OWNER))
-        assertEquals(BindingRole.COLLABORATOR, Pairing.collaboratorLinks().single().role)
-    }
-
-    @Test
-    fun removingAContactDropsOnlyItsLink() {
-        Pairing.upsertCollaborator(binding("acct-1", "d1", BindingRole.COLLABORATOR))
-        Pairing.upsertCollaborator(binding("acct-2", "d2", BindingRole.COLLABORATOR))
-        Pairing.removeCollaborator("acct-1")
-        assertEquals(listOf("acct-2"), Pairing.collaboratorLinks().map { it.accountId })
-    }
-
-    @Test
-    fun anEmptyCollaboratorStoreIsNotAnError() {
-        assertTrue(Pairing.collaboratorLinks().isEmpty())
-        SecureStore.putString("collab_links", "not json at all")
-        assertTrue(Pairing.collaboratorLinks().isEmpty(), "a corrupt inbox store degrades to empty, never crashes")
+        assertEquals("acct-mine", Pairing.active()?.accountId)
+        Pairing.remove("acct-mine")
         assertNull(Pairing.active())
+        assertEquals(legacy, SecureStore.getString("collab_links"), "the retired store is not touched")
+    }
+
+    /** The enum value stays so a record carrying it still DECODES — dropping it would degrade the role to
+     *  OWNER (the tolerant default) and hand a contact credential the computer list's trust. */
+    @Test
+    fun theRetiredCollaboratorRoleStillDecodes() {
+        SecureStore.putString(
+            "paired_daemons",
+            """[{"relay":"wss://r","accountId":"a","daemonPub":"pk","deviceId":"d1","credential":"c","role":"collaborator"}]""",
+        )
+        assertEquals(BindingRole.COLLABORATOR, Pairing.loadAll().single().role)
     }
 }

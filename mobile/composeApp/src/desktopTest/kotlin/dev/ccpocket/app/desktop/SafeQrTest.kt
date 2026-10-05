@@ -5,8 +5,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.assertIsDisplayed
-import dev.ccpocket.app.pairing.encode
-import dev.ccpocket.protocol.CollaboratorInvite
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.common.HybridBinarizer
@@ -37,12 +35,11 @@ class SafeQrTest {
     }
 
     @Test
-    fun realCollaboratorInviteCodecAndGeneratorWorkTogether() {
-        val invite = CollaboratorInvite(
-            relay = "wss://pocket.example", accountId = "acct", daemonPub = "pub",
-            ticket = "ticket", ownerLabel = "Panda Windows",
-        )
-        val payload = invite.encode()
+    fun aRealPairingPayloadAndTheGeneratorWorkTogether() {
+        // the shape `pairlet pair` prints: a full pairing link with a long base64url daemon key
+        val payload = "ccpocket://pair?relay=wss%3A%2F%2Fpocket.example&acct=acct-0123456789abcdef" +
+            "&dpk=BOx2v1kT3f0Wq9rJmZp8yLs6dNc4hGa7eKu5iRo0tPb1VwXz3QjFy2HgLmNnCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSs" +
+            "&ticket=ticket-0123456789"
         val matrix = qrMatrixOrFailure { payload }.getOrElse { fail("real invite must encode: $it") }
 
         // Decode a nearest-neighbour raster of OUR stored matrix with an independent implementation.
@@ -59,7 +56,7 @@ class SafeQrTest {
 
     @Test
     fun payloadThatThrowsIsContained() {
-        // stands in for CollaboratorInvite.encode() blowing up on daemon-supplied fields
+        // stands in for an invite's encode() blowing up on daemon-supplied fields
         val out = qrMatrixOrFailure { throw IllegalStateException("bad invite") }
         assertTrue(out.isFailure, "an exploding payload must not reach the composition")
         assertEquals("CCP-QR-01 · IllegalStateException", qrFailureLabel(out.exceptionOrNull()!!))

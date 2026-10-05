@@ -50,9 +50,8 @@ class FeatureUsageTelemetryTest {
         val repo = repo()
         repo.openWorkflow("run-secret-id")
         repo.createShare("/Users/someone/private", AccessTier.REVIEW, 3600)
-        repo.createCollaboratorTicket("Alice's laptop")
         val events = used()
-        assertEquals(listOf("workflow_run", "folder_share", "collaborator_invite"), events.map { it[TelKey.Feature] })
+        assertEquals(listOf("workflow_run", "folder_share"), events.map { it[TelKey.Feature] })
         for (p in events) {
             assertTrue(p.keys.all { it in allowedKeys }, "unexpected keys ${p.keys}")
             assertTrue(p.values.none { it.toString().contains("secret") || it.toString().contains("/") || it.toString().contains("Alice") })

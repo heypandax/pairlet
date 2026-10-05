@@ -24,7 +24,6 @@ import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.fast_mode
 import dev.ccpocket.app.resources.git_tab
-import dev.ccpocket.app.resources.ho_menu_row
 import dev.ccpocket.app.resources.label_effort
 import dev.ccpocket.app.resources.label_mode
 import dev.ccpocket.app.resources.qa_clear
@@ -61,9 +60,8 @@ import kotlin.test.assertTrue
  * Chat Quick Actions UI 2.0 — the sheet behind Chat's top-right ⋯, at the release baseline (iPhone 17,
  * 402 × 874 pt).
  *
- * What this pins is the grammar the redesign is *about*: three written groups in a locked order, one
- * separated destructive row, and Handoff as an ordinary peer of Terminal and Changed files — no `NEW`,
- * no accent, no badge. Plus the two things a low-container list can quietly break: reachability of every
+ * What this pins is the grammar the redesign is *about*: three written groups in a locked order and one
+ * separated destructive row. Plus the two things a low-container list can quietly break: reachability of every
  * row at 200% type, and the two-tap arming of Clear.
  *
  * `Density(1f, fontScale)` makes one scene pixel one dp, so the same assertions double as the overflow
@@ -113,7 +111,6 @@ class QuickActionsSheetUiTest {
      */
     private fun sheet(
         fontScale: Float = 1f,
-        handoff: Boolean = true,
         autoAdvance: Boolean = false,
         seed: PocketRepository.() -> Unit = { seedEveryCapability() },
         onDismiss: () -> Unit = {},
@@ -130,7 +127,6 @@ class QuickActionsSheetUiTest {
                         QuickActionsSheet(
                             repo,
                             onTerminal = {}, onMode = {}, onFiles = {}, onGit = {}, onHelp = {},
-                            onHandoff = if (handoff) ({}) else null,
                             onDismiss = onDismiss,
                         )
                     }
@@ -179,37 +175,6 @@ class QuickActionsSheetUiTest {
     }
 
     @Test
-    fun handoffIsAnOrdinaryPeerRowWithNoNewBadge() = sheet(handoff = true) {
-        assertTrue(present(str(Res.string.ho_menu_row)), "the row is there while the session is handoff-free")
-        assertFalse(present("NEW", substring = true), "availability is not news — no badge")
-        // it sits inside Session tools, between Changed files and Help, like any other tool
-        assertTrue(topOf(str(Res.string.qa_files)) < topOf(str(Res.string.ho_menu_row)))
-        assertTrue(topOf(str(Res.string.ho_menu_row)) < topOf(str(Res.string.support_title)))
-        // …with the same row geometry as its peers: same height, same left edge, same width
-        val handoff = onAllNodes(hasText(str(Res.string.ho_menu_row))).onFirst().getUnclippedBoundsInRoot()
-        val files = onAllNodes(hasText(str(Res.string.qa_files))).onFirst().getUnclippedBoundsInRoot()
-        assertEquals(files.left.value, handoff.left.value, 0.5f, "no glyph indenting the label")
-        assertEquals(files.right.value, handoff.right.value, 0.5f, "no badge shortening the row")
-        assertEquals(
-            (files.bottom - files.top).value, (handoff.bottom - handoff.top).value, 0.5f,
-            "no unique weight or geometry",
-        )
-    }
-
-    @Test
-    fun aSessionThatAlreadyHandedOffLosesTheRowAndNothingAroundIt() = sheet(handoff = false) {
-        assertFalse(present(str(Res.string.ho_menu_row)), "the gate hides the row…")
-        assertTrue(present(str(Res.string.qa_group_tools).uppercase()), "…without taking its group with it")
-        assertTrue(present(str(Res.string.terminal_open)) && present(str(Res.string.qa_files)) && present(str(Res.string.support_title)))
-        // no placeholder, no gap: the list closes up and Help follows the row above the gated one
-        // directly. That neighbour is Git since issue #280 added it as another ordinary peer — what is
-        // pinned here is the ABSENCE of a hole where Handoff was, not which two strings happen to touch.
-        val above = onAllNodes(hasText(str(Res.string.git_tab))).onFirst().getUnclippedBoundsInRoot()
-        val help = onAllNodes(hasText(str(Res.string.support_title))).onFirst().getUnclippedBoundsInRoot()
-        assertEquals(above.bottom.value, help.top.value, 1.5f, "the neighbours stay adjacent (hairline only)")
-    }
-
-    @Test
     fun everyActionStaysReachableAtTwoHundredPercentType() = sheet(fontScale = 2f, autoAdvance = true) {
         // the sheet must not eat the whole viewport: the scrim above it is the only way out on iOS
         assertTrue(
@@ -221,7 +186,6 @@ class QuickActionsSheetUiTest {
         // …and the last row is still reachable, by scrolling rather than by shrinking the type
         onAllNodes(hasText(str(Res.string.qa_clear))).onFirst().performScrollTo().assertIsDisplayed()
         assertWithinViewport(str(Res.string.qa_clear))
-        assertWithinViewport(str(Res.string.ho_menu_row))
     }
 
     @Test
