@@ -25,24 +25,24 @@ import java.io.File
  * The OWNER-side bridge control plane (issue #91 follow-up): mint a bridge credential, list bridges +
  * their activity, revoke. Handled ONLY for a full-power owner device — a bridge's own capability
  * whitelist denies every frame here and [DeviceSessions] only reaches this dispatch for a non-restricted
- * device, so a bridge minting another bridge (self-escalation) is structurally impossible, exactly as
- * [ShareControl] prevents a guest re-sharing the machine.
+ * device, so a bridge minting another bridge (self-escalation) is structurally impossible.
  *
  * This is the wire twin of `pair --headless` / `bridges`, and BOTH now route through this one service
- * (PairLoopback delegates) — the same reuse folder-share already does. Two implementations of "mint a
- * bridge" would be two places for the name check, the workdir-must-exist rule, and the mint-serialization
- * dance to drift apart, and a drift there mis-classifies a credential's power.
+ * (PairLoopback delegates). Two implementations of "mint a bridge" would be two places for the name check,
+ * the workdir-must-exist rule, and the mint-serialization dance to drift apart, and a drift there
+ * mis-classifies a credential's power.
  */
 /**
- * Dispatch an owner control-plane frame (folder-share #115 / bridge #91 follow-up) to its service.
- * Returns true when [frame] was a control frame and was handled — the caller returns; false lets an
- * ordinary owner frame fall through to the router.
+ * Dispatch an owner control-plane frame (bridge #91 follow-up) to its service. Returns true when [frame]
+ * was a control frame and was handled — the caller returns; false lets an ordinary owner frame fall through
+ * to the router. The retired folder-share frames (#115) are not control frames any more: they reach the
+ * router, which answers them like every other retired request.
  *
  * ONE dispatcher for BOTH owner transports — the relay's DeviceSessions and the loopback LAN's
  * WsConnection — so the set of control frames can't drift between them (the drift already happened once:
- * the LAN path knew neither plane, which made Settings ▸ Shared/Bridges dead for the desktop app sitting
- * on the daemon's own machine). Callers must only invoke this for a FULL-POWER owner peer; both
- * restricted credential kinds have these frames whitelisted away before any dispatch.
+ * the LAN path knew no control plane, which made Settings ▸ Bridges dead for the desktop app sitting
+ * on the daemon's own machine). Callers must only invoke this for a FULL-POWER owner peer; every
+ * restricted credential kind has these frames whitelisted away before any dispatch.
  *
  * Null controls (daemon still wiring up, or a LAN-only `serve` with no relay link to mint over) → false,
  * so the frame surfaces the router's "unsupported" rather than silently vanishing.
@@ -51,7 +51,6 @@ import java.io.File
  *  transport needs this to decide BEFORE dispatching: mints suspend on a reply that arrives through the
  *  same single reader loop, so they must run OFF that loop (head-of-line deadlock otherwise). */
 fun isOwnerControlFrame(frame: dev.ccpocket.protocol.Frame): Boolean = when (frame) {
-    is dev.ccpocket.protocol.CreateShare, is dev.ccpocket.protocol.ListShares, is dev.ccpocket.protocol.RevokeShare,
     is CreateBridge, is dev.ccpocket.protocol.ListBridges, is dev.ccpocket.protocol.RevokeBridge,
     is ConfigureBridgeRunner, is ControlBridgeRunner, is dev.ccpocket.protocol.DetachBridgeRunner,
     -> true
@@ -60,14 +59,10 @@ fun isOwnerControlFrame(frame: dev.ccpocket.protocol.Frame): Boolean = when (fra
 
 suspend fun dispatchOwnerControl(
     frame: dev.ccpocket.protocol.Frame,
-    share: ShareControl?,
     bridge: BridgeControl?,
     emit: suspend (dev.ccpocket.protocol.ToPhone) -> Unit,
 ): Boolean {
     when (frame) {
-        is dev.ccpocket.protocol.CreateShare -> emit((share ?: return false).create(frame))
-        is dev.ccpocket.protocol.ListShares -> emit((share ?: return false).list())
-        is dev.ccpocket.protocol.RevokeShare -> emit((share ?: return false).revoke(frame.deviceId))
         is CreateBridge -> emit((bridge ?: return false).create(frame))
         is dev.ccpocket.protocol.ListBridges -> emit((bridge ?: return false).list())
         is dev.ccpocket.protocol.RevokeBridge -> emit((bridge ?: return false).revoke(frame.name))

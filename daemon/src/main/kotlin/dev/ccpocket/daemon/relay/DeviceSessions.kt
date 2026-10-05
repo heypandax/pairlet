@@ -22,7 +22,6 @@ import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.ConfigureBridgeRunner
 import dev.ccpocket.protocol.ControlBridgeRunner
 import dev.ccpocket.protocol.CreateBridge
-import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.DetachBridgeRunner
 import dev.ccpocket.protocol.ListBridges
 import dev.ccpocket.protocol.RevokeBridge
@@ -30,11 +29,9 @@ import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.DAEMON_SUPPORTED_AGENT_WIRES
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
-import dev.ccpocket.protocol.ListShares
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PocketJson
-import dev.ccpocket.protocol.RevokeShare
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.ShareEnded
@@ -74,11 +71,8 @@ class DeviceSessions(
 ) {
     private val log = logger("DeviceSessions")
 
-    /** The OWNER control planes (share #115 / bridge #91 follow-up) live on [DaemonCore] — the LAN
-     *  transport serves them too, so they can't be relay-local state. These are convenience views. */
-    var shareControl: dev.ccpocket.daemon.relay.ShareControl?
-        get() = core.shareControl
-        set(v) { core.shareControl = v }
+    /** The OWNER bridge control plane (bridge #91 follow-up) lives on [DaemonCore] — the LAN transport
+     *  serves it too, so it can't be relay-local state. This is a convenience view. */
     var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl?
         get() = core.bridgeControl
         set(v) { core.bridgeControl = v }
@@ -224,26 +218,15 @@ class DeviceSessions(
 
     /** The relay says this device was just revoked: cut key + live E2E session immediately. The persist
      *  bumps [PairedDevices.epoch], which also severs any LIVE direct-LAN socket on its next frame. For any
-     *  RESTRICTED credential (a GUEST #115 or a BRIDGE #91) this ALSO ends its running sessions now — the
-     *  owner's "revoke" promise is "their sessions end", not merely "their link drops".
-     *
-     *  Returns true when a guest-facing [ShareEnded] notice was actually sealed toward the guest (the
-     *  #115 follow-up: the precise "revoked"/"expired" ending for its terminal card). The notice rides
-     *  BEFORE the prune below — the last frame the dying E2E session can still seal — and is pure
-     *  best-effort: everything security-relevant (key death, session cut, convo force-close) is
-     *  unchanged and unconditional right after. */
-    suspend fun onDeviceRevoked(deviceId: String, reason: String = ShareEnded.REASON_REVOKED): Boolean {
+     *  RESTRICTED credential (a BRIDGE #91, an EXECUTION link #367) this ALSO ends its running sessions now
+     *  — the owner's "revoke" promise is "their sessions end", not merely "their link drops". A retired
+     *  folder-share guest still loaded is cut the same way, minus the close-by-label (below);
+     *  its normal path out is [retireLegacyGuests]. */
+    suspend fun onDeviceRevoked(deviceId: String) {
         val wasGuest = bridges.isGuest(deviceId)
-        // guest OR bridge — a revoke must end the sessions of EITHER, not just a guest's (issue #91: a
-        // bridge's live Claude turn otherwise keeps editing files until the idle reaper claims it)
+        // every restricted kind — a revoke must end its sessions (issue #91: a bridge's live Claude turn
+        // otherwise keeps editing files until the idle reaper claims it)
         val wasRestricted = bridges.isRestricted(deviceId)
-        var noticed = false
-        if (wasGuest) {
-            // sealAndSend silently no-ops without a live session — only report a notice that could seal
-            noticed = mutex.withLock { sessions.containsKey(deviceId) }
-            // ownerLabel = the computer name the guest already learned from its invite (leaks nothing new)
-            runCatching { sealAndSend(deviceId, ShareEnded(reason, hostname())) }
-        }
         // read BEFORE bridges.remove. Never for a guest (folder sharing is retired): its label is free text in the
         // same namespace as a bridge's origin, so closing by it could end a same-named bridge's sessions. A guest's
         // own conversations are the ones this connection opened ([owned]), closed below by id.
@@ -261,16 +244,15 @@ class DeviceSessions(
         runCatching { core.router.revokeVoiceMemoDevice(deviceId) }
         persist()
         // force-close the revoked credential's convos NOW (kills their process trees) — the owner's revoke
-        // promise is "their sessions end", not "their link drops". Covers guests (#115) AND bridges (#91):
-        // a bridge's running Claude turn must not outlive the revoke. The per-connection `owned` list covers
-        // this connection; closeByOrigin ALSO reaps convos opened on an EARLIER connection (which `owned`
-        // cleared on disconnect) so nothing keeps running past the revoke (issue #115 crypto review L1).
+        // promise is "their sessions end", not "their link drops": a bridge's running Claude turn must not
+        // outlive the revoke (#91). The per-connection `owned` list covers this connection; closeByOrigin ALSO
+        // reaps convos opened on an EARLIER connection (which `owned` cleared on disconnect) so nothing keeps
+        // running past the revoke (issue #115 crypto review L1).
         if (wasRestricted) {
             revokedConvos.forEach { runCatching { core.registry.close(it, force = true) } }
             revokedOrigin?.let { runCatching { core.registry.closeByOrigin(it) } }
         }
         log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list${if (wasRestricted) " (${if (wasGuest) "guest " else ""}sessions ended)" else ""}")
-        return noticed
     }
 
     /**
@@ -729,11 +711,10 @@ class DeviceSessions(
                 return
             }
             else -> {
-                // FULL-POWER owner device: the share/bridge control planes (mint / list / revoke) need
-                // handles the router lacks, so they're intercepted here — via the SAME dispatcher the LAN
-                // transport uses. A restricted credential never reaches this branch (its own whitelist
-                // denies these frames), so re-sharing the machine or minting another bridge is
-                // structurally impossible.
+                // FULL-POWER owner device: the bridge control plane (mint / list / revoke) needs handles the
+                // router lacks, so it's intercepted here — via the SAME dispatcher the LAN transport uses. A
+                // restricted credential never reaches this branch (its own whitelist denies these frames), so
+                // minting another bridge is structurally impossible.
                 // project-pin pushes (issue #362): ONE subscriber per device key, idempotent across frames, and
                 // resolved entirely at emission by [deliverProjectPins]. Attaching delivers nothing by itself —
                 // the device's CURRENT connection must also have declared the capability and fetched.
@@ -773,10 +754,10 @@ class DeviceSessions(
                     // OFF the reader loop: a mint suspends ~10s waiting for the relay's PairTicket reply,
                     // which arrives through the SAME single ws reader that called us — dispatching inline
                     // deadlocks the mint into its own timeout (and starves every device for the duration).
-                    // The direct-ws leg masked this for shares/bridges; the relay leg hits it every time.
+                    // The direct-ws leg masked this for bridges; the relay leg hits it every time.
                     val body = env.body
                     core.scope.launch {
-                        val handled = dispatchOwnerControl(body, shareControl, bridgeControl) { sink.emit(it) }
+                        val handled = dispatchOwnerControl(body, bridgeControl) { sink.emit(it) }
                         // null control plane (daemon still wiring up / LAN-only serve) — surface it rather
                         // than vanish, mirroring what the router's fall-through used to produce
                         if (!handled) runCatching { sink.emit(PocketError("unsupported", "the daemon isn't ready for ${body::class.simpleName}", null)) }

@@ -104,6 +104,17 @@ class LegacyLoopbackGuardTest {
         assertEquals(3, s.hits.get())
     }
 
+    /** Folder sharing (#115) is retired and PairLoopback no longer registers `/share`, `/shares` or `/share/revoke`:
+     *  a path the guarded child does not register answers an ordinary 404 to the CLI's request shape. */
+    @Test
+    fun a_path_no_longer_registered_answers_a_plain_404() = serving { s, client ->
+        val base = "http://127.0.0.1:${s.port}"
+        assertEquals(HttpStatusCode.NotFound, client.post("$base/share") { setBody("""{"workdir":"/w"}""") }.status)
+        assertEquals(HttpStatusCode.NotFound, client.get("$base/shares").status)
+        assertEquals(HttpStatusCode.NotFound, client.post("$base/share/revoke") { setBody("""{"deviceId":"d"}""") }.status)
+        assertEquals(0, s.hits.get())
+    }
+
     @Test
     fun a_request_carrying_an_origin_is_refused() = serving { s, client ->
         val base = "http://127.0.0.1:${s.port}"

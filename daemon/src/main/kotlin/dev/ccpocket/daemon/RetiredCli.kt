@@ -28,3 +28,6 @@ internal fun retiredReviewCommand(): CliktCommand = RetiredCmd("review", "review
 
 /** `pairlet collaborator …` — the contacts review requests were exchanged with, retired with them. */
 internal fun retiredCollaboratorCommand(): CliktCommand = RetiredCmd("collaborator", "review contacts")
+
+/** `pairlet share …` — folder sharing (#115), retired 2026-10. */
+internal fun retiredShareCommand(): CliktCommand = RetiredCmd("share", "folder sharing")

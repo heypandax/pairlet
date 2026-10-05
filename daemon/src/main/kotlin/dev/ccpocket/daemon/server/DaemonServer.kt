@@ -38,7 +38,7 @@ class DaemonServer(
                     log.info("WS connect from $peer")
                     try {
                         WsConnection(this, core.router, core.registry, gate,
-                            ownerControls = { Pair(core.shareControl, core.bridgeControl) }).serve()
+                            ownerControls = { core.bridgeControl }).serve()
                     } finally {
                         log.info("WS disconnect from $peer")
                     }

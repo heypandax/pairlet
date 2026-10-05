@@ -23,6 +23,7 @@ import dev.ccpocket.protocol.CreateCollaboratorTicket
 import dev.ccpocket.protocol.CreateHandoff
 import dev.ccpocket.protocol.CreateReviewInvite
 import dev.ccpocket.protocol.CreateReviewRequest
+import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.DeclineHandoff
 import dev.ccpocket.protocol.DeclineReviewRequest
 import dev.ccpocket.protocol.Frame
@@ -35,6 +36,7 @@ import dev.ccpocket.protocol.ListHandoffs
 import dev.ccpocket.protocol.ListReviewContacts
 import dev.ccpocket.protocol.ListReviewInbox
 import dev.ccpocket.protocol.ListReviewRequests
+import dev.ccpocket.protocol.ListShares
 import dev.ccpocket.protocol.MarkReviewDelivered
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PocketJson
@@ -49,6 +51,8 @@ import dev.ccpocket.protocol.ReviewContactsListing
 import dev.ccpocket.protocol.ReviewInboxListing
 import dev.ccpocket.protocol.ReviewListing
 import dev.ccpocket.protocol.ReviewResult
+import dev.ccpocket.protocol.RevokeShare
+import dev.ccpocket.protocol.ShareListing
 import dev.ccpocket.protocol.StartReviewRequest
 import dev.ccpocket.protocol.ToDaemon
 import kotlinx.coroutines.CoroutineScope
@@ -67,8 +71,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 
 /**
- * Review requests, session handoff and collaborator contacts are retired. An older App or an older peer
- * daemon may still send any `pocket/review.*`, `pocket/handoff.*` or `pocket/collaborator.*` request; each
+ * Review requests, session handoff, collaborator contacts and folder sharing are retired. An older App or an
+ * older peer daemon may still send any `pocket/review.*`, `pocket/handoff.*`, `pocket/collaborator.*` or
+ * `pocket/share.*` request (a share request from an owner device — a guest's frames never reach the router); each
  * one must be answered at once — the list requests with an empty list of their own reply type, everything
  * else with the router's ordinary `unsupported` error — so nobody waits out a timeout and an older App's
  * list screens (above all the `ListHandoffs` it sends on every session open) do not turn into chat error rows.
@@ -108,6 +113,7 @@ class RetiredFramesTest {
         ListHandoffs() to HandoffListing(),
         ListHandoffs(workdir = "/w", sessionId = "s-1") to HandoffListing(),
         ListCollaborators to CollaboratorListing(),
+        ListShares to ShareListing(),
     )
 
     /** One instance of every other retired REQUEST frame the protocol still defines. */
@@ -135,12 +141,14 @@ class RetiredFramesTest {
         CompleteHandoff("h-1"),
         CreateCollaboratorTicket("Frank"),
         RemoveCollaborator("dev-c"),
+        CreateShare("/w"),
+        RevokeShare("dev-g"),
     )
 
     private fun wireName(f: Frame): String =
         PocketJson.encodeToJsonElement(Frame.serializer(), f).jsonObject["t"]!!.jsonPrimitive.content
 
-    private val retiredPrefixes = listOf("pocket/review.", "pocket/handoff.", "pocket/collaborator.")
+    private val retiredPrefixes = listOf("pocket/review.", "pocket/handoff.", "pocket/collaborator.", "pocket/share.")
 
     @Test
     fun the_lists_cover_every_retired_request_the_protocol_defines() {
@@ -153,6 +161,7 @@ class RetiredFramesTest {
         assertEquals(17, covered.count { it.startsWith("pocket/review.") })
         assertEquals(8, covered.count { it.startsWith("pocket/handoff.") })
         assertEquals(3, covered.count { it.startsWith("pocket/collaborator.") })
+        assertEquals(3, covered.count { it.startsWith("pocket/share.") })
     }
 
     @Test

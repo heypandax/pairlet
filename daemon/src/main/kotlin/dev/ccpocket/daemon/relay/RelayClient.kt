@@ -122,14 +122,10 @@ class RelayClient(
     /** The headless-bridge authority (issue #91) — PairLoopback serves list/revoke/mint from it. */
     val bridges: dev.ccpocket.daemon.bridge.BridgeRegistry get() = sessions.bridges
 
-    /** The OWNER folder-share control plane (issue #115) — PairLoopback serves the `share` CLI's
-     *  mint/list/revoke from it. Null until [run] installs it (a request during the brief startup window),
-     *  and always null on the local-server path, which has no relay link to mint a ticket over. */
-    val shareControl: ShareControl? get() = sessions.shareControl
-
     /** The OWNER bridge control plane (issue #91 follow-up) — PairLoopback serves `pair --headless` /
-     *  `bridges` from it, so the CLI and the app mint through one implementation. Null on the same terms
-     *  as [shareControl]. */
+     *  `bridges` from it, so the CLI and the app mint through one implementation. Null until [run] installs
+     *  it (a request during the brief startup window), and always null on the local-server path, which has
+     *  no relay link to mint a ticket over. */
     val bridgeControl: BridgeControl? get() = sessions.bridgeControl
 
     /** Daemon-managed adapter processes (issue #91 follow-up). Owned here so their lifetime matches the
@@ -140,16 +136,9 @@ class RelayClient(
     fun interactivePairingPending(): Boolean = sessions.interactivePairingPending()
 
     /** Revoke a bridge credential: prune locally NOW (the security anchor — its handshake key dies with
-     *  the bridges.json entry) and best-effort tell the relay so its row is revoked + socket closed.
-     *  [reason] flavors the guest-facing [dev.ccpocket.protocol.ShareEnded] notice (#115 follow-up). */
-    suspend fun revokeBridge(deviceId: String, reason: String = dev.ccpocket.protocol.ShareEnded.REASON_REVOKED) {
-        val noticed = sessions.onDeviceRevoked(deviceId, reason)
-        // The guest's ShareEnded notice rides the DATA writer while RevokeDevice rides the CONTROL writer —
-        // two independent pumps with no cross-ordering guarantee. Give the sealed notice a short head start
-        // so the relay forwards it before the revoke force-closes the guest's socket. Purely a delivery
-        // courtesy: the credential is ALREADY dead locally (onDeviceRevoked above — key pruned, E2E session
-        // cut, convos force-closed), so nothing security-relevant rides on this delay.
-        if (noticed) delay(REVOKE_NOTICE_GRACE_MS)
+     *  the bridges.json entry) and best-effort tell the relay so its row is revoked + socket closed. */
+    suspend fun revokeBridge(deviceId: String) {
+        sessions.onDeviceRevoked(deviceId)
         controlOutbox.send(dev.ccpocket.protocol.RevokeDevice(deviceId))
     }
 
@@ -238,22 +227,8 @@ class RelayClient(
             push?.let { controlOutbox.send(it) }
             push != null
         }
-        // issue #115: the OWNER folder-share control plane. Installed on the relay path (minting needs the
-        // relay link; the LAN path can't mint). DeviceSessions dispatches CreateShare/ListShares/RevokeShare
-        // to it for a full-power owner device only.
-        sessions.shareControl = ShareService(
-            accountId = identity.accountId,
-            daemonPubB64 = identity.e2ePubB64,
-            relayWsBase = relayWsBase,
-            ownerLabel = hostname,
-            registry = sessions.bridges,
-            mintTicket = { headless -> mintTicket(headless) },
-            interactivePairingPending = { sessions.interactivePairingPending() },
-            revokeCredential = { deviceId -> revokeBridge(deviceId) },
-            liveSessions = { core.registry.liveByCwd().entries.flatMap { (cwd, list) -> list.map { cwd to it } } },
-        )
-        // issue #91 follow-up: the OWNER bridge control plane, on the same relay-only footing as the share
-        // plane above. PairLoopback serves `pair --headless` / `bridges` from this SAME instance, so the CLI
+        // issue #91 follow-up: the OWNER bridge control plane, installed on the relay path (minting needs the
+        // relay link; the LAN path can't mint). PairLoopback serves `pair --headless` / `bridges` from this SAME instance, so the CLI
         // and the app's "New bridge" bind an identical intent.
         sessions.bridgeControl = BridgeService(
             accountId = identity.accountId,

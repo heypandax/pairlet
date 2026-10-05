@@ -1048,7 +1048,7 @@ class RequestRouter(
                 })
             }
 
-            // Retired features (review requests, session handoff, collaborator contacts): their list requests
+            // Retired features (review requests, session handoff, collaborator contacts, folder sharing): their list requests
             // answer an empty list of their own type ([retiredFeatureListing]); every other frame not handled
             // above, the other retired requests included, answers `unsupported`.
             else -> sink.emit(
