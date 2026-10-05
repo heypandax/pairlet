@@ -7,8 +7,8 @@
     },
     {
       "path": "protocol/src/jvmMain/kotlin/dev/ccpocket/protocol/update/ReleaseClient.kt",
-      "sha256": "77716471dd8a461fe84b8c942558d7d8fc73467bb91d47c91b1b401a802f3b14",
-      "note": "2026-09-20 daemon v2.1.1 hotfix: remove the 600-second total download ceiling so transfers that keep receiving bytes can complete on slow links. Keep the 15-second connection timeout, bound waiting for response headers to 2 minutes, and abort bodies after 2 minutes without data. Streaming, progress callbacks, endpoints, asset names, HTTP error handling and checksum verification remain unchanged. ReleaseClientDownloadTest verifies continued progress across multiple timeout windows and stalled/late response cancellation."
+      "sha256": "dcd358bf0343be724c9cb0acf37f60f88006eeb8cd6b7ff15f6680857a6ff7d8",
+      "note": "2026-09-20 daemon v2.1.1 hotfix: remove the 600-second total download ceiling so transfers that keep receiving bytes can complete on slow links. Keep the 15-second connection timeout, bound waiting for response headers to 2 minutes, and abort bodies after 2 minutes without data. Streaming, progress callbacks, endpoints, asset names, HTTP error handling and checksum verification remain unchanged. ReleaseClientDownloadTest verifies continued progress across multiple timeout windows and stalled/late response cancellation. 2026-10-05 update signing: add verifyDownload, the single verification entry point. With an empty ReleaseTrustedKeys list (the shipped state) it calls verifyAgainstSums unchanged; with a non-empty list it fetches release-manifest.json + .sig from the same asset map and requires an Ed25519 signature from a trusted key, a strictly newer matching version and a matching sha256 (ReleaseSignature), with no SHA256SUMS fallback. Endpoints, mirror selection, asset names, download behavior and verifyAgainstSums are unchanged. ReleaseClientVerifyDownloadTest covers identical unconfigured behavior and the enforced rules for GitHub and mirror maps."
     },
     {
       "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/service/ServiceInstaller.kt",
