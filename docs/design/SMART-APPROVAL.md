@@ -7,6 +7,10 @@
 >
 > 核心定位：智能审批不是“AI 判断安全”，而是“行为风险雷达 + 审批权路由”。AI 只提供风险信号，
 > daemon 中的硬策略、审批权校验和能力边界才是安全事实源。
+>
+> **2026-10-05 补注**：会话交接（Handoff／协作者／recipient）已下线，见
+> [`docs/DECLINED-REQUIREMENTS.md`](../DECLINED-REQUIREMENTS.md) 的 D3；Handoff 只读墙随之删除。下文围绕
+> Handoff 的场景、映射与分期仅作设计史保留，不再对应现有实现。
 
 ## 一、要解决什么
 

@@ -18,7 +18,11 @@
 > 落地明细与偏差见文末【§18 落地状态】；M4 未开工。
 >
 > 本文是审批领域的主设计。`SMART-APPROVAL.md` 作为风险评估与审批升级的子设计保留；
-> `SESSION-HANDOFF.md` 继续负责接力领域，但其中涉及审批路由的部分以本文为准。
+> `SESSION-HANDOFF.md` 曾负责接力领域，其中涉及审批路由的部分以本文为准。
+>
+> **2026-10-05 补注**：文件夹共享（Guest）、会话交接（Handoff／协作者／recipient）与评审请求已下线，见
+> [`docs/DECLINED-REQUIREMENTS.md`](../DECLINED-REQUIREMENTS.md) 的 D3、D4。下文涉及这些来源的审批路径、来源
+> ceiling 与落地记录仅作设计史保留，不再对应现有实现。
 
 ## 0. 设计结论
 
@@ -97,8 +101,8 @@ cc-pocket 不应继续把审批理解成“Agent 每调用一次工具，手机�
 | 飞书完全信任 | `FeishuTrust` + `AUTO_TRUSTED` | owner 为精确群/项目预先授权 | 每条请求获得 prompt-bound 的一回合 full 权限 | 不经 Guardian；不是 shell、MCP 或网络副作用的沙箱；未来未识别工具 ASK |
 | 飞书智能审核 | `FeishuTrust` + `REVIEWER_APPROVED` | owner 预设用途；Guardian 逐请求只放明确低风险 | 通过后仅项目内封闭工具免问，其余仍找 owner | Guardian 是分类器，不是 full 权限主体 |
 | 飞书 owner 专属会话 | `ownerBypassSession` 资格 + `OWNER_BYPASS` Grant | 无逐动作审批 | owner 身份消息形成一回合 full-auto | 取消先撤销 turn Grant；仍经过结构化路径检查、best-effort Bash DENY 和人类决策门 |
-| Guest Folder Share | `GuestCaps / GuestGuard / PermissionBridge` | guest 自己 | share tier 上限；guest Session allowRules | owner 只在发 Share 时给能力上限，运行时 guest 自批 |
-| Session Handoff | `CollaboratorGuard / HandoffGuard / PermissionBridge` | 当前 recipient 自批；未来高风险可转 owner | REVIEW 写工具硬拒绝；Bash 当前逐次 ASK 目标 | Controller 与 Approver 混在 lease gate；Bash neverRemember 需 daemon 强制 |
+| Guest Folder Share（已于 2026-10-05 下线） | `GuestCaps / GuestGuard / PermissionBridge` | guest 自己 | share tier 上限；guest Session allowRules | owner 只在发 Share 时给能力上限，运行时 guest 自批 |
+| Session Handoff（已于 2026-10-05 下线） | `CollaboratorGuard / HandoffGuard / PermissionBridge` | 当前 recipient 自批；未来高风险可转 owner | REVIEW 写工具硬拒绝；Bash 当前逐次 ASK 目标 | Controller 与 Approver 混在 lease gate；Bash neverRemember 需 daemon 强制 |
 | 定时任务 | `SchedulerService` 以 headless sink 打开普通 Session | 若运行中出现 ask，则 push owner | Schedule 保存 mode；能免审的动作直接执行 | 创建时没有任务能力合同，运行后才逐步弹卡；无人值守体验不稳定 |
 | OpenCode Session | `opencode run --auto` | 无交互审批通道 | 实际等价 Full Auto | owner UI 有警告；guest/bridge/handoff 被禁止使用，这是必要限制 |
 
@@ -440,9 +444,9 @@ Profile 先受来源 ceiling 限制，再映射到 backend：
 | Owner interactive | Full Control | 当前 owner 设备；高风险可要求生物识别 | 可创建 Saved Policy |
 | Schedule | Project Auto | owner | 创建时必须确认 Task Contract；不允许隐式 Full Control |
 | Generic Bridge / Feishu | 默认 Project Auto；机主逐请求批准或对精确群/项目设 `TRUSTED` 时形成单 turn full | owner | bridge 永远不能回 verdict；`REVIEWED` 的 Guardian pass 仍为封闭上限；`TRUSTED` 不经 Guardian |
-| Guest Folder Share | share tier 对应上限，永不 Full | guest；owner 可配置高风险升级 | roots、expiry 与 clean-room 固定 |
-| Handoff REVIEW | Guided/Balanced 的只读变体 | recipient；HIGH/UNKNOWN 转 owner | 结构化写硬拒绝；shell 不能 remember |
-| Handoff CONTINUE（后续） | Project Auto 以下 | recipient；外部/高风险 owner | 只在 allowedRoots 写入 |
+| Guest Folder Share（已于 2026-10-05 下线） | share tier 对应上限，永不 Full | guest；owner 可配置高风险升级 | roots、expiry 与 clean-room 固定 |
+| Handoff REVIEW（已于 2026-10-05 下线） | Guided/Balanced 的只读变体 | recipient；HIGH/UNKNOWN 转 owner | 结构化写硬拒绝；shell 不能 remember |
+| Handoff CONTINUE（后续；已随 Handoff 下线，不再实施） | Project Auto 以下 | recipient；外部/高风险 owner | 只在 allowedRoots 写入 |
 
 来源 ceiling 由 daemon 的 credential / Handoff Grant 得出，客户端和 Agent 都不能声明更高档位。
 
@@ -1320,7 +1324,7 @@ phantom result 或迟到工具请求不能借下一 prompt 的授权，Grant 也
 
 对 bridge-origin 工具请求，关键顺序是：
 
-1. Handoff 等来源自己的确定性只读／能力上限；
+1. 来源自己的确定性只读／能力上限（现为远程执行写墙；原 Handoff 只读墙已随该功能于 2026-10-05 删除）；
 2. daemon 能从已知字段提取到的结构化文件目标做 canonical workdir containment，越界则拒绝；
 3. Bash 经 `BridgeCommandPolicy`；字面命中已知 destructive/high-risk 模式的 `DENY` 先拒绝；
 4. `OWNER_BYPASS` 自动允许非人类决策工具；

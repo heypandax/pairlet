@@ -1,3 +1,5 @@
+> **已下线**：本功能已于 2026-10-05 下线，见 [`docs/DECLINED-REQUIREMENTS.md`](../DECLINED-REQUIREMENTS.md) 的 D3；以下内容仅作设计史保留。
+
 # Session Handoff —— 运行时上下文协作接力
 
 > 状态：**已实现并保留，作为运行时上下文交接能力**

@@ -1,8 +1,10 @@
+> **已下线**：会话交接与协作联系人已于 2026-10-05 下线，见[调研后不做的需求案例集](../DECLINED-REQUIREMENTS.md)的 D3；本文是当时的使用说明，仅作历史记录保留。
+
 # CC Pocket 协作接力使用说明
 
 > 状态：**现有运行时上下文交接能力的使用说明**
 >
-> 并列能力：[`design/REVIEW-REQUEST.md`](./design/REVIEW-REQUEST.md) —— 不共享原 Session，由接收者使用自己电脑上的 Agent 和上下文评审 MR / 文档
+> 并列能力：[`design/REVIEW-REQUEST.md`](../design/REVIEW-REQUEST.md) —— 不共享原 Session，由接收者使用自己电脑上的 Agent 和上下文评审 MR / 文档
 >
 > 适用版本：当前已有的 `Session Handoff` 实现（2026-08-02）
 >
