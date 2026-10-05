@@ -10,7 +10,7 @@ import dev.ccpocket.protocol.Frame
 
 /**
  * The TRANSPORT-boundary gate for an EXECUTION credential (#367 G1), the twin of
- * [dev.ccpocket.daemon.bridge.BridgeGuard] / [dev.ccpocket.daemon.handoff.CollaboratorGuard]: it runs in
+ * [dev.ccpocket.daemon.bridge.BridgeGuard] / [dev.ccpocket.daemon.bridge.GuestGuard]: it runs in
  * [dev.ccpocket.daemon.relay.DeviceSessions] on the only path where the deviceId is proven by the Noise
  * static key, BEFORE anything reaches [ExecutionRunPlane].
  *

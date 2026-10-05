@@ -48,7 +48,7 @@ class LanE2E(
      *  can supply a fixture instead of the real ~/.cc-pocket/devices.json. */
     val pairedDevices: () -> Map<String, ByteArray> = { PairedDevices.load() },
     /**
-     * Is [String] a RESTRICTED credential (bridge #91 / guest #115 / collaborator / execution #367)?
+     * Is [String] a RESTRICTED credential (bridge #91 / guest #115 / execution #367)?
      * Such a key is structurally barred from this gate already — it lives in its own credential file and
      * never in devices.json, which is the only allow-list [pairedDevices] reads — so this is a SECOND,
      * explicit refusal, and it exists because of #367.
@@ -83,11 +83,11 @@ class WsConnection(
     private val router: RequestRouter,
     private val registry: SessionRegistry,
     private val e2e: LanE2E,
-    /** The owner control planes (share #115 / bridge #91 / collaborator SESSION-HANDOFF §4.1) — served on
+    /** The owner control planes (share #115 / bridge #91) — served on
      *  the LAN transport too, because the desktop app on the daemon's own machine arrives HERE, not over
      *  the relay, and every LAN peer is a full-power owner by construction (restricted credentials can't
      *  pass the LAN gate). Null while the relay link is still coming up. */
-    private val ownerControls: (() -> Triple<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?, dev.ccpocket.daemon.handoff.CollaboratorControl?>)? = null,
+    private val ownerControls: (() -> Pair<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?>)? = null,
 ) {
     private val outbox = Channel<Envelope>(Channel.BUFFERED)
     private val nextId = AtomicLong(0)
@@ -225,10 +225,6 @@ class WsConnection(
     }
 
     private suspend fun pump(crypto: E2ESession) = coroutineScope {
-        // handoff fan-out target (SESSION-HANDOFF.md): every LAN peer is a full-power owner by
-        // construction (the gate refuses restricted credentials), so it may see HandoffUpdated pushes.
-        // Instance-keyed (one sink per connection) — MUST detach on disconnect, see the finally below.
-        registry.handoffs?.attach(sink)
         // project-pin pushes (issue #362) for this gated socket's device. Resolved at emission, and re-checked
         // by the writer.
         val pins = router.projectPinService
@@ -238,8 +234,8 @@ class WsConnection(
                 sink.emit(dev.ccpocket.protocol.ProjectPinsState(subscriptionId = subscription, snapshot = snapshot))
             }
         }
-        // managed session list pushes (issue #360): every LAN peer is an owner by construction (see the handoff
-        // attach above). Resolved at emission against THIS socket's current declaration and agent vocabulary, and
+        // managed session list pushes (issue #360): every LAN peer is an owner by construction (the gate refuses
+        // restricted credentials). Resolved at emission against THIS socket's current declaration and agent vocabulary, and
         // the sink's own allowedForCaps gate re-checks the frame type.
         // #360 security review M2: a GATED socket whose device was revoked while idle must not receive a push. The frame
         // is still handed to the writer, which re-checks the allow-list right before sealing, drops it and closes the
@@ -295,7 +291,7 @@ class WsConnection(
         }
         // A revoke cuts a gated socket the moment it is written (audit 2026-10-04): the epoch check in the read
         // loop below only ran when THIS device sent a frame, so a silent revoked device kept receiving every
-        // session stream, approval card and handoff/review row meanwhile. Throwing fails this scope — reader
+        // session stream and approval card meanwhile. Throwing fails this scope — reader
         // and writer with it — exactly like the writer's own "device revoked" refusal.
         val revokeWatch = if (gatedDeviceId != null) launch {
             PairedDevices.epochChanges.collect { epoch ->
@@ -366,8 +362,8 @@ class WsConnection(
                             // owner control planes first (share #115 / bridge #91) — the same dispatcher the
                             // relay transport uses, so the two paths can't drift. Falls through to the router
                             // for everything else (and when the controls aren't up yet).
-                            val (sc, bc, cc) = ownerControls?.invoke() ?: Triple(null, null, null)
-                            if (dispatchOwnerControl(env.body, sc, bc, cc) { sink.emit(it) }) return@launch
+                            val (sc, bc) = ownerControls?.invoke() ?: (null to null)
+                            if (dispatchOwnerControl(env.body, sc, bc) { sink.emit(it) }) return@launch
                             // gatedDeviceId = the LAN-gate-authenticated paired device (same identity space
                             // as the relay's)
                             router.handle(env.body, sink, caps = caps, deviceId = gatedDeviceId) { owned.add(it) }
@@ -384,7 +380,6 @@ class WsConnection(
                 }
             }
         } finally {
-            registry.handoffs?.detach(sink) // this connection's fan-out slot dies with the socket
             pins?.detach(sink)            // #362: same per-connection slot for pin pushes
             managed?.detach(sink)           // #360: …and for managed session list pushes
             caps.pinRetired = true          // …and a closed connection can never hold a pin subscription again

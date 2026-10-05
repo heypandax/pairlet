@@ -54,11 +54,6 @@ class DaemonCore(
     zcodeModels: dev.ccpocket.daemon.zcode.ZCodeModelService = dev.ccpocket.daemon.zcode.ZCodeModelService(),
     codexModels: CodexModelService = CodexModelService(),
     dshModels: dev.ccpocket.daemon.dsh.DshModelService = dev.ccpocket.daemon.dsh.DshModelService(),
-    /** Session Handoff (SESSION-HANDOFF.md): registry + guard + fan-out, shared by both transports.
-     *  Installed onto [SessionRegistry.handoffs] below so the router's drive gate, the §4.1 create
-     *  checks, the graceful-recall turn control and the idle-reaper protection all read one truth.
-     *  Injectable so a test can hand in a temp-store instance instead of the real ~/.cc-pocket one. */
-    val handoffs: dev.ccpocket.daemon.handoff.HandoffService = dev.ccpocket.daemon.handoff.HandoffService(),
     /** Project-pin sync (issue #362). The file store reads lazily — an embedded core that never receives a pin
      *  request never touches ~/.cc-pocket — and tests hand in a temp-file or in-memory store instead. */
     projectPinStore: dev.ccpocket.daemon.pins.ProjectPinStore =
@@ -99,7 +94,6 @@ class DaemonCore(
     val registry = SessionRegistry(scope, backends, approvals = approvals, grants = grants)
 
     init {
-        registry.handoffs = handoffs
         // issue #201: mirror the persisted "wait for my decision" preference into the per-ask read. Done
         // here (not lazily in ApprovalTimeout) so the object never has to know about DaemonPrefs — the
         // router writes the same pair whenever a client flips it.
@@ -118,9 +112,6 @@ class DaemonCore(
                 delay(SPAWNED_SWEEP_PERIOD_MS)
             }
         }
-        // periodic handoff expiry sweep + HandoffUpdated fan-out — on the core scope like the schedule
-        // pump below, so BOTH transports (relay client + local server) get it for free
-        scope.launch { handoffs.sweepLoop() }
     }
 
     val dirs = DirectoryService()
@@ -175,12 +166,8 @@ class DaemonCore(
                 // bounded window, or issue #201's wait would pin a process per fire (repeating schedules).
                 headless = true,
             )
-            // the handoff drive gate covers scheduled fires too (SESSION-HANDOFF.md §5.3: a WAITING/
-            // handed-off session accepts input from its controller only — the scheduler is never that)
-            val handoffDeny = if (convoId.isEmpty()) null else registry.driveDenied(convoId, "scheduler")
             val failure = when {
                 convoId.isEmpty() -> "agent unavailable"
-                handoffDeny != null -> handoffDeny.message
                 !registry.sendPrompt(SendPrompt(convoId, entry.prompt, promptId = "sched-${entry.id}", diagnostic = execution.context)) ->
                     "session unavailable (live in another client?)"
                 else -> null
@@ -271,13 +258,8 @@ class DaemonCore(
     var shareControl: dev.ccpocket.daemon.relay.ShareControl? = null
     @Volatile
     var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl? = null
-    /** The Collaborator Link contact plane (SESSION-HANDOFF.md §4.1) — same install/lifetime terms as
-     *  the two above (minting a connect ticket needs the relay link). */
-    @Volatile
-    var collaboratorControl: dev.ccpocket.daemon.handoff.CollaboratorControl? = null
-
     /**
-     * #367 G1: the EXECUTION credential BIND hook — same install/lifetime terms as the three above
+     * #367 G1: the EXECUTION credential BIND hook — same install/lifetime terms as the two above
      * (approving a grant mints a connect ticket, which needs the relay link).
      *
      * [dev.ccpocket.daemon.relay.DeviceSessions] calls it at the ONE moment an execution link's first
@@ -301,7 +283,7 @@ class DaemonCore(
 
     /**
      * The #367 planes, installed by the relay wiring through [installExecution] once the link is up —
-     * same lifetime rule as [collaboratorControl] and for the same reason: approving a grant mints a relay
+     * same lifetime rule as [executionControl] and for the same reason: approving a grant mints a relay
      * ticket, and the source client dials the relay. Null on a LAN-only `serve` and before the link opens.
      */
     @Volatile

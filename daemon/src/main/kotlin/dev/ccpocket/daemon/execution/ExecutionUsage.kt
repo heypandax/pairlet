@@ -18,7 +18,7 @@ import java.io.File
  * not created, an empty link store is not written) — so "unused" stays unused until real use.
  *
  * Deliberately NOT evidence: the existence of `execution-credentials.json`. [BridgeRegistry] rewrites that
- * file (as `{}`) on every bridge/guest/collaborator change, so its existence proves nothing; what counts is
+ * file (as `{}`) on every bridge/guest change, so its existence proves nothing; what counts is
  * whether the registry actually holds an EXECUTION credential.
  */
 class ExecutionUsage(

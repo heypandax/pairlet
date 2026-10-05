@@ -206,7 +206,7 @@ class RelayClient(
     /** Exposes the pairing-ceremony gate to the direct-LAN listener (see DeviceSessions.firstContactPending). */
     suspend fun deviceFirstContactPending(deviceId: String): Boolean = sessions.firstContactPending(deviceId)
 
-    /** #367: is [deviceId] a restricted credential (bridge / guest / collaborator / execution)? The LAN
+    /** #367: is [deviceId] a restricted credential (bridge / guest / execution)? The LAN
      *  gate refuses these EXPLICITLY as well as structurally — see [dev.ccpocket.daemon.server.LanE2E]. */
     fun deviceIsRestrictedCredential(deviceId: String): Boolean = sessions.bridges.isRestricted(deviceId)
 
@@ -267,49 +267,13 @@ class RelayClient(
             runners = bridgeRunners,
             liveCount = { ids -> core.registry.liveCountOf(ids) },
         )
-        // Collaborator Link contact plane (SESSION-HANDOFF.md §4.1), on the same relay-only footing as the
-        // share plane: minting a connect ticket needs the relay. The service doubles as the router's
-        // contact DIRECTORY (recipient-binding validation + labels + stats), installed on HandoffService.
-        val collaboratorService = dev.ccpocket.daemon.handoff.CollaboratorService(
-            accountId = identity.accountId,
-            daemonPubB64 = identity.e2ePubB64,
-            relayWsBase = relayWsBase,
-            ownerLabel = hostname,
-            registry = sessions.bridges,
-            mintTicket = { mintTicket(headless = true, collaborator = true) },
-            interactivePairingPending = { sessions.interactivePairingPending() },
-            revokeCredential = { deviceId -> revokeBridge(deviceId) },
-            revokeGrants = { deviceId -> core.handoffs.revokeRecipient(deviceId) },
-            fanoutToOwners = { frame -> core.handoffs.emitToOwners(frame) },
-        )
-        sessions.collaboratorControl = collaboratorService
-        core.handoffs.collaborators = collaboratorService
-        // #367: the execution planes, on exactly the same relay-only footing as the three planes above —
+        // #367: the execution planes, on exactly the same relay-only footing as the two planes above —
         // approving a grant mints a connect ticket, and the source half dials the relay. They load HERE
         // only on a machine with evidence of use (grants, an execution credential, a run journal, source
         // links/runs — see ExecutionUsage); anywhere else they load on first use (local control API, or an
         // execution frame on the transport), through the same installer, once per process.
         core.offerExecution(::installExecutionPlanes) {
             dev.ccpocket.daemon.execution.ExecutionUsage.defaults(core.executionRunRoot).reason(sessions.bridges)
-        }
-        // §3.4: the content-free, device-TARGETED offer nudge for an offline contact. The whole payload is
-        // built by PushPolicy from two opaque ids — nothing about the work rides the alert.
-        //
-        // CAPABILITY GATE: an older relay ignores NotifyPush.deviceId and degrades to the ACCOUNT fan-out,
-        // which would ring the OWNER's phone about someone else's offer. Below PROTO_V_TARGETED_PUSH we send
-        // nothing at all and fall back to the existing, honest behaviour — the recipient sees the offer on
-        // its next connect / foreground pull.
-        //
-        // NOT gated on core.prefs.pushEnabled: that preference is the OWNER's own "buzz my phone" switch (it
-        // de-registers the OWNER's token), and it has no standing over whether a colleague gets told someone
-        // is waiting on them. The recipient's own notification toggle clears the recipient's token at the
-        // relay, which is the control that actually belongs to the person being alerted.
-        core.handoffs.offerPush = dev.ccpocket.daemon.handoff.OfferPush { handoffId, recipientDeviceId ->
-            if (PushPolicy.offerPushAllowed(relayProtoV)) {
-                controlOutbox.send(PushPolicy.offerPush(handoffId, recipientDeviceId))
-            } else {
-                log.info("offer ${handoffId.take(8)}…: relay has no targeted push (protoV=$relayProtoV) — skipping the nudge")
-            }
         }
         // register the BUILT-IN engines by wire kind (issue #91 follow-up): in-process, driven through the
         // same guard + router an external bridge passes — see FeishuEngine. A new IM adds one line here.
@@ -367,7 +331,7 @@ class RelayClient(
      * session the user had already tapped away from stayed warm — and invisible to the picker — for days.
      * [SessionRegistry.reapIdle] now spares only conversations with a reachable attached view (a relay
      * `dev:` view while the peer is online, a LAN view while a socket lives) plus the usual busy /
-     * pending-ask / handoff shields; everything else is released on the same 90s clock as before.
+     * pending-ask shields; everything else is released on the same 90s clock as before.
      */
     private suspend fun reaperLoop() {
         residentLoop(REAP_SCAN_MS, onFailure = { log.error("idle reaper pass failed — next pass in ${REAP_SCAN_MS}ms", it) }) {
@@ -402,9 +366,9 @@ class RelayClient(
     /** Ask the relay to mint a pairing ticket, and remember it as the next device's handshake PSK.
      *  [headless] mints a BRIDGE ticket (issue #91): it skips the interactive-mint exclusion stamp so
      *  only real phone pairings block a headless mint — the caller records the intent right after.
-     *  [collaborator] additionally marks it a Collaborator Link INBOX (§3.4) — still headless (presence-
-     *  invisible, outside the owner's push fan-out) but allowed to hold its own push token and be woken by
-     *  a targeted NotifyPush. Only [dev.ccpocket.daemon.handoff.CollaboratorService] passes it. */
+     *  [collaborator] sets the relay's `collaborator` ticket marker — still headless (presence-invisible,
+     *  outside the owner's push fan-out). Only the #367 execution mint passes it now ([installExecutionPlanes]);
+     *  the marker is named after the retired Collaborator Link that introduced it. */
     /**
      * @param arm normally true: the raw relay ticket becomes the first-contact PSK. #367 passes FALSE —
      *   an execution link's PSK is `HKDF(ticket ‖ inviteSecret)` and the caller arms THAT instead. Arming
@@ -493,6 +457,9 @@ class RelayClient(
                             }
                         }
                     }
+                    // no replay barrier will come from an old relay: ask for the retired collaborators' revokes now,
+                    // once the control writer above is draining the outbox
+                    if (relayProtoV < PROTO_V_ATTACH_REPLAY_COMPLETE) revokeRetiredCollaborators()
                     try {
                         for (frame in incoming) when (frame) {
                             is WsFrame.Binary -> Wire.unwrapDevice(frame.data)?.let { (deviceId, payload) ->
@@ -561,15 +528,32 @@ class RelayClient(
                     // into a destructive prune.
                     sessions.reconcileReplay(authoritativeEmpty = true)
                     log.info("attach device replay complete (relay protoV=$relayProtoV)")
+                    // the relay's device set is known now: any retired collaborator it still carries is revoked
+                    revokeRetiredCollaborators()
                 } else {
                     log.warn("ignoring attach replay marker from relay protoV=$relayProtoV")
                 }
             }
-            is DeviceRevoked -> sessions.onDeviceRevoked(body.deviceId)
+            is DeviceRevoked -> sessions.onRelayDeviceRevoked(body.deviceId)
             is PeerPresence -> { dev.ccpocket.observability.Diagnostics.connection(diagnosticConnectionId, body.connectionId?.validated()); peerOnline = body.online; log.info("peer ${if (body.online) "online" else "offline"}") }
             is Pong -> { if (!sawPong) log.info("relay heartbeat armed (pong received)"); sawPong = true; lastPongAt = System.currentTimeMillis() }
             else -> {}
         }
+    }
+
+    /**
+     * Retired Collaborator Link credentials (session handoff / review contacts, 2026-10): their keys were
+     * cleared at startup, but each one is still a live device in this account at the relay until revoked
+     * there. Ask once per attach, after the relay's device set is known; the relay confirms each with
+     * `DeviceRevoked` ([DeviceSessions.onRelayDeviceRevoked]) or leaves it out of its next authoritative
+     * replay, and either removes the tombstone. Queued on the control outbox like every other control frame,
+     * so a link that drops first simply asks again on the next attach.
+     */
+    private suspend fun revokeRetiredCollaborators() {
+        val revokes = sessions.pendingRetiredRevocations()
+        if (revokes.isEmpty()) return
+        log.info("asking the relay to revoke ${revokes.size} retired collaborator credential(s)")
+        revokes.forEach { controlOutbox.send(it) }
     }
 
     private fun controlText(frame: ToRelay): String =

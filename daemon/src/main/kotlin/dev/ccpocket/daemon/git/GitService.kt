@@ -90,8 +90,8 @@ import kotlin.io.path.isDirectory
  * replayed, moved to another conversation, or re-aimed at a different file/worktree. #281 rides this
  * same table — there is deliberately no second token semantics in the codebase.
  *
- * Owner-only is enforced OUTSIDE this class (GuestCaps/BridgeCaps/CollaboratorCaps default-deny plus an
- * explicit three-credential check in RequestRouter): this class assumes it is already talking to the
+ * Owner-only is enforced OUTSIDE this class (GuestCaps/BridgeCaps default-deny plus an
+ * explicit owner check in RequestRouter): this class assumes it is already talking to the
  * owner and concerns itself with the git-level guards.
  */
 class GitService(

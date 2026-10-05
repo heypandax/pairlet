@@ -57,8 +57,8 @@ class ShareService(
         if (interactivePairingPending()) {
             return ShareCreated(ok = false, error = "a phone pairing is still valid — try again in ~2 minutes")
         }
-        // issue #207: claim the one mint slot BEFORE the suspending relay round-trip (see
-        // CollaboratorService.createTicket — the bare intentPending() check raced overlapping mints)
+        // issue #207: claim the one mint slot BEFORE the suspending relay round-trip (the bare
+        // intentPending() check raced overlapping mints)
         if (!registry.reserveMint()) {
             return ShareCreated(ok = false, error = "another pairing is in progress — try again shortly")
         }

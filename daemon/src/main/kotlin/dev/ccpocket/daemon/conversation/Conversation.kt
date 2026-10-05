@@ -152,12 +152,6 @@ class Conversation(
      * the LINK FINGERPRINT they confirmed, so the card is answerable without opening a terminal.
      */
     private val askOriginLabel: String? = null,
-    /** COLLABORATOR handoff (SESSION-HANDOFF.md §8.3): the Handoff Grant's operation ceiling this
-     *  conversation runs under. Non-null → the PermissionBridge HARD-REFUSES write tools
-     *  (Write/Edit/…) before any ask exists unless the access explicitly grants scoped writes —
-     *  the recipient is the lease controller and answers its own asks, so a mere ask is no wall.
-     *  Null = not a handoff-granted conversation. */
-    private val handoffAccess: dev.ccpocket.protocol.HandoffAccess? = null,
     /** This conversation was opened by a HEADLESS fire (the scheduler) — no client is attached and its sink
      *  is a black hole. It is still the owner's own session in every other respect, but issue #201's
      *  "wait for my decision" must NOT apply: nobody can see the card, so waiting a week would only pin a
@@ -609,12 +603,12 @@ class Conversation(
      *  managed-list hook), read at report time. Set by [dev.ccpocket.daemon.session.SessionRegistry]; null = none. */
     @Volatile var nativeSessionHookProvider: () -> dev.ccpocket.daemon.session.NativeSessionHook? = { null }
 
-    /** issue #360 security review M1: this conversation was opened by the OWNER (no bridge origin, no guest scope, no
-     *  collaborator grant) — fixed by the registry at open, inherited by a rewind branch. Only such conversations'
+    /** issue #360 security review M1: this conversation was opened by the OWNER (no bridge origin, no guest scope) —
+     *  fixed by the registry at open, inherited by a rewind branch. Only such conversations'
      *  native ids are registered into the managed list. Fails closed: false until the registry says otherwise.
      *
      *  Deliberately set ONCE, by the open that CREATED the conversation. A later open that hot-reattaches to it — the
-     *  owner rejoining a live session a guest / bridge / collaborator started — attaches a view and does NOT re-evaluate
+     *  owner rejoining a live session a guest / bridge started — attaches a view and does NOT re-evaluate
      *  this: such a session never becomes owner-created, so its native id stays in discovery for an explicit import
      *  (security review R3; conservative by design, pinned by ConversationNativeSessionHookTest). */
     @Volatile var ownerCreated: Boolean = false
@@ -1069,19 +1063,15 @@ class Conversation(
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
     fun currentMode(): PermissionMode = mode
 
-    /** Does this live conversation already enforce EXACTLY the given collaborator grant walls
-     *  (pathScope + access ceiling)? SessionRegistry's hot→cold gate (SESSION-HANDOFF §8.3): a
-     *  collaborator open that hits a live convo may only reattach when the walls match — the owner's
-     *  wall-less convo (both null here) never matches a grant, so it is closed and rebuilt cold. */
-    internal fun matchesGrant(scope: List<String>?, access: dev.ccpocket.protocol.HandoffAccess?): Boolean =
-        pathScope == scope && handoffAccess == access
+    /** Does this live conversation enforce EXACTLY the given path scope (null = an owner's, wall-less)? A reattach
+     *  only applies the caller's mode when it does (SessionRegistry), and a rewind only runs on a wall-less one. */
+    internal fun matchesGrant(scope: List<String>?): Boolean = pathScope == scope
 
     /** True while this conversation still streams to [s] — the LAN grace-close ownership check. */
     fun isAttachedTo(s: OutboundSink): Boolean = sinks.containsKey(sinkKey(s))
 
-    /** Every client currently streaming from this conversation. Used by the handoff hot→cold rebuild
-     *  (SESSION-HANDOFF §3.3): the conversation being replaced hands its viewers over, so the initiator
-     *  keeps watching the SAME session live instead of having to re-open it by hand. */
+    /** Every client currently streaming from this conversation. A rewind hands them over to the branch that
+     *  replaces it, so they keep watching the SAME session live instead of having to re-open it by hand. */
     internal fun attachedSinks(): List<OutboundSink> = sinks.values.toList()
 
     /** Remove [s]'s view of this conversation; true when no clients remain (caller may close for real). */
@@ -2035,14 +2025,11 @@ class Conversation(
             // issue #201 "wait for my decision" — ONLY the owner's own, CLIENT-DRIVEN session. Excluded:
             //  - BRIDGE (origin != null): driven by whoever is in the chat, approved by someone who isn't
             //    watching the session — a card that never expires there is a standing foothold.
-            //  - GUEST (pathScope != null) and COLLABORATOR (handoffAccess != null): they answer their own
-            //    asks under access the owner granted. handoffAccess is checked DIRECTLY rather than trusting
-            //    pathScope as a proxy — a collaborator open carries origin == null, and its pathScope is
-            //    derived from canonicalization that can in principle yield an empty list.
+            //  - GUEST (pathScope != null): it answers its own asks under access the owner granted.
             //  - HEADLESS (the scheduler): nobody can see the card, so waiting would pin one CLI process and
             //    one un-reapable conversation per fire — a repeating schedule would accumulate them.
             noAutoDeny = {
-                origin == null && pathScope == null && handoffAccess == null && !headless &&
+                origin == null && pathScope == null && !headless &&
                     ApprovalTimeout.noAutoDeny
             },
             // a bridge-origin ask is a one-off human decision (issue #91): never offer/honor "always
@@ -2092,8 +2079,6 @@ class Conversation(
             // GUEST folder-share (issue #115): confine every file tool to the shared roots
             pathScope = pathScope,
             workdir = workdir.toString(),
-            // COLLABORATOR handoff (§8.3): REVIEW_READ_ONLY hard-refuses write tools before any ask
-            handoffAccess = handoffAccess,
             // #367 G1: a run submitted by a REMOTE machine. Adds the execution deny-list INSIDE the
             // workspace (daemon state dir, agent config, git hooks, owner-executed files) — see
             // [dev.ccpocket.daemon.execution.ExecutionSandbox]. Derived from the origin, not passed in,

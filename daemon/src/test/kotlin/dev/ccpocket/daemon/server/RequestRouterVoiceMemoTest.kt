@@ -10,8 +10,6 @@ import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
 import dev.ccpocket.daemon.execution.ExecutionCaps
-import dev.ccpocket.daemon.handoff.CollaboratorCaps
-import dev.ccpocket.daemon.handoff.CollaboratorScope
 import dev.ccpocket.daemon.memo.FakeSummarizer
 import dev.ccpocket.daemon.memo.FakeTranscriber
 import dev.ccpocket.daemon.memo.MemoServiceLimits
@@ -26,7 +24,6 @@ import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.ClientCaps
-import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.VoiceMemoAudio
@@ -155,16 +152,13 @@ class RequestRouterVoiceMemoTest {
         val router = router()
         val upload = MemoUpload.random()
         val guest = GuestScope(listOf(tmp.path), emptySet(), "guest", null, AccessTier.entries.first())
-        val collab = CollaboratorScope("dev-c")
 
         val viaBridge = declared(router)
         router.handle(upload.start(), viaBridge, origin = "feishu-bot", caps = viaBridge.caps, deviceId = "dev-a")
         val viaGuest = declared(router)
         router.handle(upload.start(), viaGuest, guestScope = guest, caps = viaGuest.caps, deviceId = "dev-a")
-        val viaCollab = declared(router)
-        router.handle(upload.start(), viaCollab, caps = viaCollab.caps, deviceId = "dev-c", collabScope = collab)
 
-        for (conn in listOf(viaBridge, viaGuest, viaCollab)) assertTrue(conn.frames.isEmpty(), "no job, no refusal frame")
+        for (conn in listOf(viaBridge, viaGuest)) assertTrue(conn.frames.isEmpty(), "no job, no refusal frame")
         assertEquals(0, transcriber.calls.get())
     }
 
@@ -292,13 +286,9 @@ class RequestRouterVoiceMemoTest {
             assertFalse(GuestCaps.ingressAllowed(request), "guest ${request::class.simpleName}")
             assertFalse(BridgeCaps.ingressAllowed(request), "bridge ${request::class.simpleName}")
             assertFalse(ExecutionCaps.ingressAllowed(request), "execution ${request::class.simpleName}")
-            for (purpose in CollaboratorPurpose.entries) {
-                assertFalse(CollaboratorCaps.ingressAllowed(request, purpose), "collaborator ($purpose) ${request::class.simpleName}")
-            }
         }
         assertFalse(GuestCaps.egressAllowed(state))
         assertFalse(BridgeCaps.egressAllowed(state))
         assertFalse(ExecutionCaps.egressAllowed(state))
-        for (purpose in CollaboratorPurpose.entries) assertFalse(CollaboratorCaps.egressAllowed(state, purpose))
     }
 }

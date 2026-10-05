@@ -9,33 +9,37 @@ import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
-import dev.ccpocket.daemon.handoff.HandoffRegistry
-import dev.ccpocket.daemon.handoff.HandoffService
-import dev.ccpocket.daemon.handoff.HandoffStore
 import dev.ccpocket.daemon.identity.Identity
+import dev.ccpocket.daemon.pins.MemoryProjectPinStore
+import dev.ccpocket.daemon.pins.PinStoreState
+import dev.ccpocket.daemon.pins.ProjectPinService
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Envelope
-import dev.ccpocket.protocol.HandoffStatus
-import dev.ccpocket.protocol.HandoffUpdated
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.LanHello
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PocketJson
-import dev.ccpocket.protocol.SessionHandoff
+import dev.ccpocket.protocol.ProjectPinsSnapshot
+import dev.ccpocket.protocol.ProjectPinsState
+import dev.ccpocket.protocol.SyncProjectPins
 import dev.ccpocket.protocol.e2e.E2ECrypto
 import dev.ccpocket.protocol.e2e.E2ESession
 import dev.ccpocket.protocol.e2e.Wire
 import io.ktor.websocket.WebSocketExtension
 import io.ktor.websocket.WebSocketSession
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
@@ -63,7 +67,8 @@ import io.ktor.websocket.Frame as WsFrame
  * over the relay, and must see the same owner pushes a relay connection sees.
  *
  * So what is under test is the SYMMETRY, in both directions: a live LAN owner sees owner pushes, and the
- * sink dies with its own socket — not with a sibling's.
+ * sink dies with its own socket — not with a sibling's. The push used here is the project-pin broadcast
+ * (issue #362), which reaches every owner connection that has subscribed.
  */
 class LanOwnerFanOutTest {
 
@@ -117,7 +122,8 @@ class LanOwnerFanOutTest {
         /** The allow-list the gate consults per lookup — a fixture, never the developer's devices.json. */
         val allowed = ConcurrentHashMap<String, ByteArray>()
         val registry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { StubBackend() }))
-        val handoffs = HandoffService(HandoffRegistry(HandoffStore.load(tmp.resolve("handoffs.json"))))
+        val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val pins = ProjectPinService(MemoryProjectPinStore(PinStoreState(incarnation = INC)), serviceScope)
         val router = RequestRouter(
             registry = registry,
             dirs = DirectoryService(),
@@ -133,9 +139,10 @@ class LanOwnerFanOutTest {
                 dev.ccpocket.daemon.schedule.ScheduleStore.load(tmp.resolve("schedules.json")),
                 executor = { null },
             ),
+            projectPins = pins,
         )
 
-        init { registry.handoffs = handoffs }
+        fun close() = serviceScope.cancel()
     }
 
     /** One direct socket, served exactly as [DaemonServer] serves it: a freshly paired device opens it
@@ -177,31 +184,45 @@ class LanOwnerFanOutTest {
             @Suppress("UNREACHABLE_CODE") error("unreachable")
         }
 
-    private fun handoff(id: String) = SessionHandoff(
-        id = id, sourceSessionId = "sess-1", workdir = "/tmp/wd",
-        initiatorDeviceId = "devA", status = HandoffStatus.WAITING,
-    )
+    private suspend fun send(conn: Conn, body: dev.ccpocket.protocol.Frame) {
+        val text = PocketJson.encodeToString(Envelope("c", 0, body = body))
+        conn.ws.inbound.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, conn.session.seal(text.encodeToByteArray()))))
+    }
+
+    /** The owner client opts into pin pushes the way the app does: declare the capability, then fetch. */
+    private suspend fun subscribe(conn: Conn, id: String) {
+        val subscription = "sub-$id-0123456789abcdef"
+        send(conn, ClientCaps(supportsProjectPins = true))
+        send(conn, SyncProjectPins("fetch", subscription, "stream-$id-0123456789"))
+        val reply = assertNotNull(bodyOf(conn, withTimeout(5_000) { conn.ws.sent.receive() }) as? ProjectPinsState)
+        assertNull(reply.error)
+        assertEquals(subscription, reply.subscriptionId)
+    }
+
+    private fun pins(revision: Long) = ProjectPinsSnapshot(incarnation = INC, revision = revision)
 
     @Test
     fun a_lan_owner_receives_live_owner_pushes_and_stops_the_moment_its_socket_dies() = runBlocking {
         val f = Fixture(this)
         val conn = f.connect("devA")
         val ws = conn.ws
+        subscribe(conn, "devA")
 
         // 1. live: the push arrives on this socket without the client asking for anything
-        val handoffPush = awaitPush(conn) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
-        assertEquals("h-1", assertNotNull(handoffPush as? HandoffUpdated).handoff.id)
+        val pinPush = awaitPush(conn) { f.pins.broadcast(pins(1)) }
+        assertEquals(1, assertNotNull(pinPush as? ProjectPinsState).snapshot?.revision)
 
         // 2. the socket dies -> the sink goes with it
         ws.hangUp()
         conn.job.join()
         while (withTimeoutOrNull(20) { ws.sent.receive() } != null) Unit // drain anything already queued
 
-        f.handoffs.broadcast(listOf(handoff("h-2")))
+        f.pins.broadcast(pins(2))
         assertNull(
             withTimeoutOrNull(200) { ws.sent.receive() },
             "a detached connection must receive nothing — a leaked sink is a dead socket held forever",
         )
+        f.close()
     }
 
     /**
@@ -216,10 +237,12 @@ class LanOwnerFanOutTest {
         val secondConn = f.connect("devB")
         val first = firstConn.ws
         val second = secondConn.ws
+        subscribe(firstConn, "devA")
+        subscribe(secondConn, "devB")
 
         // both live
-        awaitPush(firstConn) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
-        awaitPush(secondConn) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
+        awaitPush(firstConn) { f.pins.broadcast(pins(1)) }
+        awaitPush(secondConn) { f.pins.broadcast(pins(1)) }
 
         first.hangUp()
         firstConn.job.join()
@@ -227,13 +250,18 @@ class LanOwnerFanOutTest {
         while (withTimeoutOrNull(20) { second.sent.receive() } != null) Unit
         while (withTimeoutOrNull(20) { first.sent.receive() } != null) Unit
 
-        val stillLive = awaitPush(secondConn) { f.handoffs.broadcast(listOf(handoff("h-3"))) }
-        assertEquals("h-3", assertNotNull(stillLive as? HandoffUpdated).handoff.id)
+        val stillLive = awaitPush(secondConn) { f.pins.broadcast(pins(3)) }
+        assertEquals(3, assertNotNull(stillLive as? ProjectPinsState).snapshot?.revision)
 
         assertNull(
             withTimeoutOrNull(200) { first.sent.receive() },
             "the connection that hung up stays detached",
         )
         second.hangUp()
+        f.close()
+    }
+
+    private companion object {
+        const val INC = "inc-0123456789abcdef"
     }
 }

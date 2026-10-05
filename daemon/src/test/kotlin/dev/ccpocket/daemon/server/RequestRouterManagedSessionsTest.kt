@@ -12,8 +12,6 @@ import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
 import dev.ccpocket.daemon.disk.ManagedSessionStore
 import dev.ccpocket.daemon.disk.canonicalManagedWorkdir
-import dev.ccpocket.daemon.handoff.CollaboratorCaps
-import dev.ccpocket.daemon.handoff.CollaboratorScope
 import dev.ccpocket.daemon.pins.DurablePinFiles
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
@@ -26,7 +24,6 @@ import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ClientCaps
-import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.DiscoverSessions
 import dev.ccpocket.protocol.DiscoveredSession
 import dev.ccpocket.protocol.DiscoveredSessions
@@ -176,14 +173,13 @@ class RequestRouterManagedSessionsTest {
     }
 
     @Test
-    fun guest_bridge_and_collaborator_are_forbidden_before_anything_is_read() = runBlocking {
+    fun guest_and_bridge_are_forbidden_before_anything_is_read() = runBlocking {
         val r = router(service())
         val guest = GuestScope(roots = listOf(project), ownedSessions = emptySet(), label = "guest", expiresAt = null, tier = AccessTier.REVIEW)
         val callers: List<Pair<String, suspend (Frame, Conn) -> Unit>> = listOf(
             "bridge" to { f, c -> r.handle(f, c, origin = "feishu-bot", caps = c.caps) },
             "guest" to { f, c -> r.handle(f, c, origin = "guest", guestScope = guest, caps = c.caps) },
             "guest-without-origin" to { f, c -> r.handle(f, c, guestScope = guest, caps = c.caps) },
-            "collaborator" to { f, c -> r.handle(f, c, caps = c.caps, deviceId = "devCollab", collabScope = CollaboratorScope("devCollab")) },
         )
         for ((who, call) in callers) {
             for (req in requests) {
@@ -207,12 +203,10 @@ class RequestRouterManagedSessionsTest {
         for (req in requests) {
             assertFalse(GuestCaps.ingressAllowed(req), "guest ${req::class.simpleName}")
             assertFalse(BridgeCaps.ingressAllowed(req), "bridge ${req::class.simpleName}")
-            for (purpose in CollaboratorPurpose.entries) assertFalse(CollaboratorCaps.ingressAllowed(req, purpose), "collaborator/$purpose")
         }
         for (reply in listOf(ManagedSessionsState(workdir = workdir), DiscoveredSessions("r", workdir, AgentKind.CLAUDE))) {
             assertFalse(GuestCaps.egressAllowed(reply))
             assertFalse(BridgeCaps.egressAllowed(reply))
-            for (purpose in CollaboratorPurpose.entries) assertFalse(CollaboratorCaps.egressAllowed(reply, purpose))
         }
     }
 

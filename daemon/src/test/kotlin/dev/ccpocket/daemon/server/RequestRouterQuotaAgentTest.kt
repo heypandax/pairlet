@@ -8,7 +8,6 @@ import dev.ccpocket.daemon.codex.CodexQuotaService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
-import dev.ccpocket.daemon.handoff.CollaboratorScope
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
@@ -20,7 +19,6 @@ import dev.ccpocket.protocol.CLAUDE_QUOTA_NO_TOKEN
 import dev.ccpocket.protocol.CLAUDE_QUOTA_OK
 import dev.ccpocket.protocol.ClaudeQuota
 import dev.ccpocket.protocol.ClaudeQuotaGet
-import dev.ccpocket.protocol.HandoffAccess
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,7 +42,7 @@ import kotlin.test.assertTrue
  *     `agent` is a COERCED enum, meaning a wire name this daemon does not know arrives as CLAUDE, is
  *     answered with the Claude allowance, and must be LABELLED claude. Stamping the service's own idea of
  *     its agent instead would hand that client a Claude number wearing the label it hoped for.
- *  2. **Owner-only, unchanged.** This is account-wide BILLING state; a bridge/guest/collaborator gets
+ *  2. **Owner-only, unchanged.** This is account-wide BILLING state; a bridge/guest gets
  *     SILENCE (no reply frame at all), never an empty snapshot that would read as "your allowance is fine".
  *
  * Both quota services are injected with seams, so nothing here reaches the keychain, the network or a
@@ -95,13 +93,12 @@ class RequestRouterQuotaAgentTest {
         frame: ClaudeQuotaGet,
         origin: String? = null,
         guestScope: GuestScope? = null,
-        collabScope: CollaboratorScope? = null,
     ): ClaudeQuota? = runBlocking {
         val got = CompletableDeferred<ClaudeQuota>()
         router(CoroutineScope(Dispatchers.Default)).handle(
             frame,
             { f -> if (f is ClaudeQuota) got.complete(f) },
-            origin = origin, guestScope = guestScope, collabScope = collabScope,
+            origin = origin, guestScope = guestScope,
         )
         // a refusal is SILENCE, so the negative cases must be asserted by waiting and getting nothing
         withTimeoutOrNull(2_000) { got.await() }
@@ -165,21 +162,11 @@ class RequestRouterQuotaAgentTest {
         ownedSessions = emptySet(), label = "alex", expiresAt = null, tier = AccessTier.COLLABORATE,
     )
 
-    private fun collaborator() = CollaboratorScope(
-        deviceId = "dev-1", pathScope = emptyList(), access = HandoffAccess.REVIEW_READ_ONLY,
-    )
-
     @Test
-    fun a_bridge_a_guest_and_a_collaborator_all_get_SILENCE_on_every_agent() {
+    fun a_bridge_and_a_guest_both_get_SILENCE_on_every_agent() {
         for (agent in listOf(AgentKind.CLAUDE, AgentKind.CODEX)) {
             assertNull(reply(ClaudeQuotaGet(agent = agent), origin = "feishu:group-1"), "bridge/$agent")
             assertNull(reply(ClaudeQuotaGet(agent = agent), origin = "alex", guestScope = guest()), "guest/$agent")
-            // the collaborator case is the one the older two-term owner test waved through: its `origin`
-            // AND its `guestScope` are both null
-            assertNull(
-                reply(ClaudeQuotaGet(agent = agent), origin = null, guestScope = null, collabScope = collaborator()),
-                "collaborator/$agent",
-            )
         }
     }
 

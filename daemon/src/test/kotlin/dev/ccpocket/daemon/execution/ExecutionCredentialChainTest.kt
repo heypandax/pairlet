@@ -11,7 +11,6 @@ import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ClientCaps
-import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.EXECUTION_FRAME_BUDGET_BYTES
 import dev.ccpocket.protocol.Envelope
@@ -68,7 +67,7 @@ import io.ktor.websocket.Frame as WsFrame
  *
  *  - an EXECUTION credential is refused every owner / session / review / handoff frame and never receives
  *    a [DaemonInfo], never gets a push slot, never joins the LAN gate;
- *  - a bridge / guest / collaborator (of every purpose) / provisional key is refused every RUN frame;
+ *  - a bridge / guest / (retired) collaborator / provisional key is refused every RUN frame;
  *  - a confirmed credential of an UNKNOWN kind falls into the explicit `else` refusal, not the owner branch;
  *  - the #207 mint slot is mutually exclusive between an execution approval and every other pairing;
  *  - the frame byte budget is enforced before anything becomes work;
@@ -230,7 +229,7 @@ class ExecutionCredentialChainTest {
         val credentials = buildList {
             add("bridge" to BridgeSpec("feishu-bot", roots))
             add("guest" to BridgeSpec("guest", roots, kind = CredentialKind.GUEST, expiresAt = clock + 3_600_000, tier = AccessTier.REVIEW))
-            for (p in CollaboratorPurpose.entries) add("collab-${p.name.lowercase()}" to BridgeSpec("peer", roots, kind = CredentialKind.COLLABORATOR, purpose = p))
+            add("collaborator" to BridgeSpec("peer", roots, kind = CredentialKind.COLLABORATOR))
         }
         for ((i, pair) in (credentials.map { it to false } + listOf(("provisional" to BridgeSpec("late", roots)) to true)).withIndex()) {
             val (cred, lapse) = pair
@@ -301,12 +300,12 @@ class ExecutionCredentialChainTest {
         assertTrue(harness.bridges.intentPending(clock))
         assertFalse(harness.bridges.reserveMint(clock), "another mint cannot start while an execution intent pends")
         assertFalse(
-            harness.bridges.recordIntent("other-ticket", BridgeSpec.collaborator("peer"), 600_000, clock),
+            harness.bridges.recordIntent("other-ticket", BridgeSpec("peer", emptyList(), kind = CredentialKind.COLLABORATOR), 600_000, clock),
             "a collaborator intent cannot interleave",
         )
         // …and the reverse: a pending collaborator intent refuses an execution approval
         clock += 600_000L + BridgeRegistry.INTENT_GRACE_MS + 1 // let the execution intent lapse
-        assertTrue(harness.bridges.recordIntent("collab-ticket", BridgeSpec.collaborator("peer"), 600_000, clock))
+        assertTrue(harness.bridges.recordIntent("collab-ticket", BridgeSpec("peer", emptyList(), kind = CredentialKind.COLLABORATOR), 600_000, clock))
         // …and the refusal says WHEN, not just "shortly": a spent invite holds the slot for its whole TTL
         val busy = assertIs<ExecutionTarget.Approval.Refused>(harness.target.approve(draft()))
         assertEquals("mint_busy", busy.code)

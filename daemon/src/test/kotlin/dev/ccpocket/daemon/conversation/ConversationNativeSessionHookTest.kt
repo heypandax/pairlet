@@ -9,7 +9,6 @@ import dev.ccpocket.daemon.session.NativeSessionHook
 import dev.ccpocket.daemon.session.NativeSessionReport
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.protocol.AgentKind
-import dev.ccpocket.protocol.HandoffAccess
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.OpenSession
@@ -205,15 +204,15 @@ class ConversationNativeSessionHookTest {
     }
 
     @Test
-    fun the_registry_fixes_the_three_way_owner_fact_at_open() = runBlocking {
+    fun the_registry_fixes_the_owner_fact_at_open() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val registry = SessionRegistry(
             scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { ScriptBackend(AgentKind.CLAUDE, listOf(script("noise"))) }),
         )
         try {
             val wd = Files.createTempDirectory("ccp-owner-fact").toString()
-            suspend fun openedAs(origin: String? = null, pathScope: List<String>? = null, access: HandoffAccess? = null): Boolean? {
-                val id = registry.open(OpenSession(wd, agent = AgentKind.CLAUDE), { }, origin = origin, pathScope = pathScope, handoffAccess = access)
+            suspend fun openedAs(origin: String? = null, pathScope: List<String>? = null): Boolean? {
+                val id = registry.open(OpenSession(wd, agent = AgentKind.CLAUDE), { }, origin = origin, pathScope = pathScope)
                 assertTrue(id.isNotEmpty())
                 return registry.ownerCreatedOf(id)
             }
@@ -221,8 +220,6 @@ class ConversationNativeSessionHookTest {
             assertEquals(false, openedAs(origin = "feishu-bot"), "bridge")
             assertEquals(false, openedAs(origin = "guest", pathScope = listOf(wd)), "guest")
             assertEquals(false, openedAs(pathScope = listOf(wd)), "guest scope alone")
-            assertEquals(false, openedAs(pathScope = listOf(wd), access = HandoffAccess.REVIEW_READ_ONLY), "collaborator")
-            assertEquals(false, openedAs(access = HandoffAccess.REVIEW_READ_ONLY), "collaborator grant alone")
         } finally {
             scope.cancel()
         }

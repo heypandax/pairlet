@@ -14,18 +14,18 @@ import dev.ccpocket.protocol.PocketError
 
 /**
  * The capability firewall for an EXECUTION link credential (#367). Same shape as
- * [dev.ccpocket.daemon.handoff.CollaboratorCaps] / [dev.ccpocket.daemon.bridge.GuestCaps]: both directions
+ * [dev.ccpocket.daemon.bridge.BridgeCaps] / [dev.ccpocket.daemon.bridge.GuestCaps]: both directions
  * are WHITELISTS and everything unlisted is denied, so a protocol addition reaches an execution caller only
  * after someone consciously admits it here.
  *
  * The baseline is ZERO of the existing surface: no session open/prompt/verdict, no discovery
- * (directories/sessions/files), no review plane, no handoff plane, no owner management, no shell. G0 admits
+ * (directories/sessions/files), no owner management, no shell. G0 admits
  * exactly one request — the grant-state query — so the link has something to prove itself with. G1 adds
  * the typed run frames; they are classified here AND authorised per frame by [ExecutionGuard] at the
  * transport boundary AND re-authorised by [ExecutionAuthorizer] inside the run plane.
  *
- * Isolation is two-sided and does not rest on this object alone: the Collaborator/Bridge/Guest
- * whitelists deny the execution frames by their own `else -> false`, which `ExecutionCapsTest` pins.
+ * Isolation is two-sided and does not rest on this object alone: the Bridge/Guest whitelists deny the
+ * execution frames by their own `else -> false`, which `ExecutionCapsTest` pins.
  */
 object ExecutionCaps {
 

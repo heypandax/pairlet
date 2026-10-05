@@ -17,7 +17,6 @@ import dev.ccpocket.daemon.session.SessionScan
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ClientCaps
-import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.DiscoverSessions
 import dev.ccpocket.protocol.DiscoveredSessions
@@ -214,7 +213,7 @@ class DeviceSessionsManagedSessionsTest {
         val credentials = buildList {
             add("bridge" to BridgeSpec("feishu-bot", root))
             add("guest" to BridgeSpec("guest", root, kind = CredentialKind.GUEST, expiresAt = System.currentTimeMillis() + 3_600_000, tier = AccessTier.REVIEW))
-            for (purpose in CollaboratorPurpose.entries) add("collab-${purpose.name.lowercase()}" to BridgeSpec("peer", root, kind = CredentialKind.COLLABORATOR, purpose = purpose))
+            add("collaborator" to BridgeSpec("peer", root, kind = CredentialKind.COLLABORATOR))
         }
         val slotsBefore = h.service.subscriberCount()
         for ((i, pair) in (credentials.map { it to false } + listOf(("provisional" to BridgeSpec("late", root)) to true)).withIndex()) {

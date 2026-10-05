@@ -54,7 +54,6 @@ fun isOwnerControlFrame(frame: dev.ccpocket.protocol.Frame): Boolean = when (fra
     is dev.ccpocket.protocol.CreateShare, is dev.ccpocket.protocol.ListShares, is dev.ccpocket.protocol.RevokeShare,
     is CreateBridge, is dev.ccpocket.protocol.ListBridges, is dev.ccpocket.protocol.RevokeBridge,
     is ConfigureBridgeRunner, is ControlBridgeRunner, is dev.ccpocket.protocol.DetachBridgeRunner,
-    is dev.ccpocket.protocol.CreateCollaboratorTicket, is dev.ccpocket.protocol.ListCollaborators, is dev.ccpocket.protocol.RemoveCollaborator,
     -> true
     else -> false
 }
@@ -63,7 +62,6 @@ suspend fun dispatchOwnerControl(
     frame: dev.ccpocket.protocol.Frame,
     share: ShareControl?,
     bridge: BridgeControl?,
-    collaborator: dev.ccpocket.daemon.handoff.CollaboratorControl? = null,
     emit: suspend (dev.ccpocket.protocol.ToPhone) -> Unit,
 ): Boolean {
     when (frame) {
@@ -76,12 +74,6 @@ suspend fun dispatchOwnerControl(
         is ConfigureBridgeRunner -> emit((bridge ?: return false).configureRunner(frame))
         is ControlBridgeRunner -> emit((bridge ?: return false).controlRunner(frame))
         is dev.ccpocket.protocol.DetachBridgeRunner -> emit((bridge ?: return false).detachRunner(frame.name))
-        // Collaborator Link contact management (SESSION-HANDOFF.md §4.1) — same owner-only footing
-        // no purpose argument: this frame is the App's SESSION HANDOFF invite and always has been, so it
-        // takes the mint's historical default.
-        is dev.ccpocket.protocol.CreateCollaboratorTicket -> emit((collaborator ?: return false).createTicket(frame.label))
-        is dev.ccpocket.protocol.ListCollaborators -> emit((collaborator ?: return false).list())
-        is dev.ccpocket.protocol.RemoveCollaborator -> emit((collaborator ?: return false).remove(frame.deviceId))
         else -> return false
     }
     return true
@@ -168,8 +160,8 @@ class BridgeService(
         if (interactivePairingPending()) {
             return BridgeCreated(ok = false, error = "a phone pairing is still valid — try again in ~2 minutes")
         }
-        // issue #207: claim the one mint slot BEFORE the suspending relay round-trip (see
-        // CollaboratorService.createTicket — the bare intentPending() check raced overlapping mints)
+        // issue #207: claim the one mint slot BEFORE the suspending relay round-trip (the bare
+        // intentPending() check raced overlapping mints)
         if (!registry.reserveMint()) {
             return BridgeCreated(ok = false, error = "another pairing is in progress — try again shortly")
         }

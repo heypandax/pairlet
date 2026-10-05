@@ -116,7 +116,7 @@ object ExecutionPolicy {
 
     /**
      * Backends whose approval chain the owner can actually police for a remote caller. Mirrors the
-     * collaborator rule ([dev.ccpocket.daemon.handoff.CollaboratorGuard]): OpenCode runs --auto, and
+     * restricted-credential rule in [dev.ccpocket.daemon.server.RequestRouter]'s OpenSession: OpenCode runs --auto, and
      * KIMI/ZCODE/DSH tool names are not normalised into the permission wall, so a ceiling would be
      * advisory there. Denied at approval, not merely at run time.
      */

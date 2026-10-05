@@ -1,10 +1,8 @@
 package dev.ccpocket.daemon.execution
 
 import dev.ccpocket.daemon.bridge.BridgeRegistry
-import dev.ccpocket.daemon.handoff.CollaboratorCaps
-import dev.ccpocket.daemon.handoff.decodeCollaboratorInvite
-import dev.ccpocket.daemon.handoff.decodeReviewContactInvite
-import dev.ccpocket.daemon.handoff.encodeUri
+import dev.ccpocket.daemon.bridge.BridgeSpec
+import dev.ccpocket.daemon.bridge.CredentialKind
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.peer.PeerChannel
 import dev.ccpocket.daemon.peer.PeerLink
@@ -12,7 +10,9 @@ import dev.ccpocket.daemon.peer.PeerLinkSecret
 import dev.ccpocket.daemon.peer.PeerLinkStore
 import dev.ccpocket.daemon.peer.PeerSession
 import dev.ccpocket.daemon.peer.b64
+import dev.ccpocket.daemon.peer.b64d
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.COLLAB_INVITE_URI_PREFIX
 import dev.ccpocket.protocol.CollaboratorInvite
 import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.EXECUTION_GRANT_INVITE_URI_PREFIX
@@ -21,9 +21,13 @@ import dev.ccpocket.protocol.ExecutionGrantQuery
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PocketError
+import dev.ccpocket.protocol.PocketJson
+import dev.ccpocket.protocol.REVIEW_CONTACT_INVITE_URI_PREFIX
 import dev.ccpocket.protocol.ToDaemon
 import dev.ccpocket.protocol.collaboratorFingerprint
+import dev.ccpocket.protocol.inviteUriPrefix
 import dev.ccpocket.protocol.e2e.E2ECrypto
+import dev.ccpocket.protocol.e2e.E2ESession
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.nio.file.Files
@@ -154,6 +158,11 @@ class ExecutionGrantG0Test {
 
     private fun randomSecret(): String = b64(ByteArray(32).also { SecureRandom().nextBytes(it) })
 
+    /** A collaborator / review-contact invite URI exactly as the retired doors published one (protocol types
+     *  only — this daemon no longer has a codec for them). */
+    private fun collabUri(inv: CollaboratorInvite): String =
+        inviteUriPrefix(inv.purpose) + b64(PocketJson.encodeToString(CollaboratorInvite.serializer(), inv).encodeToByteArray())
+
     // ------------------------------------------------------------------ happy path
 
     @Test
@@ -280,13 +289,16 @@ class ExecutionGrantG0Test {
         val appr = approve()
         val uri = appr.invite.encodeUri()
         val blob = uri.removePrefix(EXECUTION_GRANT_INVITE_URI_PREFIX)
-        assertNull(decodeReviewContactInvite(uri)); assertNull(decodeCollaboratorInvite(uri))
-        assertNull(decodeReviewContactInvite(blob)); assertNull(decodeCollaboratorInvite(blob))
+        // The retired collaborator / review-contact doors live on only in OLDER peers, which route by these URI
+        // prefixes and decode a CollaboratorInvite. The execution invite is addressed to neither, and its payload
+        // is not a CollaboratorInvite at all (none of its required fields) — so no older door can redeem it.
+        for (door in listOf(COLLAB_INVITE_URI_PREFIX, REVIEW_CONTACT_INVITE_URI_PREFIX)) assertFalse(uri.startsWith(door), door)
+        assertTrue(runCatching { PocketJson.decodeFromString(CollaboratorInvite.serializer(), b64d(blob).decodeToString()) }.isFailure)
         for (purpose in listOf(CollaboratorPurpose.REVIEW, CollaboratorPurpose.SESSION_HANDOFF)) {
             val inv = CollaboratorInvite("wss://relay.test", targetIdentity.accountId, targetIdentity.e2ePubB64, relay.mint().ticket, purpose = purpose)
-            assertNull(decodeExecutionInvite(inv.encodeUri()), "$purpose uri at execution door")
-            assertNull(decodeExecutionInvite(inv.encodeUri().substringAfter('#')), "$purpose blob at execution door")
-            assertEquals(ExecutionSource.Join.Refused("invite_invalid"), source.join(inv.encodeUri(), appr.grant.targetDaemonFingerprint))
+            assertNull(decodeExecutionInvite(collabUri(inv)), "$purpose uri at execution door")
+            assertNull(decodeExecutionInvite(collabUri(inv).substringAfter('#')), "$purpose blob at execution door")
+            assertEquals(ExecutionSource.Join.Refused("invite_invalid"), source.join(collabUri(inv), appr.grant.targetDaemonFingerprint))
         }
 
         val reviewTicket = relay.mint().ticket
@@ -312,10 +324,20 @@ class ExecutionGrantG0Test {
         assertEquals("awaiting_owner_confirm", assertIs<ExecutionSource.Query.Ok>(source.query(again.grant.grantId)).info.state)
         assertEquals(join.link.deviceId, store.byId(again.grant.grantId)!!.sourceDeviceId)
 
-        for (p in CollaboratorPurpose.entries) {
-            assertFalse(CollaboratorCaps.ingressAllowed(ExecutionGrantQuery("x"), p))
-            assertFalse(CollaboratorCaps.egressAllowed(ExecutionGrantInfo("x", 1, "active", 0), p))
-        }
+        // …and a COLLABORATOR credential (retired) bound on this very chain is refused at the transport gate
+        // outright: its execution frame reaches no plane, gets no reply of any kind, and never makes it an
+        // execution credential
+        val collabTicket = "collab-ticket"
+        assertTrue(harness.bridges.recordIntent(collabTicket, BridgeSpec("peer", emptyList(), kind = CredentialKind.COLLABORATOR), ttlMs = 600_000))
+        harness.sessions.onMintedTicket(collabTicket, headless = true)
+        val collabKeys = E2ECrypto.generateKeyPair()
+        harness.sessions.onDevicePaired("dev-collab", b64(collabKeys.publicRaw))
+        val init = E2ESession.initiator(collabKeys.privateRaw, collabKeys.publicRaw, targetIdentity.e2ePubRaw, collabTicket.encodeToByteArray())
+        val collab = init.finish(assertNotNull(harness.handshake("dev-collab", init.ephPublic)))
+        harness.send("dev-collab", collab, ExecutionGrantQuery(again.grant.grantId))
+        assertTrue(harness.drain("dev-collab", collab).isEmpty(), "no ingress, and nothing — no ExecutionGrantInfo, no error — egresses")
+        assertEquals(CredentialKind.COLLABORATOR, harness.bridges.kindOf("dev-collab"))
+        assertFalse(harness.bridges.isExecution("dev-collab"))
     }
 
     @Test

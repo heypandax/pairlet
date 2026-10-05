@@ -282,7 +282,6 @@ class RunService(
                 // and the file-tool wall in PermissionBridge
                 origin = RunService.originOf(run.grantId),
                 pathScope = listOf(root),
-                handoffAccess = null,
                 // #367 LOW-3: an approval from this run reaches the OWNER's phone naming the source they
                 // authorised and the link fingerprint they confirmed — never the opaque grant id. The
                 // remote caller still cannot answer it; there is no verdict frame on the execution wire.

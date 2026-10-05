@@ -133,7 +133,7 @@ internal class FixtureTransport(
 internal fun sealedLeaves(k: KClass<*>): List<KClass<*>> =
     if (k.sealedSubclasses.isEmpty()) listOf(k) else k.sealedSubclasses.flatMap { sealedLeaves(it) }
 
-/** Build a frame from its required ctor params (same approach as CollaboratorCapsTest). */
+/** Build a frame from its required ctor params. */
 internal fun instantiateFrame(cls: KClass<*>): Any {
     cls.objectInstance?.let { return it }
     val ctor = cls.primaryConstructor ?: cls.constructors.first()

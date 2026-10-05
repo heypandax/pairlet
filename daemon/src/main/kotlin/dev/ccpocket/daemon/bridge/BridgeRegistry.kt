@@ -43,6 +43,9 @@ class BridgeRegistry(
     // issue #367: the fourth credential file, derived the same way so a temp-dir test stays isolated
     private val executionKeyStore: File = store.parentFile?.let { File(it, "execution-credentials.json") }
         ?: ExecutionCredentialStore.file(),
+    // the retired-collaborator tombstones (see [retireCollaborators]), derived the same way
+    private val retiredCollaboratorStore: File = store.parentFile?.let { File(it, RetiredCollaboratorStore.FILE_NAME) }
+        ?: RetiredCollaboratorStore.file(),
 ) {
     private val log = logger("BridgeRegistry")
     private val b64enc: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
@@ -61,10 +64,13 @@ class BridgeRegistry(
     // deviceId -> sessionIds the guest started, PERSISTED so "visibility by initiator" survives a restart
     private val guestSessions = HashMap<String, MutableSet<String>>()
 
+    // deviceIds of retired Collaborator Link credentials whose relay-side revoke is not confirmed yet
+    // (see [retireCollaborators]); guarded by `this`
+    private val retired = LinkedHashSet<String>()
+
     init {
         BridgeStore.load(store).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.BRIDGE) }
         GuestStore.load(guestStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.GUEST) }
-        CollaboratorKeyStore.load(collaboratorKeyStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.COLLABORATOR) }
         ExecutionCredentialStore.load(executionKeyStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.EXECUTION) }
         runCatching {
             if (guestSessionStore.exists()) {
@@ -74,11 +80,43 @@ class BridgeRegistry(
         }
         val bridges = specs.values.count { it.kind == CredentialKind.BRIDGE }
         val guests = specs.values.count { it.kind == CredentialKind.GUEST }
-        val collabs = specs.values.count { it.kind == CredentialKind.COLLABORATOR }
         val executions = specs.values.count { it.kind == CredentialKind.EXECUTION }
-        if (bridges + guests + collabs + executions > 0) {
-            log.info("loaded $bridges bridge + $guests guest + $collabs collaborator + $executions execution credential(s)")
+        if (bridges + guests + executions > 0) {
+            log.info("loaded $bridges bridge + $guests guest + $executions execution credential(s)")
         }
+        retireCollaborators()
+    }
+
+    /**
+     * Session handoff and review contacts were retired (2026-10), and with them the Collaborator Link
+     * credential. Its keys are never loaded again. This runs once per start and does, in this order:
+     *
+     *  1. read the deviceIds out of collaborator-keys.json (every COLLABORATOR row — a row this daemon holds
+     *     as a live credential of another kind is left alone, since revoking it at the relay would cut that
+     *     credential);
+     *  2. merge them into the tombstone file ([RetiredCollaboratorStore]) — ids only, no key material;
+     *  3. only once that write has succeeded, empty collaborator-keys.json.
+     *
+     * A failed step 2 keeps the keys file as it is (fail closed: the next start retries); the ids are still
+     * tombstoned in memory, so this run treats them exactly as if the write had worked. A tombstoned id is
+     * KNOWN to [isRetiredCollaborator] until the relay confirms its revoke ([confirmRetired]) — the transport
+     * relies on that to keep a still-valid relay credential out of the full-power allow-list. Nothing here
+     * touches any other credential file.
+     */
+    private fun retireCollaborators() {
+        val stored = runCatching { RetiredCollaboratorStore.load(retiredCollaboratorStore) }
+            .onFailure { log.warn("retired-collaborator tombstones unreadable (${it.message}) — leaving them and the collaborator keys as they are") }
+        synchronized(this) { retired += stored.getOrNull().orEmpty() }
+        val rows = CollaboratorKeyStore.load(collaboratorKeyStore)
+        if (rows.isEmpty()) return
+        val ids = rows.filter { (id, entry) -> entry.spec.kind == CredentialKind.COLLABORATOR && id !in bridgePubs }.keys
+        val all = synchronized(this) { retired += ids; retired.toList() }
+        if (stored.isFailure || !RetiredCollaboratorStore.save(all, retiredCollaboratorStore)) {
+            log.warn("could not record ${ids.size} retired collaborator credential(s) — keeping collaborator-keys.json for the next start")
+            return
+        }
+        CollaboratorKeyStore.save(emptyMap(), collaboratorKeyStore)
+        log.info("retired ${ids.size} collaborator credential(s): keys cleared, relay revoke pending")
     }
 
     /** File entries carry their own kind in the spec (default BRIDGE for pre-#115 rows); [expected] is the
@@ -212,9 +250,29 @@ class BridgeRegistry(
     @Synchronized
     fun isGuest(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.GUEST && deviceId in bridgePubs
 
-    /** SESSION-HANDOFF.md §4.1: this deviceId is a confirmed COLLABORATOR link credential. */
+    /** A retired Collaborator Link credential whose relay-side revoke is not confirmed yet: its key is gone,
+     *  but the relay may still announce the id, so it must be treated as known (never armed, never
+     *  allow-listed, never bound to another credential). */
     @Synchronized
-    fun isCollaborator(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.COLLABORATOR && deviceId in bridgePubs
+    @Synchronized
+    fun isRetiredCollaborator(deviceId: String): Boolean = deviceId in retired
+
+    /** Every tombstoned id the relay still has to be asked to revoke. */
+    @Synchronized
+    fun retiredCollaboratorIds(): Set<String> = retired.toSet()
+
+    /** The relay no longer honours [deviceId] (it confirmed the revoke, or its authoritative replay left the id
+     *  out): drop the tombstone. True when [deviceId] was one. A failed write only means the next start asks
+     *  the relay again, which it answers by doing nothing. */
+    @Synchronized
+    fun confirmRetired(deviceId: String): Boolean {
+        if (!retired.remove(deviceId)) return false
+        if (!RetiredCollaboratorStore.save(retired.toList(), retiredCollaboratorStore)) {
+            log.warn("retired collaborator ${deviceId.take(8)}… confirmed revoked, but the tombstone file could not be updated")
+        }
+        log.info("retired collaborator ${deviceId.take(8)}… revoked at the relay — tombstone removed")
+        return true
+    }
 
     /** issue #367: this deviceId is a confirmed EXECUTION link credential (a peer daemon's run link). */
     @Synchronized
@@ -329,9 +387,10 @@ class BridgeRegistry(
         specs.entries.filter { it.value.kind == CredentialKind.GUEST && it.value.expired(now) }.map { it.key }
 
     private fun persist() {
-        // split by kind: bridges.json holds ONLY bridges, guests.json ONLY guests, collaborator-keys.json
-        // ONLY collaborators, execution-credentials.json ONLY execution links — the downgrade-isolation
-        // invariant (an older daemon reading its own files must never see a newer kind's key)
+        // split by kind: bridges.json holds ONLY bridges, guests.json ONLY guests, execution-credentials.json
+        // ONLY execution links — the downgrade-isolation invariant (an older daemon reading its own files
+        // must never see a newer kind's key). A retired COLLABORATOR row is never written anywhere: the
+        // keys file is only ever emptied, by [retireCollaborators].
         val byKind = bridgePubs.entries.groupBy { specs[it.key]?.kind }
         fun rows(kind: CredentialKind) = (byKind[kind] ?: emptyList()).associate { (id, pub) ->
             // keep each credential's ORIGINAL bind time — an unrelated persist (another bind, a revoke)
@@ -340,7 +399,6 @@ class BridgeRegistry(
         }
         BridgeStore.save(rows(CredentialKind.BRIDGE), store)
         GuestStore.save(rows(CredentialKind.GUEST), guestStore)
-        CollaboratorKeyStore.save(rows(CredentialKind.COLLABORATOR), collaboratorKeyStore)
         ExecutionCredentialStore.save(rows(CredentialKind.EXECUTION), executionKeyStore) // issue #367
 
     }

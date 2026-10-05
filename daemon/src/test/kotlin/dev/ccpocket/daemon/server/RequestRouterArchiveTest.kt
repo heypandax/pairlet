@@ -238,30 +238,6 @@ class RequestRouterArchiveTest {
     }
 
     @Test
-    fun a_collaborator_can_neither_archive_nor_enumerate() = runBlocking {
-        // A COLLABORATOR arrives with origin == null AND guestScope == null — only collabScope is set — so
-        // guarding on the first two alone is vacuous for exactly the weakest credential the product hands
-        // out (a link sent to a contact). Sabotage here is silent: hiding the owner's sessions everywhere.
-        val scope = CoroutineScope(Dispatchers.Default)
-        val r = router(scope, mapOf(dirA to listOf(summary("s1", dirA))))
-        val collab = dev.ccpocket.daemon.handoff.CollaboratorScope(deviceId = "dev-collab")
-
-        val emitted = mutableListOf<Frame>()
-        r.handle(
-            SetSessionArchived(dirA, "s1", archived = true),
-            { synchronized(emitted) { emitted += it } },
-            collabScope = collab,
-        )
-        val sessions = awaitFrame(emitted).single() as Sessions
-        assertEquals(listOf("s1"), sessions.items.map { it.sessionId }, "the mutation must not have applied")
-
-        val after = mutableListOf<Frame>()
-        r.handle(ListArchivedSessions, { synchronized(after) { after += it } }, collabScope = collab)
-        kotlinx.coroutines.delay(200)
-        assertTrue(synchronized(after) { after.isEmpty() }, "no archive enumeration for a collaborator")
-    }
-
-    @Test
     fun the_archive_view_clips_first_prompt_so_one_frame_cannot_overrun_the_relay() = runBlocking {
         // firstPrompt is untruncated on the wire and can be enormous (skill injection has produced ~800KB
         // single messages here). Unlike a per-project Sessions frame this one aggregates the WHOLE machine,
