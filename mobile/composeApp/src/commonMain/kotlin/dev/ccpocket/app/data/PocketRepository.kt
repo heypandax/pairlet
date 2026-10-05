@@ -2990,6 +2990,18 @@ class PocketRepository(
         // the auto-continue / repair offers name a session on the machine we are leaving (#137)
         limitOffer.value = null; limitConfirmed.value = null
         repairOffer.value = null; repairProgress.value = null
+        // daemon-side preferences are this computer's truth; null is the "not answered (yet)" state the settings
+        // pages gate on — kept, a next daemon too old to answer showed the last one's switches, and they did nothing
+        pushPrefs.value = null; approvalPrefs.value = null; approvalFullControlExpiryMs.value = null
+        // the rewind sheet names a cut in this computer's conversation (confirming it would send that anchor to the
+        // next computer's chat) and its refusal bar is this chat's too. sessionLineage / rewindAwaiting stay: both
+        // match on a daemon-minted convoId, which no other computer reproduces
+        rewindSheet.value = null; rewindError.value = null
+        // the archive toast's action re-sends SetSessionArchived for this computer's (workdir, session), and its
+        // target is what a later `archive_failed` resurrects (renameError is keyed by a session id: left as is)
+        archiveToast.value = null; archiveTarget = null
+        slashCommands.clear() // CommandList is per conversation; a backend that never sends one would inherit these
+        clearSessionPanels()
         convoId.value = null
         sessionsDir.value = null
         browseIntentDir = null // #349: a browse intent belongs to the link/machine that accepted the tap
@@ -3166,12 +3178,7 @@ class PocketRepository(
         clearAskQueue()
         transcript.clearMessages(); pendingImages.clear()
         resetHistoryPaging() // #147
-        terminalEntries.clear(); terminalBusy.value = false
-        changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
-        closeFileViewer()
-        clearGitState() // the Git panel is per-session too (#280/#281)
-        pathListing.value = null
-        resetFileBrowser() // …and the 全部 视角 (cache + view + level) belongs to the workdir we're leaving
+        clearSessionPanels()
         allowRules.clear()
         slashCommands.clear()
         clearBackgroundJobs()
@@ -3180,6 +3187,22 @@ class PocketRepository(
         contextUsed.value = null; contextWindow.value = null
         refreshing.value = false; sessionsRefreshing.value = false
         abandonVoice()
+    }
+
+    /**
+     * The open session's side panels — quick terminal, changed files + viewer, Git/worktrees, the @-completion
+     * listing and the file tree — and every reply deadline they armed. Leaving a COMPUTER drops them all
+     * ([disconnect], [demoteToSatellite]): `pathListing` and `changedFilesUnavailable` survive [openSession]
+     * itself, so without this the next computer's first chat completed `@` from the last computer's files and
+     * a fresh session's file panel opened on "unavailable".
+     */
+    private fun clearSessionPanels() {
+        terminalEntries.clear(); terminalBusy.value = false
+        changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
+        closeFileViewer()
+        clearGitState() // the Git panel is per-session too (#280/#281)
+        pathListing.value = null
+        resetFileBrowser() // …and the 全部 视角 (cache + view + level) belongs to the workdir we're leaving
     }
 
     /** Write-through for a binding's stored direct URL: persist, refresh the list, patch the active copy.

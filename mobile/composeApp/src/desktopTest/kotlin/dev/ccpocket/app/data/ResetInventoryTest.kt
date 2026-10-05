@@ -367,12 +367,22 @@ class ResetInventoryTest {
         //   GAP-桥接   DSC/SWC keep the bridge admin state (while bridgeControl IS cleared)
         //   GAP-共享   DSC/SWC keep the folder-share state (shareEnded: DSC only — the cold switch reloads it per account)
         //   GAP-交接   DSC/SWC keep handoff + collaborator state (only handoffsLoaded is cleared)
-        //   GAP-偏好   DSC/SWC keep the daemon-side push / approval preferences
-        //   GAP-回退   DSC/SWC keep the rewind sheet and lineage
-        //   GAP-提示   DSC/SWC keep the archive / rename toasts and their targets
-        //   GAP-会话视图 DSC/SWC keep slash commands and allow rules (DEM clears them)
-        //   GAP-面板   DSC/SWC/BCK/STP/DIR keep the Git / terminal / changed-files / file-viewer panels (only OPN/DEM clear)
-        //   GAP-降级   DEM keeps limitOffer/limitConfirmed/repairOffer/repairProgress; they resurface when the satellite is promoted
+        //   GAP-会话视图 DSC/SWC keep allow rules (DEM clears them) — verified harmless, deliberately untouched
+        // FIX-* = a former GAP that disconnect() now clears (the cold switch inherits it); OK-* = a former GAP judged
+        // harmless after reading every reader, kept on purpose:
+        //   FIX-偏好   push / approval prefs are daemon truth whose null means "not answered" — a next daemon too old
+        //              to answer showed the last computer's switches, which then did nothing
+        //   FIX-回退   the rewind sheet (confirm sent the last computer's anchor into the next chat) and its refusal bar
+        //   OK-回退    sessionLineage / rewindAwaiting match on a daemon-minted UUID convoId no other computer reproduces
+        //   FIX-提示   the archive toast's action re-sent the last computer's (workdir, session); archiveTarget is what
+        //              a later archive_failed resurrected
+        //   OK-提示    renameError is read only through a sessionId match (desktop sidebar), renameTarget only feeds it
+        //   FIX-会话视图 slash commands: a backend that never sends CommandList inherited the last computer's
+        //   FIX-面板   DSC/SWC drop the session panels + their armed deadlines (clearSessionPanels, shared with DEM).
+        //              BCK/STP/DIR still keep them — same computer, and openSession clears them before the next chat
+        //   OK-降级    DEM keeps limitOffer/limitConfirmed/repairOffer/repairProgress: both banners render only for a
+        //              matching convoId, the desktop (the only shell that demotes) renders neither, and the next
+        //              openSession on the promoted repo clears all four before any chat exists
         // NOTE-* = asymmetries this run found that the proposal's list does not name; recorded, not judged:
         //   NOTE-流式   transcript.streaming survives DSC/SWC/BCK/TKO/DIR
         //   NOTE-身份   DSC/SWC null convoId but keep sessionKey/currentSessionId/chatTitle/observing
@@ -490,14 +500,14 @@ class ResetInventoryTest {
             archiveSupported             K K K K K K K K
             archivedSessions             R R K K K K K K
             archivedRefreshing           R R K K K K K K
-            archiveToast                 K K K K K K K K  # GAP-提示
-            archiveTarget                K K K K K K K K  # GAP-提示
-            renameError                  K K K K K K K K  # GAP-提示
-            renameTarget                 K K K K K K K K  # GAP-提示
-            rewindSheet                  K K K K K K K K  # GAP-回退
-            rewindError                  K K K K K K K K  # GAP-回退
-            sessionLineage               K K K K K K K K  # GAP-回退
-            rewindAwaiting               K K K K K K K K  # GAP-回退
+            archiveToast                 R R K K K K K K  # FIX-提示
+            archiveTarget                R R K K K K K K  # FIX-提示
+            renameError                  K K K K K K K K  # OK-提示
+            renameTarget                 K K K K K K K K  # OK-提示
+            rewindSheet                  R R K K K K K K  # FIX-回退
+            rewindError                  R R K K K K K K  # FIX-回退
+            sessionLineage               K K K K K K K K  # OK-回退
+            rewindAwaiting               K K K K K K K K  # OK-回退
             transcript.messages          R R R R R R R R
             transcript.sessionNotice     R R R R R R R R
             transcript.streaming         K K R R K R K K  # NOTE-流式
@@ -526,38 +536,38 @@ class ResetInventoryTest {
             askBurstDone                 R R R R K K K K
             pendingApprovals             R R K K K K K K
             timedOutAskId                K K K K K K K K  # NOTE-从不清
-            slashCommands                K K R K K K K K  # GAP-会话视图
-            terminalEntries              K K R R K K K K  # GAP-面板
-            terminalBusy                 K K R R K K K K  # GAP-面板
-            changedFiles                 K K R R K K K K  # GAP-面板
-            changedFilesLoading          K K R R K K K K  # GAP-面板
-            changedFilesUnavailable      K K R K K K K K  # GAP-面板
-            viewedFilePath               K K R R K K K K  # GAP-面板
-            viewerDeferred               K K R R K K K K  # GAP-面板
-            viewedFile                   K K R R K K K K  # GAP-面板
-            viewedFileProgress           K K R R K K K K  # GAP-面板
-            viewedFileDiff               K K R R K K K K  # GAP-面板
-            exportWaiting                K K R R K K K K  # GAP-面板
-            gitStatus                    K K R R K K K K  # GAP-面板
-            gitStatusLoading             K K R R K K K K  # GAP-面板
-            gitStatusUnavailable         K K R R K K K K  # GAP-面板
-            gitDiff                      K K R R K K K K  # GAP-面板
-            gitDiffPath                  K K R R K K K K  # GAP-面板
-            gitDiffStaged                K K R R K K K K  # GAP-面板
-            gitBusyOp                    K K R R K K K K  # GAP-面板
-            gitError                     K K R R K K K K  # GAP-面板
-            gitFetchNote                 K K R R K K K K  # GAP-面板
-            gitPendingConfirm            K K R R K K K K  # GAP-面板
-            worktrees                    K K R R K K K K  # GAP-面板
-            worktreeCreated              K K R R K K K K  # GAP-面板
-            worktreesLoading             K K R R K K K K  # GAP-面板
-            worktreesUnavailable         K K R R K K K K  # GAP-面板
-            pathListing                  K K R K K K K K  # GAP-面板
+            slashCommands                R R R K K K K K  # FIX-会话视图
+            terminalEntries              R R R R K K K K  # FIX-面板
+            terminalBusy                 R R R R K K K K  # FIX-面板
+            changedFiles                 R R R R K K K K  # FIX-面板
+            changedFilesLoading          R R R R K K K K  # FIX-面板
+            changedFilesUnavailable      R R R K K K K K  # FIX-面板
+            viewedFilePath               R R R R K K K K  # FIX-面板
+            viewerDeferred               R R R R K K K K  # FIX-面板
+            viewedFile                   R R R R K K K K  # FIX-面板
+            viewedFileProgress           R R R R K K K K  # FIX-面板
+            viewedFileDiff               R R R R K K K K  # FIX-面板
+            exportWaiting                R R R R K K K K  # FIX-面板
+            gitStatus                    R R R R K K K K  # FIX-面板
+            gitStatusLoading             R R R R K K K K  # FIX-面板
+            gitStatusUnavailable         R R R R K K K K  # FIX-面板
+            gitDiff                      R R R R K K K K  # FIX-面板
+            gitDiffPath                  R R R R K K K K  # FIX-面板
+            gitDiffStaged                R R R R K K K K  # FIX-面板
+            gitBusyOp                    R R R R K K K K  # FIX-面板
+            gitError                     R R R R K K K K  # FIX-面板
+            gitFetchNote                 R R R R K K K K  # FIX-面板
+            gitPendingConfirm            R R R R K K K K  # FIX-面板
+            worktrees                    R R R R K K K K  # FIX-面板
+            worktreeCreated              R R R R K K K K  # FIX-面板
+            worktreesLoading             R R R R K K K K  # FIX-面板
+            worktreesUnavailable         R R R R K K K K  # FIX-面板
+            pathListing                  R R R K K K K K  # FIX-面板
             browseListing                K K K K K K K K
-            fileTree                     K K R R K K K K  # GAP-面板
-            fileTreePending              K K R R K K K K  # GAP-面板
-            filesAllView                 K K R R K K K K  # GAP-面板
-            fileTreeSubPath              K K R R K K K K  # GAP-面板
+            fileTree                     R R R R K K K K  # FIX-面板
+            fileTreePending              R R R R K K K K  # FIX-面板
+            filesAllView                 R R R R K K K K  # FIX-面板
+            fileTreeSubPath              R R R R K K K K  # FIX-面板
             browseRoots                  R R K K K K K K
             lastBrowseAnchor             K K K K K K K K
             lastBrowseSub                K K K K K K K K
@@ -657,9 +667,9 @@ class ResetInventoryTest {
             demoPendingReply             K K K K K K K K
             demoDepth                    K K K K K K K K
             authState                    R R K K K K K K
-            pushPrefs                    K K K K K K K K  # GAP-偏好
-            approvalPrefs                K K K K K K K K  # GAP-偏好
-            approvalFullControlExpiryMs  K K K K K K K K  # GAP-偏好
+            pushPrefs                    R R K K K K K K  # FIX-偏好
+            approvalPrefs                R R K K K K K K  # FIX-偏好
+            approvalFullControlExpiryMs  R R K K K K K K  # FIX-偏好
             presetsState                 R R K K K K K K
             presetsStateRev              R R K K K K K K
             gatewayBaseUrl               R R K K K K K K
@@ -705,10 +715,10 @@ class ResetInventoryTest {
             schedulesUnavailable         R R K K K K K K
             scheduleError                R R K K K K K K
             scheduleDeadline             R R K K K K K K
-            limitOffer                   R R K R K K K K  # GAP-降级
-            limitConfirmed               R R K R K K K K  # GAP-降级
-            repairOffer                  R R K R K K K K  # GAP-降级
-            repairProgress               R R K R K K K K  # GAP-降级
+            limitOffer                   R R K R K K K K  # OK-降级
+            limitConfirmed               R R K R K K K K  # OK-降级
+            repairOffer                  R R K R K K K K  # OK-降级
+            repairProgress               R R K R K K K K  # OK-降级
             shares                       K K K K K K K K  # GAP-共享
             sharesLoaded                 K K K K K K K K  # GAP-共享
             sharesRefreshing             K K K K K K K K  # GAP-共享
@@ -768,16 +778,16 @@ class ResetInventoryTest {
             managedTombstones            R R K K K K K K
             sessionsRefreshing           K K R K K K K K  # NOTE-不对称
             changedFilesDeadline         K K K K K K K K  # NOTE-从不清
-            viewedFileDeadline           K K R R K K K K  # GAP-面板
-            fileViewObservation          K K R R K K K K  # GAP-面板
-            exportDeadline               K K R R K K K K  # GAP-面板
-            gitStatusDeadline            K K R R K K K K  # GAP-面板
-            gitDiffDeadline              K K R R K K K K  # GAP-面板
-            gitActionDeadline            K K R R K K K K  # GAP-面板
-            worktreesDeadline            K K R R K K K K  # GAP-面板
-            gitPendingAction             K K R R K K K K  # GAP-面板
-            gitPendingRemove             K K R R K K K K  # GAP-面板
-            pendingWorktreeAddBranch     K K R R K K K K  # GAP-面板
+            viewedFileDeadline           R R R R K K K K  # FIX-面板
+            fileViewObservation          R R R R K K K K  # FIX-面板
+            exportDeadline               R R R R K K K K  # FIX-面板
+            gitStatusDeadline            R R R R K K K K  # FIX-面板
+            gitDiffDeadline              R R R R K K K K  # FIX-面板
+            gitActionDeadline            R R R R K K K K  # FIX-面板
+            worktreesDeadline            R R R R K K K K  # FIX-面板
+            gitPendingAction             R R R R K K K K  # FIX-面板
+            gitPendingRemove             R R R R K K K K  # FIX-面板
+            pendingWorktreeAddBranch     R R R R K K K K  # FIX-面板
             filesShowHidden              K K K K K K K K
             memoFeatureOn                K K K K K K K K
             memoOpen                     K K K K K K K K

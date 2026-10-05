@@ -1,8 +1,13 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.app.pairing.PairedDaemon
+import dev.ccpocket.protocol.ApprovalPrefs
 import dev.ccpocket.protocol.ArchivedSessions
+import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.PathEntries
+import dev.ccpocket.protocol.PathEntry
+import dev.ccpocket.protocol.PushPrefs
+import dev.ccpocket.protocol.SlashCommand
 import dev.ccpocket.protocol.ScheduleInfo
 import dev.ccpocket.protocol.ScheduleState
 import dev.ccpocket.protocol.SessionLive
@@ -63,5 +68,53 @@ class DisconnectPerComputerStateTest {
         assertNull(r.limitConfirmed.value)
         assertNull(r.repairOffer.value)
         assertNull(r.repairProgress.value)
+    }
+
+    /**
+     * The per-computer caches the reset inventory used to mark GAP: each one is visible (or acted on) after a
+     * switch — prefs gate a settings switch on "the daemon answered", the archive toast's action re-sends A's
+     * row, the rewind sheet confirms A's anchor, A's slash commands and @-listing complete B's composer.
+     */
+    @Test
+    fun disconnectDropsDaemonPrefsTransientSheetsSlashCommandsAndSessionPanels() {
+        val r = PocketRepository(CoroutineScope(Dispatchers.Unconfined)).apply {
+            paired.value = PairedDaemon(
+                relay = "wss://test", accountId = "acct-a", daemonPub = "pk", deviceId = "dev", credential = "cred",
+            )
+        }
+        r.receiveForTest(SessionLive("c1", "/w", "sid-1", executing = false))
+        r.receiveForTest(PushPrefs(enabled = false))
+        r.receiveForTest(ApprovalPrefs(noAutoDeny = true, fullControlExpiryMs = 60_000))
+        r.receiveForTest(CommandList("c1", listOf(SlashCommand("deploy-a"))))
+        r.receiveForTest(PathEntries(workdir = "/w", subPath = "", entries = listOf(PathEntry("secret-a.txt", isDir = false))))
+        r.setSessionArchived("/w", "sid-old", archived = true, title = "old")
+        r.rewindSheet.value = PocketRepository.RewindSheet(PocketRepository.RewindTarget("c1", 3, "u", "t", "rewind"))
+        r.rewindError.value = "stale_anchor"
+        r.runShell("ls")
+        r.fetchChangedFiles()
+        r.fetchGitStatus()
+        // preconditions
+        assertEquals(false, r.pushPrefs.value)
+        assertEquals(true, r.approvalPrefs.value)
+        assertEquals(1, r.slashCommands.size)
+        assertNotNull(r.pathListing.value)
+        assertNotNull(r.archiveToast.value)
+        assertTrue(r.terminalBusy.value && r.changedFilesLoading.value && r.gitStatusLoading.value)
+
+        r.disconnect()
+
+        assertNull(r.pushPrefs.value, "B answers for itself — null is the 'not answered' gate")
+        assertNull(r.approvalPrefs.value)
+        assertNull(r.approvalFullControlExpiryMs.value)
+        assertTrue(r.slashCommands.isEmpty(), "A's commands must not complete B's composer")
+        assertNull(r.pathListing.value, "openSession keeps pathListing — the switch has to drop it")
+        assertNull(r.archiveToast.value, "its action would re-send A's (workdir, session) to B")
+        assertNull(r.rewindSheet.value)
+        assertNull(r.rewindError.value)
+        assertTrue(r.terminalEntries.isEmpty())
+        assertFalse(r.terminalBusy.value)
+        assertFalse(r.changedFilesLoading.value)
+        assertFalse(r.changedFilesUnavailable.value)
+        assertFalse(r.gitStatusLoading.value)
     }
 }
