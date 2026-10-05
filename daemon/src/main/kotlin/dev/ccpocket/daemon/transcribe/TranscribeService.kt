@@ -18,10 +18,14 @@ import java.util.concurrent.ConcurrentHashMap
  * replies [Transcript] on the sink the chunks arrived on (so results only reach the device that
  * spoke). Transcription never touches the claude process — it runs concurrently with a turn.
  */
-class TranscribeService(
+class TranscribeService internal constructor(
     private val scope: CoroutineScope,
+    /** Turns one complete capture into its [Transcript] reply. Production runs whisper; a test hands in a fake. */
+    private val transcriber: suspend (convoId: String, capture: CaptureBuffer.Result.Complete, workdir: Path) -> Transcript,
     private val workdirOf: suspend (String) -> Path?,
 ) {
+    constructor(scope: CoroutineScope, workdirOf: suspend (String) -> Path?) : this(scope, ::whisperTranscript, workdirOf)
+
     private val log = logger("Transcribe")
     private val buffer = CaptureBuffer()
     private val jobs = ConcurrentHashMap<String, Job>() // convoId -> running transcription
@@ -51,26 +55,32 @@ class TranscribeService(
 
     private fun launchTranscription(convoId: String, c: CaptureBuffer.Result.Complete, workdir: Path, sink: OutboundSink) {
         val job = scope.launch(Dispatchers.IO + CoroutineName("whisper-$convoId")) {
-            val whisper = WhisperTranscriber.resolveWhisper()
-            val model = if (whisper != null) WhisperTranscriber.resolveModel() else null
-            val frame = when {
-                whisper == null -> Transcript(convoId, c.captureId, ok = false, error = WhisperTranscriber.MSG_INSTALL)
-                model == null -> Transcript(convoId, c.captureId, ok = false, error = WhisperTranscriber.MSG_MODEL)
-                else -> when (val res = WhisperTranscriber.transcribe(c.bytes, c.mediaType, workdir, whisper, model)) {
-                    is WhisperTranscriber.TranscribeResult.Ok -> Transcript(convoId, c.captureId, text = res.text)
-                    is WhisperTranscriber.TranscribeResult.Err -> Transcript(convoId, c.captureId, ok = false, error = res.userMessage)
-                }
-            }
-            sink.emit(frame)
+            sink.emit(transcriber(convoId, c, workdir))
         }
         jobs[convoId] = job
         job.invokeOnCompletion { jobs.remove(convoId, job) }
     }
 
+    /** True while any dictation capture is being transcribed (the auto-update idle gate reads this). */
+    fun isTranscribing(): Boolean = jobs.isNotEmpty()
+
     private fun cancelJob(convoId: String) {
         jobs.remove(convoId)?.let {
             it.cancel()
             log.info("$convoId transcription cancelled")
+        }
+    }
+}
+
+private suspend fun whisperTranscript(convoId: String, c: CaptureBuffer.Result.Complete, workdir: Path): Transcript {
+    val whisper = WhisperTranscriber.resolveWhisper()
+    val model = if (whisper != null) WhisperTranscriber.resolveModel() else null
+    return when {
+        whisper == null -> Transcript(convoId, c.captureId, ok = false, error = WhisperTranscriber.MSG_INSTALL)
+        model == null -> Transcript(convoId, c.captureId, ok = false, error = WhisperTranscriber.MSG_MODEL)
+        else -> when (val res = WhisperTranscriber.transcribe(c.bytes, c.mediaType, workdir, whisper, model)) {
+            is WhisperTranscriber.TranscribeResult.Ok -> Transcript(convoId, c.captureId, text = res.text)
+            is WhisperTranscriber.TranscribeResult.Err -> Transcript(convoId, c.captureId, ok = false, error = res.userMessage)
         }
     }
 }

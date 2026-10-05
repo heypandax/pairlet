@@ -25,4 +25,6 @@ interface ExecutionRunPlane {
     suspend fun handle(deviceId: String, linkPubB64: String, frame: ToDaemon, reply: suspend (Frame) -> Unit)
     /** Recovery/maintenance tick: journal recovery, timeouts, retention, pending revokes. */
     suspend fun maintain()
+    /** Any run not yet terminal — queued (no session yet) included. Read by the auto-update idle gate. */
+    fun hasLiveRuns(): Boolean
 }

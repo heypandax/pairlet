@@ -461,6 +461,9 @@ class DaemonCore(
     /** One refusal ledger for every execution layer (target bind, transport gate, run plane). */
     val executionRefusals = dev.ccpocket.daemon.execution.ExecutionRefusals()
 
+    /** The auto-update idle gate (see [DaemonActivity]). Reads [executionPlane] as-is: never loads the planes. */
+    suspend fun hasActiveWork(): Boolean = DaemonActivity.busy(registry, executionPlane, scheduler, transcribe, voiceMemo)
+
     suspend fun shutdown() {
         runCatching { voiceMemo.close() }
         registry.closeAll()
