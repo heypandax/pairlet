@@ -284,6 +284,7 @@ internal fun MenuBarExtra(
                             showPointer = false,
                             elevated = false,
                             keyHint = true,
+                            arrivalSurface = "menubar", // not the in-window popover's row slots
                         )
                     }
                 }

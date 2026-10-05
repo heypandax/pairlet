@@ -51,9 +51,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.data.ApprovalKey
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.app.ui.approval.FOCUSED_ASK_SURFACE
+import dev.ccpocket.app.ui.approval.rememberApprovalArmed
 import dev.ccpocket.protocol.AskQuestion
 import dev.ccpocket.protocol.PermissionAsk
 import org.jetbrains.compose.resources.stringResource
@@ -82,9 +85,14 @@ fun QuestionCard(
     onAnswer: (answers: Map<String, String>?, response: String?) -> Unit,
     onSkip: () -> Unit,
     onOwnsInput: (Boolean) -> Unit = {},
+    // where this card sits, for the double-tap guard: the phone's focused ask by default (it takes the Secure
+    // Approval sheet's place); a desktop chat pane passes its own
+    arrivalSurface: String = FOCUSED_ASK_SURFACE,
 ) {
     val questions = ask.questions.orEmpty()
     if (questions.isEmpty()) return
+    // Skip and Submit decide; picking options does not. Both refuse input for the arrival guard window.
+    val armed = rememberApprovalArmed(arrivalSurface, ApprovalKey(ask.convoId, ask.askId))
     var qIndex by remember(ask.askId) { mutableStateOf(0) }
     val selections = remember(ask.askId) { mutableStateMapOf<Int, Set<String>>() }
     val otherTexts = remember(ask.askId) { mutableStateMapOf<Int, String>() }
@@ -229,15 +237,17 @@ fun QuestionCard(
             Row(Modifier.padding(top = 16.dp).fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     stringResource(Res.string.question_skip), color = Tok.muted, fontSize = 14.5.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onSkip).padding(horizontal = 8.dp, vertical = 11.dp),
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = armed) { if (armed) onSkip() }.padding(horizontal = 8.dp, vertical = 11.dp),
                 )
                 Spacer(Modifier.weight(1f))
-                val ready = if (freeform) freeformText.isNotBlank() else allAnswered
+                // inside the guard window Submit wears its own not-ready look
+                val ready = armed && (if (freeform) freeformText.isNotBlank() else allAnswered)
                 Box(
                     Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
                         .background(if (ready) Tok.accent else Tok.surface)
                         .let { if (ready) it else it.border(1.dp, Tok.hair, RoundedCornerShape(12.dp)) }
                         .clickable(enabled = ready) {
+                            if (!ready) return@clickable
                             if (freeform) onAnswer(null, freeformText.trim())
                             else onAnswer(questions.indices.mapNotNull { i -> answerOf(i)?.let { questions[i].question to it } }.toMap(), null)
                         }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
 import dev.ccpocket.app.assertPresent
+import dev.ccpocket.app.passArrivalGuard
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.*
@@ -468,6 +469,7 @@ class DesktopUiTest {
         assertPresent(str(Res.string.tray_needs_you))
         assertPresent("rm -rf ./build && ./gradlew clean") // mac-studio's Bash ask
         assertEquals(2, model.attention.size)
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
         onAllNodes(hasText(str(Res.string.allow))).onFirst().performClick() // rows compose in queue order — first Allow = first row
         waitForIdle()
         assertEquals(1, model.attention.size) // a resolved row leaves the queue (and the badges)
@@ -661,6 +663,7 @@ class DesktopUiTest {
         val model = SeedDesktopModel()
         setContent { PocketTheme { TrayPopover(model) } }
         assertEquals(2, model.attention.size)
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
         onAllNodes(hasText(str(Res.string.allow))).onFirst().performClick() // rows compose in queue order — first Allow = first row
         waitForIdle()
         assertEquals(1, model.attention.size)
