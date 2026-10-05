@@ -2978,12 +2978,26 @@ class Conversation(
         // mode's premature result, a settled background task — issues #55/#105) is one more "the process
         // is NOT idle despite !executing" signal, so the relaunch waits it out too.
         //
+        // …and two more (lifecycle design S7 / audit M1): still-RUNNING background work (a backgrounded
+        // build, a background sub-agent, a monitor) and a permission ask / question still waiting for the
+        // user. The relaunch kills the whole process tree: the build or sub-agent would die with it and the
+        // job panel be wiped, the open card withdrawn — all silently, which is exactly what #105 and
+        // [reapStaleJobs] exist to prevent. Same rule as a running turn: this prompt rides the current
+        // process, pendingRelaunch survives, and the change applies on the first send that finds none of
+        // these. Until then the badge already shows the new value (the optimistic announce at switch time),
+        // as it does for a switch made mid-turn.
+        //
         // (issue #104) snapshot the process state BEFORE the (re)launch below: a prompt acked during a fresh
         // spawn or a settings relaunch is exactly the window a client "delivered but no turn" (turnStalled) targets.
         val firstSpawn = proc == null
         val workAtSend = turnWork
-        val relaunching = proc != null && !workAtSend.executing && pendingRelaunch &&
+        val relaunchDue = proc != null && !workAtSend.executing && pendingRelaunch &&
             relaunchGraceElapsed() && !continuationExpected(workAtSend)
+        val heldByWork = relaunchDue && (workAtSend.backgroundWork || hasPendingAsk())
+        if (heldByWork) {
+            log.info("$convoId settings relaunch deferred: background work=${workAtSend.backgroundWork} pendingAsk=${hasPendingAsk()} — prompt rides the current process")
+        }
+        val relaunching = relaunchDue && !heldByWork
         // `executing` must be armed with a happens-before edge to the new pump: a process that dies
         // instantly at startup runs its death-branch `executing = false` on the pump thread, and that
         // clear MUST win. Arming AFTER the launch (as before) lost the race under load — the late `true`
