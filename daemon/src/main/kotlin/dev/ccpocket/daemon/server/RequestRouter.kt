@@ -1320,10 +1320,6 @@ class RequestRouter(
      *  through, bare ones (`not_found`, `not_allowed`) get the `handoff_` prefix the App keys on. */
     private fun handoffCode(code: String) = if (code.startsWith("handoff")) code else "handoff_$code"
 
-    /** A FULL-POWER owner caller: none of the three restricted credential classes is present. Spelled
-     *  out once so every owner-only ReviewRequest op tests all three (a COLLABORATOR arrives with
-     *  origin == null AND guestScope == null — testing only those two is vacuous for exactly the
-     *  weakest credential this daemon hands out). */
     /**
      * One managed session list request (issue #360). Order of the gates matters:
      *  1. a connection that has not declared [ClientCapsHolder.supportsManagedSessions] gets SILENCE — no managed
@@ -1641,7 +1637,8 @@ class RequestRouter(
     }
 }
 
-/** A FULL-POWER owner caller: none of the three restricted credential classes is present. File-level (it was
- *  a private router member) so the review dispatcher in review/ReviewRouting.kt shares this one definition. */
+/** A FULL-POWER owner caller: none of the three restricted credential classes is present. Spelled out once
+ *  so every owner-only op tests all three (a COLLABORATOR arrives with origin == null AND guestScope == null —
+ *  testing only those two is vacuous for exactly the weakest credential this daemon hands out). */
 internal fun isOwner(origin: String?, guestScope: GuestScope?, collab: CollaboratorScope?) =
     origin == null && guestScope == null && collab == null
