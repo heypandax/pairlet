@@ -25,6 +25,7 @@ import dev.ccpocket.protocol.CreateReviewInvite
 import dev.ccpocket.protocol.CreateReviewRequest
 import dev.ccpocket.protocol.DeclineHandoff
 import dev.ccpocket.protocol.DeclineReviewRequest
+import dev.ccpocket.protocol.FetchApprovalHistory
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.GetReviewRequest
 import dev.ccpocket.protocol.HandoffBrief
@@ -137,6 +138,11 @@ class RetiredFramesTest {
         RemoveCollaborator("dev-c"),
     )
 
+    /** Retired requests outside those three families: no client sends them, the router answers `unsupported`. */
+    private val retiredSingles: List<ToDaemon> = listOf(
+        FetchApprovalHistory(), // the approval-history pull; the daemon still writes the trail, nobody reads it over the wire
+    )
+
     private fun wireName(f: Frame): String =
         PocketJson.encodeToJsonElement(Frame.serializer(), f).jsonObject["t"]!!.jsonPrimitive.content
 
@@ -159,7 +165,7 @@ class RetiredFramesTest {
     fun no_retired_request_is_taken_by_the_owner_control_planes_first() {
         // both transports offer an owner's frame to dispatchOwnerControl before the router; none of these may
         // stop there, or the LAN and relay paths would answer them differently from the router below
-        for (f in listRequests.map { it.first } + otherRequests) assertFalse(isOwnerControlFrame(f), f::class.simpleName)
+        for (f in listRequests.map { it.first } + otherRequests + retiredSingles) assertFalse(isOwnerControlFrame(f), f::class.simpleName)
     }
 
     /** Every request is answered with exactly one frame, inline — no reply means a caller-side timeout. */
@@ -185,7 +191,7 @@ class RetiredFramesTest {
     fun every_other_retired_request_answers_unsupported(): Unit = runBlocking {
         val r = router()
         for (origin in listOf(null, "bridge-dev")) {
-            for (frame in otherRequests) {
+            for (frame in otherRequests + retiredSingles) {
                 val err = assertIs<PocketError>(replyTo(r, frame, origin), "${frame::class.simpleName}")
                 assertEquals("unsupported", err.code)
                 assertEquals("frame not handled by daemon: ${frame::class.simpleName}", err.message)
