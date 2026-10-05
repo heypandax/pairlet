@@ -1,7 +1,9 @@
-What's new in 2.3.0
+What's new in 2.4.0
 
-- The name is now Pairlet everywhere, and the icon no longer carries the Pocket label. It is the same app: pairing and data are kept, and there is nothing to reinstall or pair again.
-- Tapping a project now shows "Opening…" and offers a retry if the computer does not answer; projects with many sessions no longer fail to open.
-- When Claude asks a question, tap the card's title to collapse it to one line and read what came before; your selections are kept. The "Answer required" notice at the top now takes a single line.
-- The Codex model list is no longer limited to three built-in models, and it says why when only the built-in ones can be shown.
-- After you also update Pairlet on your computer: Kimi background tasks no longer stay "running" after they end, ZCode 3.14 sessions can send messages again, and DeepSeek sessions started on the phone show up on the computer too.
+- Dictation: a slow connection no longer shows a failure first. Uploading and waiting are shown separately, a transcript that arrives late is still used, and retrying does not transcribe the same recording twice.
+- Reopening a session you just looked at shows what you already had right away and then adds what is new, so long sessions do not reload their whole history each time.
+- Approvals: a card ignores taps for a moment after it appears, so a double tap cannot approve the next request, and its buttons only act on the request they show.
+- While a photo is still being compressed the send button waits, instead of sending the message without the photo.
+- Settings > About now shows this device's fingerprint and your computer's, so you can check that you paired with your own computer.
+- Removed a few rarely used features: review requests, handing a session over to a collaborator, sharing a folder with a guest, and the unencrypted direct-connection option. Normal pairing and sessions are not affected.
+- After you also update Pairlet on your computer: Kimi sessions run with the model and permission mode you chose, and a device you revoked on the computer stays revoked after a restart.
