@@ -334,9 +334,12 @@ class FeishuEngine internal constructor(
     // /untrust and /bind must land immediately while it is thinking, then defeat the final claim. This closes
     // the revoke/rebind window between ReviewedPreflight's async revalidation and arming a broad turn grant.
     private val policyGate = FeishuPolicyGate()
-    // the bot's own open_id (fetched at start) — the mention filter's ground truth. Null until fetched;
-    // fallback then is "any mention", the pre-fix behaviour, so a slow fetch degrades soft.
+    // the bot's own open_id (fetched once the link is up, retried with backoff until it lands) — the mention
+    // filter's ground truth. Until it is known a group @ can't be attributed, so it waits for it (bounded)
+    // instead of answering ANY mention (audit F7: "@colleague 看下" used to run in a TRUSTED group).
     @Volatile private var botOpenId: String? = null
+    private val botIdentity = CompletableDeferred<String>()
+    @Volatile private var botIdentityJob: Job? = null
     // Feishu delivers events AT-LEAST-ONCE; this bounded LRU of message ids drops a redelivered duplicate so
     // one message never fires the same prompt twice. Guarded by its own monitor — onMessage runs on the lark
     // SDK's dispatcher threads (not a coroutine), so the engine's suspend mutex can't cover it.
@@ -541,16 +544,44 @@ class FeishuEngine internal constructor(
      * The bot's own open_id, from GET /bot/v3/info — what makes the mention filter PRECISE: without it,
      * "@some colleague check this" in a chat the bot sits in would count as addressing the bot (any-mention
      * was the reference adapter's behaviour, and it misfires whenever the app receives all group messages).
-     * Best-effort async: until (or unless) it lands, the filter falls back to any-mention and says so once.
+     * Async, and retried with a capped backoff while the engine runs (audit F7): until it lands, group
+     * mentions wait for it ([deferUntilBotIdentity]) rather than being attributed to the bot by guesswork.
+     * Fetched once per engine — the bot's open_id is fixed for an app, and a restart keeps the same app.
      */
     private fun fetchBotIdentity() {
+        synchronized(linkLock) {
+            if (botOpenId != null || botIdentityJob?.isActive == true) return
+            botIdentityJob = scope.launch {
+                var attempt = 0
+                while (running && botOpenId == null) {
+                    runCatching {
+                        api?.botOpenId() ?: error("Feishu API client unavailable")
+                    }.onSuccess { openId ->
+                        botOpenId = openId
+                        botIdentity.complete(openId)
+                        log.info("feishu bot identity: ${openId.take(12)}…")
+                    }.onFailure {
+                        val wait = FeishuMention.botIdentityRetryDelayMs(attempt++)
+                        logLine(
+                            "[engine] couldn't fetch the bot's own open_id (${it.message}) — group @mentions are held " +
+                                "until it is known; retrying in ${wait / 1_000}s",
+                        )
+                        delay(wait)
+                    }
+                }
+            }
+        }
+    }
+
+    /** A group message with mentions arrived before the bot knows its own open_id: re-run it through
+     *  [onMessage] once the identity lands, or drop it (with a log line) after [BOT_IDENTITY_WAIT_MS]. A held
+     *  message has not been marked seen yet, so a Feishu redelivery is still deduplicated on the re-run. */
+    private fun deferUntilBotIdentity(event: P2MessageReceiveV1, chatId: String?) {
         scope.launch {
-            runCatching {
-                val openId = api?.botOpenId() ?: error("Feishu API client unavailable")
-                botOpenId = openId
-                log.info("feishu bot identity: ${openId.take(12)}…")
-            }.onFailure {
-                logLine("[engine] couldn't fetch the bot's own open_id (${it.message}) — falling back to answering ANY @mention")
+            if (withTimeoutOrNull(BOT_IDENTITY_WAIT_MS) { botIdentity.await() } != null) {
+                onMessage(event)
+            } else {
+                logLine("[drop] $chatId: 还没取到机器人自己的 open_id，无法确认这条是否 @ 了机器人，已忽略")
             }
         }
     }
@@ -643,11 +674,16 @@ class FeishuEngine internal constructor(
         // every chat the app subscribes to.
         val mentions = msg.mentions?.toList().orEmpty()
         if (isGroup) {
-            if (mentions.isEmpty()) return
-            // precise when we know who we are: the BOT must be among the mentioned, or the message isn't for
-            // us — "@colleague look at this" in our chat must stay none of our business
-            val self = botOpenId
-            if (self != null && mentions.none { it.id?.openId == self }) return
+            // the BOT must be among the mentioned, or the message isn't for us — "@colleague look at this" in
+            // our chat must stay none of our business
+            when (FeishuMention.groupGate(mentions.map { it.id?.openId }, botOpenId)) {
+                FeishuMention.GroupGate.ACCEPT -> {}
+                FeishuMention.GroupGate.DROP -> return
+                FeishuMention.GroupGate.AWAIT_IDENTITY -> {
+                    deferUntilBotIdentity(event, msg.chatId)
+                    return
+                }
+            }
         }
         val chatId = msg.chatId ?: return
         // requirement 2: when this message REPLIES to an earlier one, parentId is the quoted message and
@@ -1710,6 +1746,9 @@ class FeishuEngine internal constructor(
         // credential rejection to come back synchronously as before; a blackholed host (the SDK's OkHttp
         // connect timeout is 10s) falls past it into the background retry instead of holding the caller.
         const val CONNECT_WAIT_MS = 10_000L
+        // how long a group mention may wait for the bot's own open_id (see deferUntilBotIdentity): spans the
+        // first few retries of a failed fetch, short enough that a held message isn't answered absurdly late
+        const val BOT_IDENTITY_WAIT_MS = 30_000L
         val LINK_UP = Any()          // first-connect outcome markers (see start)
         val STILL_CONNECTING = Any()
         const val CHAT_NAME_WAIT_MS = 1_500L // bounded wait for a first group-name fetch (see chatNameOrNull)
