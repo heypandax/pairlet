@@ -619,7 +619,6 @@ class PocketRepository(
     internal var presenceProbeMs = LIST_WAIT_MS           // test seam
     internal var linkHealthOverride: (() -> Boolean)? = null // test seam for transportHealthy()
     private var directoriesRev = 0          // bumped on every Directories reply — the #145 probe's "did the computer answer" check
-    private var handoffListingRev = 0       // the inbox-mode counterpart: bumped on every HandoffListing reply
     // per-session connection bookkeeping (plain vars; [phase]/[directoriesLoaded] hold the observable truth)
     private var attachedThisSession = false // relay Attached seen (or, direct mode, socket + first Directories)
     private var diagnosticConnectionId: String? = null
@@ -1107,21 +1106,6 @@ class PocketRepository(
     val directories = mutableStateListOf<DirectoryEntry>()
     /** True once the first Directories of a session arrives — distinguishes "empty" from "still loading". */
     val directoriesLoaded = mutableStateOf(false)
-
-    /**
-     * INBOX MODE (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.2.3): this link speaks a Collaborator credential,
-     * whose baseline grants ZERO session access. Everything the ordinary connect sequence does — ClientCaps,
-     * ListDirectories, ListPendingApprovals — is refused by the daemon's collaborator capability whitelist,
-     * so the app used to sit on the loading skeleton and then claim "computer offline" ~6s later.
-     *
-     * An inbox link instead asks for the ONE thing it may have (its own Handoff offers) and treats the reply
-     * as its readiness proof. It is a background link: it drives no content screen, so it must never show a
-     * connection failure state either.
-     */
-    val isCollaboratorInbox: Boolean get() = paired.value?.role == BindingRole.COLLABORATOR
-
-    /** Inbox mode's [directoriesLoaded]: the first HandoffListing proves the collaborator channel is up. */
-    val handoffsLoaded = mutableStateOf(false)
     val refreshing = mutableStateOf(false)
     val sessions = mutableStateListOf<SessionSummary>()
     val sessionsDir = mutableStateOf<String?>(null)
@@ -1477,7 +1461,7 @@ class PocketRepository(
     val historyLayoutToken = mutableStateOf<String?>(null)
     val latestDiagnosticId = mutableStateOf<String?>(null)
     private fun productDimensions() = demoTag() + mapOf<TelKey, Any>(
-        TelKey.UsageMode to if (demoMode.value) "demo" else if (isCollaboratorInbox || paired.value?.role?.let { it != BindingRole.OWNER } == true) "shared" else "own",
+        TelKey.UsageMode to if (demoMode.value) "demo" else if (paired.value?.role?.let { it != BindingRole.OWNER } == true) "shared" else "own",
         TelKey.Backend to (sessionAgent.value ?: AgentKind.CLAUDE).name.lowercase(),
     )
     val contentLayoutToken: String? get() = if (!appIsForeground.value) null else historyLayoutToken.value ?: promptOutcomes.layoutToken(convoId.value)
@@ -2053,10 +2037,7 @@ class PocketRepository(
 
     /** Recompute the observable [phase] from the per-session flags. Call after every relevant event. */
     private fun recomputePhase() {
-        // inbox mode has its own readiness proof: a collaborator credential is REFUSED directory discovery,
-        // so waiting for Directories here would keep the link permanently "not ready" (§3.2.3)
-        val listed = if (isCollaboratorInbox) handoffsLoaded.value else directoriesLoaded.value
-        val ready = attachedThisSession && listed && !daemonOffline
+        val ready = attachedThisSession && directoriesLoaded.value && !daemonOffline
         val next = when {
             pairingInvalid                                   -> ConnPhase.PairingInvalid
             ready                                            -> ConnPhase.Ready
@@ -2150,14 +2131,12 @@ class PocketRepository(
     private fun onComputerBackOnline() {
         if (!transportHealthy()) { launchTransport(reconnect = true); return }
         presenceProbeJob?.cancel()
-        val inbox = isCollaboratorInbox
-        val seenRev = if (inbox) handoffListingRev else directoriesRev
+        val seenRev = directoriesRev
         presenceProbeJob = scope.launch {
-            if (inbox) send(ListHandoffs()) else send(ListDirectories())
+            send(ListDirectories())
             restoreAfterReconnect()
             delay(presenceProbeMs)
-            val rev = if (inbox) handoffListingRev else directoriesRev
-            if (sessionActive.value && rev == seenRev) launchTransport(reconnect = true, force = true)
+            if (sessionActive.value && directoriesRev == seenRev) launchTransport(reconnect = true, force = true)
         }
     }
 
@@ -2260,19 +2239,8 @@ class PocketRepository(
                 SubmitOutcome.Failed(FailReason.SEND_FAILED)
             }
         }
-        if (!connected.value) {
-            // Severing a link is the ONE case where "no live route" must not mean "try later": the
-            // credential is about to be discarded, so a one-shot dial is the last chance this relay row
-            // has to be cleared at all. Everywhere else NO_ROUTE parks the round until a route exists.
-            val p2 = paired.value
-            if (!pushSevering || p2 == null) return SubmitOutcome.Failed(FailReason.NO_ROUTE)
-            return runCatching {
-                when (val r = pushDial(p2, frame, ackTimeoutMs)) {
-                    is DepositOutcome.Acked -> SubmitOutcome.Acked(r.result)
-                    DepositOutcome.Legacy -> SubmitOutcome.SentLegacy
-                }
-            }.getOrElse { if (it is CancellationException) throw it else SubmitOutcome.Failed(FailReason.SEND_FAILED) }
-        }
+        // no live route parks the round until a route exists
+        if (!connected.value) return SubmitOutcome.Failed(FailReason.NO_ROUTE)
         val requestId = frame.requestId
         return coroutineScope {
             val receipt = requestId?.let {
@@ -2301,25 +2269,6 @@ class PocketRepository(
         }
     }
 
-    /**
-     * Clear THIS link's push token at the relay without touching the device-wide preference — used when a
-     * Collaborator Link is severed. The credential is about to be discarded, so the token registered under
-     * that colleague's account has to go with it; otherwise their daemon keeps pushing at a link we no
-     * longer hold, and only the OWNER revoking the contact would ever stop it.
-     */
-    fun deregisterPush() {
-        if (!useRelay) return
-        pushDesired.value = false
-        val key = attachedPushKey ?: return
-        attachedPushKey = null
-        pushSevering = true
-        scope.launch { registrar.clearAndForget(key) }
-    }
-
-    /** True from the moment this link is being severed: [submitPush] may then dial even with no live
-     *  transport, because there will be no later attempt. */
-    private var pushSevering = false
-
     /** What the Settings notification row renders — aggregated across every attached pairing. */
     val pushStatus: StateFlow<PushUiStatus> get() = registrar.status
 
@@ -2340,7 +2289,6 @@ class PocketRepository(
         // person is standing in Settings right now. Turning it OFF is an expectation change the
         // coordinator picks up from [pushDesired], and it converges on a blank-token registration.
         registrar.trigger(if (on) TriggerReason.USER_ENABLED else TriggerReason.START)
-        onNotificationsChanged?.invoke(on) // §3.4: contacts' inbox links hold their own tokens
     }
 
     /** Settings: persist the default execution mode for new sessions. Takes effect on the next new session. */
@@ -2518,12 +2466,8 @@ class PocketRepository(
         listWaitJob?.cancel()
         listWaitJob = scope.launch {
             delay(LIST_WAIT_MS)
-            val listed = if (isCollaboratorInbox) handoffsLoaded.value else directoriesLoaded.value
-            if (sessionActive.value && attachedThisSession && !listed && !daemonOffline && !pairingInvalid) {
-                // §3.2.3: an inbox link must NEVER report "computer offline" — it is a background contact
-                // channel with no screen of its own, and a quiet colleague's machine is not an app error.
-                // The deaf-link re-handshake below still runs: that's a real self-heal, not a claim.
-                if (!isCollaboratorInbox) daemonOffline = true
+            if (sessionActive.value && attachedThisSession && !directoriesLoaded.value && !daemonOffline && !pairingInvalid) {
+                daemonOffline = true
                 recomputePhase()
                 // A silent computer here is EITHER really offline or a DEAF E2E link: the daemon keeps one
                 // session per device, so if another of this device's sockets (fleet satellite, reconnect
@@ -2569,7 +2513,7 @@ class PocketRepository(
         connected.value = true // internal "attempt active/attached" guard for retry/foreground — NOT the UI
         attachedThisSession = false; daemonOffline = false; relayDeadlinePassed = false; listWaitJob?.cancel()
         diagnosticConnectionId = null
-        if (!reconnect) { pairingInvalid = false; hadReadyThisSession = false; directoriesLoaded.value = false; handoffsLoaded.value = false }
+        if (!reconnect) { pairingInvalid = false; hadReadyThisSession = false; directoriesLoaded.value = false }
         recomputePhase() // Connecting, or Reconnecting if we were Ready before — recomputePhase is the sole writer of phase
         status.value = StatusMsg(if (reconnect) Res.string.status_reconnecting else Res.string.status_connecting)
         if (inboundJob == null) {
@@ -2651,19 +2595,12 @@ class PocketRepository(
         // ClientCaps FIRST: it declares this build understands agent="opencode", so the daemon stops
         // filtering those rows out of the lists that follow (old builds never send it — see Messages.kt).
         scope.launch {
-            if (isCollaboratorInbox) {
-                // §3.2.3: a collaborator credential may send exactly one thing on connect — an UNFILTERED
-                // ListHandoffs, which the daemon answers with (and registers a fan-out sink for) only the
-                // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
-                send(ListHandoffs())
-            } else {
-                // maxFrameBytes: what the transports really accept (RelayE2EConnection.MAX_FRAME_BYTES). Declaring it is
-                // what lets the daemon send full-size history windows; a daemon that never hears it sizes every frame
-                // for the 1 MiB shipped iOS builds were bound to (KTOR-6963), shedding pictures from big replays.
-                send(clientCaps())
-                send(ListDirectories())
-                send(ListPendingApprovals)
-            }
+            // maxFrameBytes: what the transports really accept (RelayE2EConnection.MAX_FRAME_BYTES). Declaring it is
+            // what lets the daemon send full-size history windows; a daemon that never hears it sizes every frame
+            // for the 1 MiB shipped iOS builds were bound to (KTOR-6963), shedding pictures from big replays.
+            send(clientCaps())
+            send(ListDirectories())
+            send(ListPendingApprovals)
             if (reconnect) restoreAfterReconnect()
         }
         startGrace(reconnect)
@@ -2782,9 +2719,7 @@ class PocketRepository(
             // `connected` may be a lie after a background suspension (the heartbeat was frozen; the TCP died
             // silently). Exercise a WRITE right now: healthy link → this merely refreshes the stale project
             // list; wedged link → the bounded send trips DeadLink in ≤10s instead of ~25s of fake Ready.
-            // Inbox links do the same with the one frame they're allowed — which doubles as the §3.2.3
-            // "foreground → re-pull ListHandoffs" requirement (a missed offer push heals here).
-            if (isCollaboratorInbox) refreshHandoffsSilently() else refreshDirectoriesSilently()
+            refreshDirectoriesSilently()
             pinLink.onForeground() // #362: re-fetch heals a missed pin push; a blocked outbox may try again
         }
     }
@@ -2827,9 +2762,6 @@ class PocketRepository(
         val wd = workdir.value
         val dir = sessionsDir.value
         val convo = convoId.value
-        // §3.2.8: offer/accept/decline/return/recall/expire are all recovered from DAEMON TRUTH after a
-        // reconnect — the inbox re-pulls its whole list rather than trusting whatever it held locally.
-        if (isCollaboratorInbox) send(ListHandoffs())
         sidePanes.reopenAll() // #311: every split column re-attaches the same way the focused chat does
         when {
             // daemon finds the still-live conversation by sessionId → reattach + history replay, which the
@@ -2877,7 +2809,6 @@ class PocketRepository(
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
         diagnosticConnectionId = null
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
-        handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
         // The frozen features' cached LISTINGS of this daemon's truth (their logic is not touched here). Each is
         // re-pulled from the next daemon when its surface opens (chat → ListHandoffs, contacts → ListCollaborators,
         // bridges page → ListBridges, shares page → ListShares). Kept, they crossed machines — and activeHandoff,
@@ -3368,7 +3299,7 @@ class PocketRepository(
      * handshaken session, so answering it cannot miss.
      */
     private fun redeclareCaps() {
-        if (isCollaboratorInbox || demoMode.value) return
+        if (demoMode.value) return
         scope.launch { send(clientCaps()) }
     }
 
@@ -4582,19 +4513,6 @@ class PocketRepository(
             is HandoffListing -> {
                 replace(handoffs, f.items.sortedByDescending { it.createdAt })
                 recomputeActiveHandoff()
-                handoffListingRev++
-                // §3.2.3: for an inbox link THIS is the readiness proof — the collaborator channel answered,
-                // which (unlike Directories, which it may never send) is all such a credential can prove.
-                handoffsLoaded.value = true
-                if (isCollaboratorInbox) {
-                    daemonOffline = false; listWaitJob?.cancel()
-                    connected.value = true; relayDeadlinePassed = false
-                    if (!hadReadyThisSession) {
-                        hadReadyThisSession = true
-                        Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()) + productDimensions())
-                    }
-                    recomputePhase()
-                }
                 // a wholesale replace also has to reconcile the accept spinner and the auto-open rule
                 // against daemon truth — a listing is how a reconnect learns the accept already landed
                 f.items.forEach(::reconcileHandoffLifecycle)
@@ -5507,8 +5425,8 @@ class PocketRepository(
         }
         if (!mine || h.status != HandoffStatus.IN_PROGRESS) return
         // an owner device that merely OBSERVES someone else's handoff must not be yanked anywhere; only the
-        // inbox link (whose sole purpose is this) and the device that just accepted walk in automatically
-        if (!isCollaboratorInbox && h.id !in acceptedHere) return
+        // device that just accepted walks in automatically
+        if (h.id !in acceptedHere) return
         if (h.id in autoOpenedHandoffs) return
         if (convoId.value != null && currentSessionId == h.sourceSessionId) { autoOpenedHandoffs += h.id; return }
         autoOpenedHandoffs += h.id
@@ -5614,17 +5532,11 @@ class PocketRepository(
 
     fun removeCollaborator(deviceId: String) = scope.launch { runCatching { send(RemoveCollaborator(deviceId)) } }
 
-    /** Pull this caller's handoffs. An inbox link asks UNFILTERED (§3.2.3 — it has no session to scope by,
-     *  and the daemon answers with exactly the offers bound to its device); an ordinary link scopes to the
-     *  session on screen, and simply skips when there isn't one. */
+    /** Pull this caller's handoffs, scoped to the session on screen; skips when there isn't one. */
     fun listHandoffs() {
-        if (isCollaboratorInbox) { refreshHandoffsSilently(); return }
         val sid = sessionKey.value ?: currentSessionId ?: return
         scope.launch { runCatching { send(ListHandoffs(sessionId = sid)) } }
     }
-
-    /** The unfiltered pull, used by the inbox on connect / foreground / reconnect. */
-    fun refreshHandoffsSilently() = scope.launch { runCatching { send(ListHandoffs()) } }
 
     fun cancelHandoff(id: String) = scope.launch { runCatching { send(CancelHandoff(id)) } }
     fun recallHandoff(id: String) = scope.launch { runCatching { send(RecallHandoff(id)) } }
@@ -5684,7 +5596,6 @@ class PocketRepository(
                 replace(collaboratorLinks, Pairing.collaboratorLinks())
                 pendingCollabInvite.value = null
                 Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "collaborator", TelKey.UsageMode to "shared"))
-                onCollaboratorLinkAdded?.invoke(link, invite.ticket)
             } catch (t: Throwable) {
                 collabRedeemError.value = t.message ?: t::class.simpleName ?: "error"
                 Telemetry.track(TelEvent.PairFailed, mapOf(TelKey.Reason to pairFailReason(t), TelKey.Source to "collaborator"))
@@ -5712,19 +5623,6 @@ class PocketRepository(
 
     /** The offer id a push/deep link asked us to show, if any — consumed by the root incoming entry. */
     val pendingOfferId = mutableStateOf<String?>(null)
-
-    /** Set by the app root: a fresh Collaborator Link (and its one-time ticket, the first connect's PSK)
-     *  so the inbox connection for it comes up now rather than at the next app launch. */
-    var onCollaboratorLinkAdded: ((PairedDaemon, String) -> Unit)? = null
-
-    /** Set by the app root: the notifications toggle changed. Settings binds to the PRIMARY link, but the
-     *  preference is the device's, and a Collaborator Link inbox now holds a push token of its own (§3.4) —
-     *  without this fan-out, turning notifications off would leave every contact still able to buzz you. */
-    var onNotificationsChanged: ((Boolean) -> Unit)? = null
-
-    /** The one-time ticket doubles as the PSK on a binding's FIRST relay connect — a freshly redeemed inbox
-     *  link is constructed after the redeem, so it needs it handed over explicitly. */
-    internal fun armFirstTicket(ticket: String?) { firstTicket = ticket }
 
     /**
      * THE deep-link front door (§7). iOS `onOpenURL`, the Android VIEW intent, the pairing scanner and the
@@ -6457,7 +6355,7 @@ class PocketRepository(
             // change it is a request that can only be refused. Gating it HERE (rather than at the picker)
             // means every caller — deep link, push tap, retry replay — inherits the same rule.
             agentPreset = startAgentPreset?.takeIf { resumeId == null },
-            diagnostic = openObservation?.takeIf { daemonDiagnostics && !isCollaboratorInbox && paired.value?.role == BindingRole.OWNER && !demoMode.value }
+            diagnostic = openObservation?.takeIf { daemonDiagnostics && paired.value?.role == BindingRole.OWNER && !demoMode.value }
                 ?.also { it.requested = true }?.context,
         )
         openDiagnostic?.stage(DiagnosticStage.QUEUE)

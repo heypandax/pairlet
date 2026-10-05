@@ -300,25 +300,15 @@ fun App(scope: CoroutineScope) {
     var fleetOpen by remember { mutableStateOf(false) }
     var inboxOpen by remember { mutableStateOf(false) }
     var appForeground by remember { mutableStateOf(true) }
-    // Collaborator Links are contacts, not computers (SESSION-HANDOFF.md §4.1): their links live in their
-    // own always-on inbox rather than the fleet, and they carry exactly one thing — Handoff offers.
-    val collabInbox = remember { dev.ccpocket.app.data.CollaboratorInbox(scope).also { it.start() } }
-    // a fresh redeem shouldn't wait for the next launch to start listening — the offer that prompted the QR
-    // is usually already sitting on the colleague's daemon
-    remember { repo.onCollaboratorLinkAdded = { binding, ticket -> collabInbox.add(binding, ticket) } }
     // app_launch, the paired computer's reconnect, an OS-delivered link and a tapped push — all held until the
     // 5.1.2(i) data disclosure below is accepted (a route arriving earlier waits, it is not dropped)
     ConsentGatedLaunchEffects(repo)
     // issue #382: publish the open chat's session so a foreground turn push about it can skip the banner
     LaunchedEffect(repo) { androidx.compose.runtime.snapshotFlow { dev.ccpocket.app.push.foregroundSessionOf(repo.sessionKey.value, repo.convoId.value, repo.connected.value) }.collect { dev.ccpocket.app.push.ForegroundSession.update(it) } }
-    // the notifications toggle lives on the primary link but governs the whole device: fan it out so a
-    // Collaborator Link inbox de-registers (and re-registers) its own token with it (§3.4)
-    remember { repo.onNotificationsChanged = { on -> collabInbox.onNotificationsChanged(on) } }
     val appLock = repo.appLock
     dev.ccpocket.app.OnAppForeground { // iOS kills sockets in background — reconnect the whole fleet on return
         appForeground = true
         fleet.onAppForeground()
-        collabInbox.onAppForeground() // §3.2.3: and re-pull each contact's offers (a missed push heals here)
         fleet.repos().forEach { it.refreshPendingApprovals() }
         appLock.onForeground() // App Lock (issue #109): re-lock per policy / drop the cover on return
     }
@@ -329,7 +319,6 @@ fun App(scope: CoroutineScope) {
         // A retiring Activity can stop after its replacement has installed a new global fleet.
         // Its lifecycle belongs to this root; it must never background the replacement's links.
         fleet.onAppBackground()
-        collabInbox.repos().forEach { it.onAppBackground() }
     }
     dev.ccpocket.app.OnAppObscured { appLock.onWillObscure() }
     // The Claude allowance refresh rules, mounted ONCE here rather than inside the pill: two instances
@@ -572,7 +561,6 @@ fun App(scope: CoroutineScope) {
                 onDecline = { repo.pendingShareInvite.value = null },
             )
         }
-        IncomingHandoffRoot(repo, collabInbox)
         // App Lock (issue #109): the gate blocks ALL content (incl. the permission sheet) until biometrics
         // pass; the cover masks the app-switcher snapshot while briefly backgrounded. Both reuse the same
         // branded lockup. Desktop never reaches App(), so this overlay is Android/iOS-only by construction.
@@ -603,59 +591,6 @@ private fun NavBarPadded(content: @Composable BoxScope.() -> Unit) {
     Box(
         Modifier.fillMaxSize().background(Tok.base).windowInsetsPadding(WindowInsets.navigationBars),
         content = content,
-    )
-}
-
-/**
- * The root-level incoming-handoff doorway (implementation review §3.2.5). Independent of convoId, workdir
- * and sessionKey by construction: it aggregates the WAITING offers addressed to this device across the
- * PRIMARY link (another of your own devices handing you work) and every Collaborator Link inbox, and it
- * shows itself the moment one exists — that is the whole "the first offer has to be able to arrive"
- * requirement. Dismissing it is per-offer-set: a NEW offer re-opens it.
- */
-@Composable
-private fun IncomingHandoffRoot(repo: PocketRepository, inbox: dev.ccpocket.app.data.CollaboratorInbox) {
-    // a trust screen the user opened deliberately owns the screen first
-    if (repo.pendingCollabInvite.value != null || repo.pendingShareInvite.value != null) return
-    // (owning repo, offer) — the repo is who can answer it; an inbox offer must be accepted over the
-    // collaborator link that received it, never over the primary
-    val all: List<Pair<PocketRepository, dev.ccpocket.protocol.SessionHandoff>> =
-        repo.incomingOffers().map { repo to it } + inbox.offers().map { it.repo to it.handoff }
-    var dismissedFor by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var selectedId by remember { mutableStateOf<String?>(null) }
-    // a deep link / push tap names an offer directly (§3.4): honour it even if the sheet was dismissed.
-    // Keyed on the offer IDS too, not just the routed id: a push routinely wakes the app BEFORE the inbox
-    // link has reconnected and pulled the listing, so the named offer usually shows up a moment later.
-    val routed = repo.pendingOfferId.value
-    LaunchedEffect(routed, all.map { it.second.id }) {
-        if (routed != null && all.any { it.second.id == routed }) {
-            dismissedFor = dismissedFor - routed
-            selectedId = routed
-            repo.pendingOfferId.value = null
-        }
-    }
-    val live = all.filterNot { it.second.id in dismissedFor }
-    if (live.isEmpty()) { if (selectedId != null) selectedId = null; return }
-    val owning = live.firstOrNull { it.second.id == selectedId }
-    val answerRepo = owning?.first ?: live.first().first
-    dev.ccpocket.app.SystemBackHandler(enabled = true) {
-        if (selectedId != null) selectedId = null else dismissedFor = dismissedFor + live.map { it.second.id }
-    }
-    IncomingHandoffScreen(
-        offers = live.map { it.second },
-        selected = owning?.second,
-        ownerLabelOf = { it.initiatorLabel ?: "?" },
-        accepting = answerRepo.handoffAccepting.value,
-        errorNote = answerRepo.handoffAcceptError.value?.let { stringResource(it) }
-            ?: answerRepo.handoffUnsupported.value,
-        onSelect = { selectedId = it.id },
-        onAccept = { h -> live.firstOrNull { it.second.id == h.id }?.first?.acceptHandoff(h.id) },
-        onDecline = { h ->
-            live.firstOrNull { it.second.id == h.id }?.first?.declineHandoff(h.id)
-            selectedId = null
-        },
-        onBack = { selectedId = null },
-        onClose = { dismissedFor = dismissedFor + live.map { it.second.id }; selectedId = null },
     )
 }
 
