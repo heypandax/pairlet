@@ -1419,7 +1419,7 @@ class PocketRepository(
     val historyLayoutToken = mutableStateOf<String?>(null)
     val latestDiagnosticId = mutableStateOf<String?>(null)
     private fun productDimensions() = demoTag() + mapOf<TelKey, Any>(
-        TelKey.UsageMode to if (demoMode.value) "demo" else if (paired.value?.role?.let { it != BindingRole.OWNER } == true) "shared" else "own",
+        TelKey.UsageMode to if (demoMode.value) "demo" else "own",
         TelKey.Backend to (sessionAgent.value ?: AgentKind.CLAUDE).name.lowercase(),
     )
     val contentLayoutToken: String? get() = if (!appIsForeground.value) null else historyLayoutToken.value ?: promptOutcomes.layoutToken(convoId.value)
@@ -2890,7 +2890,7 @@ class PocketRepository(
                 // #362: a first owner computer may be where the legacy list belongs; re-adding the ACTIVE computer
                 // leaves this binding stale, which the rebind reports instead of syncing with it
                 bindProjectPins()
-                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "code-add", TelKey.UsageMode to if (newBinding.role == BindingRole.OWNER) "own" else "shared"))
+                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "code-add", TelKey.UsageMode to "own"))
                 onDone(true)
             } catch (t: Throwable) {
                 status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")

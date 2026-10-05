@@ -758,63 +758,15 @@
     <string name="path_copied">已复制</string>
     <string name="path_cwd_hint">已按会话目录解析</string>
 
-    <!-- ── folder-share (issue #115) ─────────────────────────────── -->
-    <string name="share_this_folder">分享这个文件夹…</string>
-    <string name="settings_shared_folders">已分享的文件夹</string>
-
-    <!-- owner: invite composer -->
-    <string name="share_composer_title">分享文件夹</string>
-    <string name="share_access_level">访问级别</string>
+    <!-- access tier names (bridge cards); first written for the retired folder share -->
     <string name="access_tier_review">审阅</string>
-    <string name="share_tier_review_desc">每步操作都需批准</string>
     <string name="access_tier_collaborate">协作</string>
-    <string name="share_tier_collaborate_desc">此处的编辑自动应用；命令仍会询问</string>
     <string name="access_tier_autonomous">自主</string>
-    <string name="share_tier_autonomous_desc">最少询问——命令仍会询问</string>
-    <string name="share_tier_review_help">最谨慎：每次编辑和命令都要等对方批准。</string>
-    <string name="share_tier_collaborate_help">此文件夹内的编辑自动应用；命令、联网等仍会询问。</string>
-    <string name="share_tier_autonomous_help">打断最少——但命令始终不会静默执行，仍会询问。</string>
-    <string name="share_expires_label">有效期</string>
-    <string name="share_expiry_help">邀请与访问权限到期后自动失效，可随时手动撤销。</string>
-    <string name="share_boundary_get">对方可以</string>
-    <string name="share_boundary_get_agents">在此文件夹运行 agent</string>
-    <string name="share_boundary_get_files">读取和编辑这里的文件</string>
-    <string name="share_boundary_get_env">它的 git、依赖、环境</string>
-    <string name="share_boundary_not">对方不能</string>
-    <string name="share_boundary_not_folders">你的其他文件夹</string>
-    <string name="share_boundary_not_memory">你的全局 CLAUDE.md 与记忆</string>
-    <string name="share_boundary_not_mcp">你的 MCP 集成与账号</string>
-    <string name="share_boundary_not_switch">切换账号</string>
-    <string name="share_boundary_shell_warn">命令行不是沙箱——它们以你的用户身份运行。</string>
-    <string name="share_create">生成邀请</string>
-    <string name="share_creating">正在生成邀请…</string>
-    <string name="share_create_failed">无法生成邀请。请更新电脑上的 daemon 后重试。</string>
 
-    <!-- owner: invite ready -->
-    <string name="share_invite_ready">邀请已就绪</string>
-    <string name="share_invite_hint">让对方在 Pairlet ▸ 连接 里粘贴此码加入。仅可用一次。</string>
-    <string name="share_invite_code">邀请码</string>
-    <string name="share_invite_copy">复制邀请码</string>
-    <string name="share_invite_copied">已复制</string>
-    <string name="share_invite_share">分享…</string>
-    <string name="share_invite_expires_in">%1$s 后过期</string>
-    <string name="share_invite_expired_note">此邀请码已过期，请重新生成。</string>
-    <string name="share_done">完成</string>
-
-    <!-- owner: management -->
-    <string name="shared_folders_title">已分享的文件夹</string>
-    <string name="shared_folders_empty">你还没有分享任何文件夹</string>
-    <string name="shared_folders_empty_hint">长按一个项目，然后选择“分享这个文件夹”。</string>
-    <string name="share_guest_someone">某人</string>
-    <string name="share_active_now">正在使用</string>
+    <!-- the bridge card's live-session count -->
     <string name="bridge_sessions_live">%1$d 个进行中</string>
+    <!-- the retired folder share's verb: no screen uses it; BridgesUiTest names it to prove the bridge card doesn't -->
     <string name="share_revoke">撤销</string>
-    <string name="share_revoked_label">已撤销</string>
-    <string name="share_revoke_title">撤销访问权限？</string>
-    <string name="share_revoke_c1">对方进行中的会话会立即结束。</string>
-    <string name="share_revoke_c2">对方将失去对此文件夹的访问权限。</string>
-    <string name="share_revoke_c3">此邀请无法再次使用。</string>
-    <string name="share_revoke_confirm">撤销访问权限</string>
 
     <!-- headless bridges (issue #91 follow-up): phone-side monitor + revoke + runner control -->
     <string name="settings_bridges">机器人桥接</string>
@@ -849,53 +801,7 @@
     <string name="bridge_expand_toggle">展开或收起</string>
     <string name="bridge_merge_lost">daemon 版本过旧，不支持增量编辑——这些值被清空而不是保留：%1$s。请升级 daemon 后重新编辑并补填。</string>
 
-    <!-- guest: accept preview -->
-    <string name="join_title">加入文件夹</string>
-    <string name="join_get_title">你将可以</string>
-    <string name="join_note">面向可信协作者的受限访问。</string>
-    <string name="join_cta">加入文件夹</string>
-    <string name="join_decline">拒绝</string>
-
-    <!-- guest: shared row badge -->
-    <string name="shared_badge">已分享</string>
-    <string name="shared_by_caption">由 %1$s 分享</string>
-    <string name="share_info_strip">这里 agent 的权限请求会发给你。</string>
-
-    <!-- expiry captions -->
-    <string name="share_left_days">剩 %1$d 天</string>
-    <string name="share_left_hours">剩 %1$d 小时</string>
-    <string name="share_left_minutes">剩 %1$d 分钟</string>
-    <string name="share_expired">已过期</string>
-
-    <!-- folder-share: UI copy added with the four screens -->
-    <string name="share_tier_recommended">推荐</string>
-    <string name="share_revoke_hint_anytime">你可以随时撤销访问权限。</string>
-    <string name="share_recap_access">权限</string>
-    <string name="share_recap_expires">有效期</string>
-    <string name="share_recap_folder">文件夹</string>
-    <string name="share_invite_new_code">重新生成</string>
-    <string name="share_manage_hint">随时在 设置 ▸ 共享文件夹 中管理或撤销。</string>
-    <string name="share_active_label">使用中</string>
-    <string name="share_history_label">历史</string>
-    <string name="share_owner_footer">对方的会话运行在你的电脑和你的 Claude 套餐上。</string>
-    <string name="share_expires_in">%1$s 后过期</string>
-    <string name="share_status_idle">空闲</string>
-    <string name="share_share_again">再次共享</string>
-    <string name="share_expired_label">已过期</string>
-    <string name="share_access_ended">访问已结束</string>
-    <string name="share_ended_body">%1$s 结束了此共享。此文件夹中的会话已无法从本设备访问。</string>
-    <string name="share_ended_body_expired">此共享已过期。此文件夹中的会话已无法从本设备访问。</string>
-    <string name="share_the_owner">所有者</string>
-    <string name="share_remove_from_list">从列表移除</string>
-    <string name="share_ask_new_invite">索取新的邀请</string>
-    <string name="share_revoked_disconnected">此共享已被撤销 · 会话已断开</string>
-    <string name="join_scan_title">加入共享文件夹</string>
-    <string name="join_scan_hint">扫描来自文件夹所有者的邀请</string>
-    <string name="join_or_paste">或粘贴邀请码</string>
-    <string name="join_paste_placeholder">粘贴邀请码</string>
-    <string name="join_single_use">邀请仅可使用一次，且很快过期。</string>
-    <string name="join_invalid">邀请无效或已过期。请索取新的邀请。</string>
-    <string name="join_review_title">确认邀请</string>
+    <!-- settings: the Connections page's group title above the bridges row -->
     <string name="settings_sharing_section">共享</string>
     <!-- 会话归档（issue #202）—— 桌面端与手机端共用 -->
     <string name="archive_session">归档会话</string>
@@ -999,7 +905,6 @@
     <string name="settings_tab_account">账号</string>
     <string name="settings_tab_computers">电脑</string>
     <string name="settings_tab_schedules">定时任务</string>
-    <string name="settings_tab_shared">共享</string>
     <string name="settings_tab_shortcuts">快捷键</string>
     <string name="settings_tab_about">关于</string>
 
@@ -1117,7 +1022,6 @@
     <string name="settings_schedules_stale">更新电脑上的 Pairlet 后才能使用定时任务。</string>
     <string name="settings_schedules_empty">暂无定时任务。在手机端长按发送键即可创建。</string>
     <string name="schedule_repeats">重复</string>
-    <string name="share_path_hint">输入这台电脑上某个文件夹的绝对路径。</string>
     <string name="settings_shortcuts_title">键盘快捷键</string>
     <string name="shortcut_palette">命令面板</string>
     <string name="shortcut_send">发送消息</string>
@@ -1435,7 +1339,6 @@
     <string name="computers_add">添加电脑</string>
     <string name="computers_more">电脑操作</string>
     <string name="computers_role_owner">机主</string>
-    <string name="computers_role_guest">访客</string>
     <string name="computers_account">账号 %1$s · %2$s</string>
 
     <!-- ── 电脑群 / 待处理（Supporting Surfaces UI 2.0） ────────────────────── -->
@@ -1477,8 +1380,8 @@
     <string name="settings_cat_general_sub">外观、字号、通知、语音输入</string>
     <string name="settings_cat_agent">Agent 与会话默认项</string>
     <string name="settings_cat_agent_sub">权限模式、模型、思考强度、上下文窗口、Agent 筛选</string>
-    <string name="settings_cat_connections">连接与协作</string>
-    <string name="settings_cat_connections_sub">电脑、共享文件夹、机器人桥</string>
+    <string name="settings_cat_connections">连接</string>
+    <string name="settings_cat_connections_sub">电脑、机器人桥</string>
     <string name="settings_cat_security">安全与审批</string>
     <string name="settings_cat_security_sub">审批行为、Full Control 存续时长、应用锁</string>
     <string name="settings_cat_support">帮助与关于</string>
