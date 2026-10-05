@@ -86,10 +86,6 @@ data class DkProject(
     val path: String,
     val name: String,
     val running: Boolean = false,
-    // folder-share (issue #115): set only on a GUEST's shared project (the daemon stamps DirectoryEntry) —
-    // drives the sidebar's "Shared" provenance pill. Null = an ordinary local dir.
-    val sharedBy: String? = null,      // owner label ("shared by panda")
-    val shareExpiresAt: Long? = null,  // epoch ms — the "6d left" caption
 )
 
 data class DkSession(
@@ -140,14 +136,10 @@ data class DkSessionGroup(
     val name: String,
     val current: Boolean,
     val sessions: List<DkSession>,
-    // folder-share (issue #115): a guest's shared project keeps its provenance on the RECENT group —
-    // the header renders the "Shared" pill + owner + remaining validity. Null = an ordinary local dir.
-    val sharedBy: String? = null,
-    val shareExpiresAt: Long? = null,
     // this project's custom session groups (issue #119), listed together with [sessions]: live for the current
     // group, the copy its snapshot kept for every other one (#360) — which is what lets a project that stops being
     // listed keep its sections. Display only: every group verb acts on the listed project ([DesktopModel.customGroups]).
-    // Empty = no groups, an older daemon or a guest — the rows render flat.
+    // Empty = no groups or an older daemon — the rows render flat.
     val customGroups: List<DkGroup> = emptyList(),
 )
 
@@ -570,8 +562,8 @@ interface DesktopModel {
     // them OR a project with no groups yet: either way the current project's rows render flat (the degrade).
     /** The current project's custom groups, ordered; empty = none / older daemon → flat list. */
     val customGroups: List<DkGroup> get() = emptyList()
-    /** Owner + group-capable connection: false hides every group-edit affordance (a guest is a daemon-side
-     *  no-op anyway; the seed/preview model leaves it inert). */
+    /** Group-capable connection with a listed project: false hides every group-edit affordance (the
+     *  seed/preview model leaves it inert). */
     val canEditGroups: Boolean get() = false
     /** Create a group in the current project (the daemon re-pushes Sessions, refreshing [customGroups]). */
     fun createGroup(name: String) {}
@@ -738,7 +730,7 @@ interface DesktopModel {
     // root. These reuse the pure helpers in ui/DirectoryPicker.kt. Defaults are inert for seed/preview.
     /** Latest anchored folder-browse reply (match its (workdir, subPath) before use). */
     val browseListing: dev.ccpocket.protocol.PathEntries? get() = null
-    /** The daemon machine's filesystem roots, latched from the "~" reply (owner-only; empty on old daemon/guest). */
+    /** The daemon machine's filesystem roots, latched from the "~" reply (empty on an older daemon). */
     val browseRoots: List<String> get() = emptyList()
     /** The daemon's known project directories — feeds recents/home inference + the "already a project" badge. */
     val browseDirectories: List<dev.ccpocket.protocol.DirectoryEntry> get() = emptyList()
@@ -1159,17 +1151,6 @@ interface DesktopModel {
     fun renameComputer(c: DkComputer, label: String?) // null clears back to the accountId fallback
     /** Remove this daemon binding from the desktop's local credential list; the daemon itself is unchanged. */
     fun removeComputer(c: DkComputer)
-
-    // ── folder-share (issue #115): owner management. All default to inert so the
-    //    seed/preview model needs no changes; the live [RepoDesktopModel] wires them to the repo. ──
-    val shares: List<dev.ccpocket.protocol.ShareInfo> get() = emptyList()
-    val sharesLoaded: Boolean get() = false
-    /** The invite minted by the last [createShare] — the owner shows its QR/code, then [clearLastShare]. */
-    val lastShareInvite: dev.ccpocket.protocol.ShareInvite? get() = null
-    fun refreshShares() {}
-    fun createShare(path: String, tier: dev.ccpocket.protocol.AccessTier, expiresInSec: Long) {}
-    fun revokeShare(deviceId: String) {}
-    fun clearLastShare() {}
 
     // scheduled tasks (issue #137): the ACTIVE computer's schedule list (management surface — the
     // creation gesture lives on mobile's composer). Defaults keep seed/preview/test fakes inert;
