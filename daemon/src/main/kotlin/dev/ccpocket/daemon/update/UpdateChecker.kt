@@ -16,7 +16,7 @@ import kotlin.system.exitProcess
  * (a log line, plus one push to the phone per new version). With [autoApply] — and only for a
  * curl-managed install whose service points at the stable launcher — it downloads, verifies, flips
  * the symlink and EXITS: launchd KeepAlive / systemd Restart=always relaunch straight onto the new
- * version. Windows never auto-applies (a Scheduled Task doesn't restart an exited process);
+ * version — once no session is busy, or after at most [MAX_DEFER_MS] (see [applyWhenIdle]). Windows never auto-applies (a Scheduled Task doesn't restart an exited process);
  * `pairlet update` covers it manually.
  */
 object UpdateChecker {
@@ -47,11 +47,12 @@ object UpdateChecker {
     /** What a fresh install gets: keep itself current (see [resolveAutoApply]). */
     const val DEFAULT_AUTO_APPLY = true
 
-    fun start(relay: RelayClient, autoApply: Boolean) {
+    /** [isBusy]: is any session doing or awaiting work a daemon exit would destroy? (auto-apply's gate) */
+    fun start(relay: RelayClient, autoApply: Boolean, isBusy: () -> Boolean) {
         thread(isDaemon = true, name = "update-checker") {
             Thread.sleep(FIRST_CHECK_DELAY_MS) // let boot + relay attach settle first
             while (true) {
-                runCatching { checkOnce(relay, autoApply) }
+                runCatching { checkOnce(relay, autoApply, isBusy) }
                     .onFailure {
                         dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.UPDATE,
                             dev.ccpocket.observability.Stage.REQUEST, dev.ccpocket.observability.ErrorCode.UNAVAILABLE, it,
@@ -63,7 +64,46 @@ object UpdateChecker {
         }
     }
 
-    internal fun checkOnce(relay: RelayClient, autoApply: Boolean) {
+    /**
+     * The auto-apply step (audit U2): apply the update, then exit for the supervisor to relaunch — but only
+     * while no session is busy, because the exit takes every running agent turn down with it. Waits for
+     * idle before the download and again before the exit (a turn may start while it downloads), polling
+     * every [pollMs], against ONE deadline of [maxDeferMs] so a daemon that never goes idle still updates.
+     * A failing [isBusy] probe counts as busy. Runs on the update-checker thread; the manual
+     * `pairlet update` command never comes through here.
+     */
+    internal fun applyWhenIdle(
+        isBusy: () -> Boolean,
+        apply: () -> Unit,
+        exit: () -> Unit,
+        maxDeferMs: Long = MAX_DEFER_MS,
+        pollMs: Long = IDLE_POLL_MS,
+        now: () -> Long = System::currentTimeMillis,
+        sleep: (Long) -> Unit = Thread::sleep,
+    ) {
+        val deadline = now() + maxDeferMs
+        fun awaitIdle(step: String) {
+            var announced = false
+            while (runCatching(isBusy).getOrDefault(true)) {
+                val left = deadline - now()
+                if (left <= 0) {
+                    log.warn("auto-update: sessions still busy after ${maxDeferMs / 60_000} min — proceeding to $step anyway")
+                    return
+                }
+                if (!announced) {
+                    log.info("auto-update: a session is busy — holding the $step until idle (checking every ${pollMs / 1_000}s)")
+                    announced = true
+                }
+                sleep(minOf(pollMs, left))
+            }
+        }
+        awaitIdle("download")
+        apply()
+        awaitIdle("restart")
+        exit()
+    }
+
+    internal fun checkOnce(relay: RelayClient, autoApply: Boolean, isBusy: () -> Boolean) {
         val current = UpdateService.currentVersion()
         if (current == "0.0.0-dev") return // dev builds don't self-update
         val latest = UpdateService.latestRelease() ?: return
@@ -87,11 +127,18 @@ object UpdateChecker {
             !System.getProperty("os.name").lowercase().contains("win")
 
         if (canAuto) {
-            log.info("auto-updating to ${latest.version}")
-            // background path: no terminal to draw on, and a redrawn line would flood the daemon log (#381)
-            UpdateService.apply(latest, install!!, UpdateProgressListener.QUIET)
-            log.info("switched — exiting so the service supervisor relaunches v${latest.version}")
-            exitProcess(0) // KeepAlive / Restart=always brings the new binary up within seconds
+            applyWhenIdle(
+                isBusy = isBusy,
+                apply = {
+                    log.info("auto-updating to ${latest.version}")
+                    // background path: no terminal to draw on, and a redrawn line would flood the daemon log (#381)
+                    UpdateService.apply(latest, install!!, UpdateProgressListener.QUIET)
+                },
+                exit = {
+                    log.info("switched — exiting so the service supervisor relaunches v${latest.version}")
+                    exitProcess(0) // KeepAlive / Restart=always brings the new binary up within seconds
+                },
+            )
         }
 
         // notify the phone once per version (the relay only pushes when the app isn't attached;
@@ -113,4 +160,10 @@ object UpdateChecker {
     private const val REANNOUNCE_TIMEOUT_MS = 5_000L
     private const val FIRST_CHECK_DELAY_MS = 5 * 60 * 1000L
     private const val CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L
+    // Longest an auto-update waits for the daemon to go idle: one check interval. A found update then lands
+    // no later than the next scheduled check would have (never more than a cycle late) and the wait never
+    // overlaps that check; 24h also outlasts any realistic agent turn, while a never-ending background job
+    // (a dev server left running) can't pin the daemon on an old version for good.
+    internal const val MAX_DEFER_MS = CHECK_INTERVAL_MS
+    internal const val IDLE_POLL_MS = 60_000L
 }
