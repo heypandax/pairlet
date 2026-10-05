@@ -589,9 +589,6 @@ class Conversation(
     @Volatile
     private var lastAskPushMs = 0L
 
-    @Volatile
-    private var pendingResumeId: String? = null
-
     // the resumeId this conversation was opened with — the relaunch anchor while sessionId is still
     // null (the agent emits nothing, init included, until the first turn lands). Without it, a
     // pre-first-turn mode switch on a resumed/taken-over terminal session would relaunch blank
@@ -1532,7 +1529,7 @@ class Conversation(
      * The relaunch primitive: stop the agent and re-spawn it resuming [resumeId], rebuilding the spec from the
      * live `model`/`mode`/`effort` fields. Driven by sendPrompt's relaunch-then-send (issue #84): a Claude
      * model/mode/effort switch defers its relaunch to here — right before the next turn — so a running turn is
-     * never interrupted. No pendingResumeId: a resume relaunch must not re-replay history.
+     * never interrupted. A resume relaunch must not re-replay history.
      *
      * Fork decision: pre-first-turn ([sessionId] still null) reuse open()'s call — the desktop's liveness
      * hasn't changed just because the phone flipped a setting; the old `resumeId != sessionId` heuristic
@@ -2408,11 +2405,6 @@ class Conversation(
                             // transcript for the resume pickers at next boot (issue #70)
                             sessionId?.let { sid -> runCatching { backend.onSessionStarted(sid, workdir.toString()) } }
                             sink.emit(live(sessionId))
-                            pendingResumeId?.let { rid ->
-                                pendingResumeId = null
-                                val slice = backend.replaySlice(workdir.toString(), rid)
-                                emitHistory(slice, sink)
-                            }
                         } else if (reemitLive && sessionId != null) {
                             reemitLive = false // mode switch relaunch landed — refresh the phone's sessionId
                             sink.emit(live(sessionId))
