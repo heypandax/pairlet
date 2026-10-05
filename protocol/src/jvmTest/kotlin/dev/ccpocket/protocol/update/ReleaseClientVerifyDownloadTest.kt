@@ -182,6 +182,67 @@ class ReleaseClientVerifyDownloadTest {
         }
     }
 
+    // ── anti-rollback mark through the real entry point ─────────────────────────────────────────────
+
+    private val highWater: Path = dir.resolve("state").resolve(ReleaseHighWater.FILE_NAME)
+
+    private fun signedRelease(prefix: String, publishedAt: String, body: ByteArray = payload): ReleaseClient.Release {
+        val m = manifestJson(version, mapOf(asset to sha256Hex(body)), publishedAt = publishedAt)
+        return ReleaseClient.Release(version, release(prefix, manifestBytes = m, signature = key.signatureFile(m)))
+    }
+
+    private fun enforcedWithMark(rel: ReleaseClient.Release, log: MutableList<String> = mutableListOf()) =
+        ReleaseClient.verifyDownload(rel, asset, file, "9.0.0", onSkip = { log += it }, trustedKeys = listOf(key.publicBase64), highWaterFile = highWater)
+
+    @Test
+    fun after_accepting_a_re_signed_hotfix_the_pre_hotfix_manifest_of_the_same_version_is_refused() {
+        assertTrue(enforcedWithMark(signedRelease("/hotfixed", "2026-10-06T00:00:00Z")))
+        assertEquals("9.1.0", ReleaseHighWater.read(highWater)!!.version)
+        refused(Failure.ROLLBACK) { enforcedWithMark(signedRelease("/pre-hotfix", "2026-10-05T00:00:00Z")) }
+        // the re-signed copy itself (or an even later re-sign) stays acceptable
+        assertTrue(enforcedWithMark(signedRelease("/hotfixed-again", "2026-10-06T00:00:00Z")))
+        assertTrue(enforcedWithMark(signedRelease("/later", "2026-10-07T00:00:00Z")))
+    }
+
+    @Test
+    fun an_authentic_manifest_raises_the_mark_even_when_the_download_does_not_match_it() {
+        // e.g. a mirror pairing the new manifest with the old package: refused, but the newer manifest is now known
+        refused(Failure.HASH_MISMATCH) { enforcedWithMark(signedRelease("/mixed", "2026-10-06T00:00:00Z", body = "new package".toByteArray())) }
+        assertEquals(java.time.Instant.parse("2026-10-06T00:00:00Z"), ReleaseHighWater.read(highWater)!!.publishedAt)
+        refused(Failure.ROLLBACK) { enforcedWithMark(signedRelease("/old", "2026-10-05T00:00:00Z")) }
+    }
+
+    @Test
+    fun a_corrupt_mark_does_not_block_updates() {
+        Files.createDirectories(highWater.parent)
+        Files.writeString(highWater, "{corrupt")
+        val log = mutableListOf<String>()
+        assertTrue(enforcedWithMark(signedRelease("/after-corrupt", "2026-10-05T00:00:00Z"), log))
+        assertTrue(log.any { it.contains("unreadable — treating it as absent") }, "$log")
+        assertEquals("9.1.0", ReleaseHighWater.read(highWater)!!.version, "replaced by a valid mark")
+    }
+
+    @Test
+    fun not_configured_never_reads_or_writes_the_mark() {
+        Files.createDirectories(highWater.parent)
+        Files.writeString(highWater, "{corrupt")
+        val rel = ReleaseClient.Release(version, release("/nc-mark"))
+        val log = mutableListOf<String>()
+        assertTrue(ReleaseClient.verifyDownload(rel, asset, file, "9.0.0", onSkip = { log += it }, trustedKeys = emptyList(), highWaterFile = highWater))
+        assertEquals("{corrupt", Files.readString(highWater))
+        assertTrue(log.isEmpty(), "$log")
+    }
+
+    // ── versions are validated where they are first parsed, in both modes ───────────────────────────
+
+    @Test
+    fun a_latest_json_with_a_path_like_version_is_dropped() {
+        for (v in listOf("../9.1.0", "9.1.0/../../x", "9.1.0/x", "9.1"))
+            assertEquals(null, ReleaseClient.parseManifest("""{"version":"$v","assets":{"a":"https://x/a"}}"""), v)
+        assertEquals("2.1.1-20260920-download-timeout",
+            ReleaseClient.parseManifest("""{"version":"v2.1.1-20260920-download-timeout","assets":{"a":"https://x/a"}}""")!!.version)
+    }
+
     @Test
     fun enforced_accepts_any_trusted_key_and_rejects_a_removed_one() {
         val next = TestSigningKey()

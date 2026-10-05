@@ -8,6 +8,8 @@ import dev.ccpocket.daemon.service.ServiceInstaller
 import dev.ccpocket.daemon.util.DaemonVersion
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.update.ReleaseClient
+import dev.ccpocket.protocol.update.ReleaseHighWater
+import dev.ccpocket.protocol.update.ReleaseSignature
 import dev.ccpocket.protocol.update.ReleaseTrustedKeys
 import dev.ccpocket.protocol.update.ReleaseVersions
 import java.nio.file.Files
@@ -161,6 +163,10 @@ object UpdateService {
 
     fun latestRelease(): Release? = ReleaseClient.latest(REPO)
 
+    /** Where ENFORCED mode keeps its anti-rollback mark — the daemon's state dir, next to update-notice. */
+    fun defaultHighWaterFile(): Path =
+        Path.of(System.getProperty("user.home"), ".cc-pocket", ReleaseHighWater.FILE_NAME)
+
     /**
      * Download + verify + extract [release] into `versions/<ver>` and switch the stable launcher to it.
      * mac/linux: atomic symlink flip (the service ExecStart points at the symlink, so a restart lands on
@@ -183,6 +189,7 @@ object UpdateService {
         progress: UpdateProgressListener = UpdateProgressListener.QUIET,
         trustedKeys: List<String> = ReleaseTrustedKeys.KEYS,
         current: String = currentVersion(),
+        highWaterFile: Path? = defaultHighWaterFile(),
     ): Path {
         val trace = Diagnostics.begin(ErrorPath.UPDATE)
         var stage = Stage.CONFIGURE
@@ -192,6 +199,9 @@ object UpdateService {
         trace?.stage(stage)
         var cleanup: Path? = null
         try {
+            // the version becomes versions/<ver>/ below: refuse anything that is not a plain release version
+            // before a single byte is written (ReleaseClient already drops such releases; this guards callers)
+            check(ReleaseSignature.isValidVersion(release.version)) { "refusing release with invalid version '${release.version}'" }
             val asset = assetNameFor(release.version) ?: error("no prebuilt artifact for this platform")
             val url = release.assetUrls[asset] ?: error("release v${release.version} has no asset $asset")
             val tmp = Files.createTempDirectory("cc-pocket-update").also { cleanup = it }
@@ -202,7 +212,9 @@ object UpdateService {
             ReleaseClient.download(url, file) { p -> notify { onDownload(p) } }
             stage = Stage.VERIFY; trace?.stage(stage)
             enter(UpdatePhase.VERIFY)
-            val verified = ReleaseClient.verifyDownload(release, asset, file, current, onSkip = { log.warn(it) }, trustedKeys = trustedKeys)
+            val verified = ReleaseClient.verifyDownload(
+                release, asset, file, current, onSkip = { log.warn(it) }, trustedKeys = trustedKeys, highWaterFile = highWaterFile,
+            )
             if (verified) log.info(if (trustedKeys.isEmpty()) "checksum OK ($asset)" else "signed release manifest + checksum OK ($asset)")
             else {
                 trace?.stage(Stage.VERIFY, ErrorCode.FALLBACK_USED)

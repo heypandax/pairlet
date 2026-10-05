@@ -36,9 +36,11 @@ class UpdateSignatureTest {
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).also { it.start() }
     private val files = mutableMapOf<String, ByteArray>()
     private val base get() = "http://127.0.0.1:${server.address.port}"
+    private val requests = java.util.concurrent.atomic.AtomicInteger()
 
     init {
         server.createContext("/") { ex ->
+            requests.incrementAndGet()
             val body = synchronized(files) { files[ex.requestURI.path] }
             if (body == null) ex.sendResponseHeaders(404, -1)
             else { ex.sendResponseHeaders(200, body.size.toLong()); ex.responseBody.write(body) }
@@ -60,8 +62,11 @@ class UpdateSignatureTest {
 
     private fun sha(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
 
-    private fun manifest(version: String, entries: Map<String, String>) = """
-        {"schema":"${ReleaseSignature.SCHEMA}","version":"$version","publishedAt":"2026-10-05T08:00:00Z",
+    /** Per-test anti-rollback mark (never the shared test-home one, so test order cannot matter). */
+    private val highWater: Path get() = temp.resolve("state").resolve("highwater.json")
+
+    private fun manifest(version: String, entries: Map<String, String>, publishedAt: String = "2026-10-05T08:00:00Z") = """
+        {"schema":"${ReleaseSignature.SCHEMA}","version":"$version","publishedAt":"$publishedAt",
          "assets":{${entries.entries.joinToString(",") { "\"${it.key}\":{\"sha256\":\"${it.value}\"}" }}}}
     """.trimIndent().toByteArray()
 
@@ -123,7 +128,7 @@ class UpdateSignatureTest {
         val rec = Recorder()
         val inst = install()
         val e = assertFailsWith<ReleaseSignature.RejectedException> {
-            UpdateService.apply(release, inst, rec, trustedKeys = listOf(key.public), current = current)
+            UpdateService.apply(release, inst, rec, trustedKeys = listOf(key.public), current = current, highWaterFile = highWater)
         }
         assertEquals(failure, e.failure, e.message)
         assertEquals(listOf("phase:DOWNLOAD", "phase:VERIFY", "failed:VERIFY"), rec.events)
@@ -149,7 +154,7 @@ class UpdateSignatureTest {
         val (release, _) = publish("/ok", "99.4.0", archive(), sums = false)
         val rec = Recorder()
         val inst = install()
-        UpdateService.apply(release, inst, rec, trustedKeys = listOf(key.public), current = "1.0.0")
+        UpdateService.apply(release, inst, rec, trustedKeys = listOf(key.public), current = "1.0.0", highWaterFile = highWater)
         assertSwitchedTo(inst, "99.4.0")
         assertEquals(listOf("phase:DOWNLOAD", "phase:VERIFY", "phase:EXTRACT", "phase:INSTALL", "switched"), rec.events)
     }
@@ -177,5 +182,37 @@ class UpdateSignatureTest {
     @Test
     fun enforced_refuses_a_release_that_is_not_newer_than_the_running_one() {
         refused(ReleaseSignature.Failure.NOT_NEWER, publish("/old", "99.8.0", archive()).first, current = "99.8.0")
+    }
+
+    @Test
+    fun enforced_refuses_the_pre_hotfix_manifest_once_the_re_signed_one_was_seen() {
+        val body = archive()
+        // the re-signed (hotfix) manifest was seen first — here its download did not match, so nothing installed
+        val (resigned, _) = publish("/hotfix", "99.9.0", body,
+            manifestBytes = { a -> manifest("99.9.0", mapOf(a to sha("other".toByteArray())), publishedAt = "2026-10-06T00:00:00Z") })
+        refused(ReleaseSignature.Failure.HASH_MISMATCH, resigned)
+        // a mirror then serves the older, genuinely signed manifest of the same version with its package
+        refused(ReleaseSignature.Failure.ROLLBACK, publish("/pre-hotfix", "99.9.0", body).first)
+    }
+
+    @Test
+    fun a_path_like_version_is_refused_before_anything_is_downloaded_or_written() {
+        for (keys in listOf(emptyList(), listOf(key.public))) {
+            val inst = install()
+            synchronized(files) { files["/evil/x"] = archive() }
+            requests.set(0)
+            val release = ReleaseClient.Release("../../evil", mapOf(
+                "cc-pocket-daemon-../../evil-linux-x86_64.tar.gz" to "$base/evil/x",
+                "cc-pocket-daemon-../../evil-macos-arm64.tar.gz" to "$base/evil/x",
+                "cc-pocket-daemon-../../evil-macos-x86_64.tar.gz" to "$base/evil/x"))
+            val e = assertFailsWith<IllegalStateException> {
+                UpdateService.apply(release, inst, Recorder(), trustedKeys = keys, current = "1.0.0", highWaterFile = highWater)
+            }
+            assertTrue(e.message!!.contains("invalid version"), e.message)
+            assertEquals(emptyList(), Files.list(inst.versionsDir).use { it.toList() }, "nothing written under versions/")
+            assertFalse(inst.launcher.exists())
+            assertFalse(highWater.exists())
+            assertEquals(0, requests.get(), "nothing may be downloaded")
+        }
     }
 }

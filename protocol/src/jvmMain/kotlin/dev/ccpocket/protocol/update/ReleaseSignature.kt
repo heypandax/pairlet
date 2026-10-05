@@ -37,9 +37,10 @@ object ReleaseSignature {
     const val MAX_MANIFEST_BYTES = 1 shl 20
     const val MAX_SIGNATURE_BYTES = 4 * 1024
 
-    /** Same rule the release scripts enforce: plain dotted version with an optional suffix, nothing that
-     *  could walk a path (the daemon uses the version as a directory name). */
-    private val VERSION_RE = Regex("^[0-9]+\\.[0-9]+\\.[0-9]+([-.][0-9A-Za-z.]+)?$")
+    /** Same rule the release scripts enforce: dotted version with an optional suffix (e.g. `-rc1`,
+     *  `-20260920-download-timeout`) and never a path separator — the daemon uses the version as a
+     *  directory name. Applied to every version a client is offered, signed or not ([isValidVersion]). */
+    private val VERSION_RE = Regex("^[0-9]+\\.[0-9]+\\.[0-9]+([-.+][0-9A-Za-z.+-]+)?$")
     private val ASSET_RE = Regex("^[A-Za-z0-9][A-Za-z0-9._+-]*$")
     private val SHA256_RE = Regex("^[0-9a-f]{64}$")
 
@@ -52,6 +53,22 @@ object ReleaseSignature {
 
     data class Manifest(val version: String, val publishedAt: Instant, val assets: Map<String, String>)
 
+    /** The newest signed manifest this client has accepted (see [ReleaseHighWater]): nothing below it —
+     *  a lower version, or the same version with an earlier [publishedAt] — is accepted again. */
+    data class HighWater(val version: String, val publishedAt: Instant) {
+        /** True when [m] is strictly older than this mark. */
+        fun isAbove(m: Manifest): Boolean =
+            ReleaseVersions.isNewer(version, m.version) ||
+                (!ReleaseVersions.isNewer(m.version, version) && m.publishedAt.isBefore(publishedAt))
+
+        companion object {
+            fun of(m: Manifest) = HighWater(m.version, m.publishedAt)
+        }
+    }
+
+    /** True for a version string a client may act on (install dir name, asset name). */
+    fun isValidVersion(version: String): Boolean = VERSION_RE.matches(version)
+
     /** Why an update was refused in ENFORCED mode. [summary] is what the user / log sees first. */
     enum class Failure(val summary: String) {
         MANIFEST_MISSING("the release has no signed manifest"),
@@ -61,6 +78,7 @@ object ReleaseSignature {
         MANIFEST_MALFORMED("the signed release manifest is malformed"),
         VERSION_MISMATCH("the signed manifest is for a different version"),
         NOT_NEWER("the signed manifest is not newer than the running version"),
+        ROLLBACK("the signed manifest is older than one this client already accepted"),
         ASSET_NOT_LISTED("the signed manifest does not list this download"),
         HASH_MISMATCH("the download does not match the signed manifest"),
     }
@@ -91,7 +109,8 @@ object ReleaseSignature {
      * The whole ENFORCED-mode decision for one downloaded artifact, without any I/O. [manifestBytes] /
      * [signatureBytes] are null when the release did not provide them (or they could not be fetched).
      * [expectedVersion] is the version the client chose to install (from latest.json / the GitHub API),
-     * [currentVersion] the one running. Returns the verified manifest; throws [RejectedException] otherwise.
+     * [currentVersion] the one running, [highWater] the newest manifest accepted before (null = none).
+     * Returns the verified manifest; throws [RejectedException] otherwise.
      */
     fun verify(
         manifestBytes: ByteArray?,
@@ -101,6 +120,22 @@ object ReleaseSignature {
         currentVersion: String,
         asset: String,
         actualSha256: String,
+        highWater: HighWater? = null,
+    ): Manifest = verifyManifest(manifestBytes, signatureBytes, trustedKeys, expectedVersion, currentVersion, highWater)
+        .also { checkAsset(it, asset, actualSha256) }
+
+    /**
+     * Everything about the manifest itself: present, signed by a trusted key, well formed, for
+     * [expectedVersion], newer than [currentVersion] and not below [highWater]. A manifest that passes is
+     * authentic and current, even if the artifact downloaded next turns out not to match it.
+     */
+    fun verifyManifest(
+        manifestBytes: ByteArray?,
+        signatureBytes: ByteArray?,
+        trustedKeys: List<String>,
+        expectedVersion: String,
+        currentVersion: String,
+        highWater: HighWater? = null,
     ): Manifest {
         require(trustedKeys.isNotEmpty()) { "verify() is the ENFORCED path; an empty trusted list must not get here" }
         if (manifestBytes == null) reject(Failure.MANIFEST_MISSING, "no $MANIFEST_ASSET for v$expectedVersion")
@@ -116,11 +151,19 @@ object ReleaseSignature {
         if (!ReleaseVersions.isNewer(manifest.version, currentVersion)) {
             reject(Failure.NOT_NEWER, "signed v${manifest.version}, running v$currentVersion")
         }
+        if (highWater != null && highWater.isAbove(manifest)) {
+            reject(Failure.ROLLBACK, "offered v${manifest.version} published ${manifest.publishedAt}, " +
+                "already accepted v${highWater.version} published ${highWater.publishedAt}")
+        }
+        return manifest
+    }
+
+    /** The downloaded artifact against an already verified manifest. */
+    fun checkAsset(manifest: Manifest, asset: String, actualSha256: String) {
         val expected = manifest.assets[asset] ?: reject(Failure.ASSET_NOT_LISTED, asset)
         if (!expected.equals(actualSha256, ignoreCase = true)) {
             reject(Failure.HASH_MISMATCH, "$asset\n  signed   $expected\n  actual   ${actualSha256.lowercase()}")
         }
-        return manifest
     }
 
     /** True when [signature] over [message] verifies against at least one key in [trustedKeys]. A list entry

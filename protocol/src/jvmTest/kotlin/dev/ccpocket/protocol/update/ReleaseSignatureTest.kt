@@ -5,6 +5,7 @@ import java.util.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -143,6 +144,43 @@ class ReleaseSignatureTest {
     @Test
     fun the_enforced_path_refuses_to_run_with_an_empty_list() {
         assertFailsWith<IllegalArgumentException> { verify(keys = emptyList()) }
+    }
+
+    // ── anti-rollback high-water mark ────────────────────────────────────────────────────────────
+
+    private fun mark(version: String, at: String) = ReleaseSignature.HighWater(version, java.time.Instant.parse(at))
+    private fun signedAt(version: String, at: String): Pair<ByteArray, ByteArray> {
+        val body = manifestJson(version, mapOf(asset to sha256Hex(payload)), publishedAt = at)
+        return body to key.signatureFile(body)
+    }
+
+    @Test
+    fun a_manifest_below_the_high_water_mark_is_refused_as_rollback() {
+        val (m, s) = signedAt("2.5.0", "2026-10-05T08:00:00Z")
+        // a newer version was already accepted
+        refused(Failure.ROLLBACK) {
+            ReleaseSignature.verify(m, s, listOf(key.publicBase64), "2.5.0", "2.4.0", asset, sha256Hex(payload), mark("2.6.0", "2026-10-01T00:00:00Z"))
+        }
+        // same version, but the copy re-signed later (a hotfix) was already accepted: the pre-hotfix one is refused
+        refused(Failure.ROLLBACK) {
+            ReleaseSignature.verify(m, s, listOf(key.publicBase64), "2.5.0", "2.4.0", asset, sha256Hex(payload), mark("2.5.0", "2026-10-06T00:00:00Z"))
+        }
+    }
+
+    @Test
+    fun the_same_or_a_later_manifest_than_the_mark_is_accepted() {
+        val (m, s) = signedAt("2.5.0", "2026-10-05T08:00:00Z")
+        for (hw in listOf(mark("2.5.0", "2026-10-05T08:00:00Z"), mark("2.5.0", "2026-10-04T00:00:00Z"), mark("2.4.9", "2026-12-01T00:00:00Z"))) {
+            ReleaseSignature.verify(m, s, listOf(key.publicBase64), "2.5.0", "2.4.0", asset, sha256Hex(payload), hw)
+        }
+    }
+
+    @Test
+    fun only_plain_release_versions_are_valid() {
+        for (ok in listOf("2.3.0", "1.9.7-r2", "2.1.1-20260920-download-timeout", "0.0.0-dev", "2.0.0+build.5", "10.20.30"))
+            assertTrue(ReleaseSignature.isValidVersion(ok), ok)
+        for (bad in listOf("", "2.3", "../2.3.0", "2.3.0/../../x", "2.3.0/x", "2.3.0\\x", "v2.3.0", " 2.3.0", "2.3.0\n", "2.3.0-"))
+            assertFalse(ReleaseSignature.isValidVersion(bad), bad)
     }
 
     @Test

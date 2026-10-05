@@ -2,6 +2,7 @@ package dev.ccpocket.app.desktop
 
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.protocol.update.ReleaseClient
+import dev.ccpocket.protocol.update.ReleaseHighWater
 import dev.ccpocket.protocol.update.ReleaseSignature
 import dev.ccpocket.protocol.update.ReleaseTrustedKeys
 import dev.ccpocket.protocol.update.ReleaseVersions
@@ -143,14 +144,24 @@ object DesktopUpdater {
         asset: String,
         current: String = APP_VERSION,
         trustedKeys: List<String> = ReleaseTrustedKeys.KEYS,
+        highWaterFile: Path? = defaultHighWaterFile(),
     ): Path {
+        // same guard as the daemon: nothing is downloaded or written for a version that is not a plain release one
+        check(ReleaseSignature.isValidVersion(release.version)) { "refusing release with invalid version '${release.version}'" }
         val url = release.assetUrls[asset] ?: error("release v${release.version} has no asset $asset")
         val tmp = Files.createTempDirectory("cc-pocket-desktop-update")
         val file = tmp.resolve(asset)
         ReleaseClient.download(url, file)
-        ReleaseClient.verifyDownload(release, asset, file.toAbsolutePath(), current, trustedKeys = trustedKeys)
+        ReleaseClient.verifyDownload(
+            release, asset, file.toAbsolutePath(), current,
+            onSkip = { runCatching { System.err.println(it) } }, trustedKeys = trustedKeys, highWaterFile = highWaterFile,
+        )
         return file
     }
+
+    /** ENFORCED mode's anti-rollback mark, in the desktop app's own state dir. */
+    private fun defaultHighWaterFile(): Path =
+        Path.of(System.getProperty("user.home"), ".cc-pocket-app", ReleaseHighWater.FILE_NAME)
 
     // macOS: mount the dmg, copy the new .app OUT of the read-only image, detach, then hand a detached
     // helper the swap — a process can't replace its own running bundle, so the helper waits for this PID to
