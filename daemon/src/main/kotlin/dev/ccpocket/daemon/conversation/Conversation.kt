@@ -670,6 +670,12 @@ class Conversation(
     @Volatile
     private var announcedDeferral: Map<String, String> = emptyMap()
 
+    // Announced changes a prompt's launch was handed but that never went live (the launch failed): the next
+    // prompt-driven launch confirms them once it succeeds. Same protection; cleared by every launch attempt
+    // and stop (the failing prompt path re-arms it after its own failed attempt).
+    @Volatile
+    private var unconfirmedDeferral: List<SettingChange> = emptyList()
+
     // context tokens the resumed transcript's last turn left in the window — seeds the phone's usage
     // statusline before the first new turn lands. Null for a brand-new session (nothing used yet).
     @Volatile
@@ -1929,6 +1935,7 @@ class Conversation(
         modelPickPending = false // …including a model pick: this process's own init may now report the resolved id
         bakedSettings = LaunchSettings.of(rawSpec) // …and nothing announced as deferred is pending against it
         announcedDeferral = emptyMap()
+        unconfirmedDeferral = emptyList()
         resetTurnScratch()
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val launchGeneration = processGeneration
@@ -3269,14 +3276,17 @@ class Conversation(
         val initialSend = InitialSend(promptId, outgoing, images, bridgeGrantToken)
         if (relaunching) {
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
-            announceDeferredSettingsAppliedLocked() // before the launch: its pump must not out-race the line
+            val applying = stageDeferredApplyLocked() // read before the relaunch's stop clears what was announced
             val relaunched = runCatching { relaunch(sessionId ?: openedResumeId, armExecuting = true, initialSend = initialSend) }
             if (relaunched.isFailure) {
+                unconfirmedDeferral = applying // not live — the next successful launch confirms it instead
                 clearTurnWork() // the relaunch never started a turn
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to relaunch for the new settings (${relaunched.exceptionOrNull()?.message})", convoId))
                 return null
             }
+            // live now and nothing of THIS prompt written yet: the line leads the turn it explains
+            announceDeferredSettingsAppliedLocked(applying)
         } else if (proc == null) {
             // LAZY START (issue #61): a plain open no longer spawns the agent — the FIRST prompt does. Resume the id
             // open() recorded (openedResumeId), reusing its fork decision (openedWithFork — false for a plain open, so
@@ -3292,8 +3302,9 @@ class Conversation(
             // A truly stale id is recovered at process death (SESSION_NOT_FOUND clears the lineage).
             val lazySpec = launchSpec(initialPrompt = outgoing) // anchor + fork decision: launchSpec's defaults
             lifecycleProbe?.invoke(LifecyclePoint.AFTER_SPAWN_DECISION)
-            // a process that died while an announced deferral was pending: this respawn is where it applies
-            announceDeferredSettingsAppliedLocked()
+            // a process that died (or a relaunch that failed) while an announced deferral was pending: this
+            // respawn is where it applies
+            val applying = stageDeferredApplyLocked()
             val launched = runCatching {
                 launchProcess(
                     lazySpec,
@@ -3302,6 +3313,7 @@ class Conversation(
                 )
             }
             if (launched.isFailure) {
+                unconfirmedDeferral = applying
                 promptDiagnostics.failed(promptId, launched.exceptionOrNull())
                 clearTurnWork() // the spawn never started a turn
                 // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
@@ -3309,6 +3321,7 @@ class Conversation(
                 sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
                 return null
             }
+            announceDeferredSettingsAppliedLocked(applying)
         } else if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
             // ONE-SHOT mid-turn queue: the live process baked its prompt into argv and reads no stdin,
             // so this prompt can't ride it. Ledger it — the ack below means "queued", the same receipt
@@ -3368,13 +3381,21 @@ class Conversation(
         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(text)))
     }
 
-    /** The launch about to run bakes what an earlier notice called deferred: confirm it in the chat. Silent when
-     *  nothing was announced (an ordinary switch stays frame-for-frame unchanged) or the user switched back.
-     *  Caller holds [lifecycle], BEFORE the launch (its pump must not emit ahead of this line). */
-    private suspend fun announceDeferredSettingsAppliedLocked() {
-        if (announcedDeferral.isEmpty()) return
-        val applied = pendingSettingChangesLocked()
-        announcedDeferral = emptyMap()
+    /** What a prompt's launch is about to apply that a notice called deferred — plus whatever an earlier,
+     *  failed launch was handed — read BEFORE the launch (a relaunch's stop wipes the announced state). Empty
+     *  when nothing was announced: an ordinary switch stays frame-for-frame unchanged. Caller holds [lifecycle]. */
+    private fun stageDeferredApplyLocked(): List<SettingChange> {
+        val fresh = if (announcedDeferral.isEmpty()) emptyList() else pendingSettingChangesLocked()
+        return fresh + unconfirmedDeferral.filter { carried -> fresh.none { it.key == carried.key } }
+    }
+
+    /** The launch SUCCEEDED (the caller's failure branch already returned): confirm in the chat what of [staged]
+     *  it actually baked — not a value the user switched away from meanwhile. Caller holds [lifecycle], after
+     *  [launchProcess] returned and before this prompt's write, so no reply to it can precede the line. */
+    private suspend fun announceDeferredSettingsAppliedLocked(staged: List<SettingChange>) {
+        if (staged.isEmpty()) return
+        val now = bakedSettings?.let { settingLabels(it) } ?: return
+        val applied = staged.filter { now[it.key] == it.to }
         if (applied.isEmpty()) return
         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(deferredSettingsAppliedNotice(applied))))
     }
@@ -3709,8 +3730,9 @@ class Conversation(
         proc = null
         bridge = null
         slot = null
-        bakedSettings = null // no process, nothing riding stale settings (a relaunch announced its apply already)
+        bakedSettings = null // no process, nothing riding stale settings (a relaunch staged its apply already)
         announcedDeferral = emptyMap()
+        unconfirmedDeferral = emptyList()
         // second pass: an event the old pump was already handling when the slot retired may have re-armed it
         clearTurnWork()
         settleSubagents(includeBackground = true) // sub-agents died with the tree — stop their cards spinning
@@ -3939,15 +3961,21 @@ class Conversation(
 
         private const val MODEL_KEY = "model"
 
-        private fun settingChanges(from: LaunchSettings, to: LaunchSettings, modelPicked: Boolean): List<SettingChange> =
-            buildList {
-                fun add(key: String, a: String, b: String) { if (a != b) add(SettingChange(key, a, b)) }
-                if (modelPicked) add(MODEL_KEY, from.model ?: "the default model", to.model ?: "the default model")
-                add("reasoning effort", from.effort ?: "default", to.effort ?: "default")
-                add("permission mode", modeLabel(from.mode, from.permissionMode), modeLabel(to.mode, to.permissionMode))
-                add("thinking", thinkingLabel(from.thinking), thinkingLabel(to.thinking))
-                add("service tier", from.serviceTier ?: "default", to.serviceTier ?: "default")
-            }
+        /** Each launch setting as the notices word it, keyed by its chat label (insertion order = notice order). */
+        private fun settingLabels(s: LaunchSettings): Map<String, String> = linkedMapOf(
+            MODEL_KEY to (s.model ?: "the default model"),
+            "reasoning effort" to (s.effort ?: "default"),
+            "permission mode" to modeLabel(s.mode, s.permissionMode),
+            "thinking" to thinkingLabel(s.thinking),
+            "service tier" to (s.serviceTier ?: "default"),
+        )
+
+        private fun settingChanges(from: LaunchSettings, to: LaunchSettings, modelPicked: Boolean): List<SettingChange> {
+            val a = settingLabels(from)
+            val b = settingLabels(to)
+            return a.keys.filter { (modelPicked || it != MODEL_KEY) && a[it] != b[it] }
+                .map { SettingChange(it, a.getValue(it), b.getValue(it)) }
+        }
 
         // the App's own names for the modes (cfg_mode_*), lower-cased to sit mid-sentence
         private fun modeLabel(mode: PermissionMode, native: String?): String = native ?: when (mode) {

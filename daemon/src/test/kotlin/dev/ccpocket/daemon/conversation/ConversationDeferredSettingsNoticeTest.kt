@@ -99,6 +99,45 @@ class ConversationDeferredSettingsNoticeTest {
     }
 
     @Test
+    fun a_failed_relaunch_claims_nothing_and_the_next_successful_launch_confirms() = withGrace("0") {
+        runBlocking {
+            if (LifecycleHarness.isWindows()) return@runBlocking
+            // launch #1 is the deferred settings relaunch: its attach throws, so the process never goes live
+            val backend = LifecycleBackend(attachThrowsAt = setOf(1)) { _, _ -> script }
+            val h = LifecycleHarness(backend, "cNoticeFail", continuationGraceMs = 50)
+            try {
+                h.convo.open(resumeId = null, model = "opus")
+                h.convo.sendPrompt("start bg", promptId = "1")
+                h.await(what = "turn one") { h.framesOf<TurnDone>().size == 1 }
+                h.convo.switchModel("sonnet")
+                h.convo.sendPrompt("hello", promptId = "2")
+                h.await(what = "turn two") { h.framesOf<TurnDone>().size == 2 }
+                h.convo.sendPrompt("finish it", promptId = "3")
+                h.await(what = "turn three") { h.framesOf<TurnDone>().size == 3 }
+                assertEquals(1, h.deferredNotices().size)
+                delay(150) // past the continuation grace the completion armed
+
+                h.convo.sendPrompt("after", promptId = "4") // the deferred relaunch — fails
+                h.await(what = "the relaunch failure") { h.framesOf<PocketError>().isNotEmpty() }
+                assertEquals(2, backend.specs.size)
+                assertEquals(emptyList(), h.appliedNotices(), "a failed launch must not claim the new settings: ${h.texts()}")
+
+                h.convo.sendPrompt("retry", promptId = "5") // the next launch succeeds and bakes them
+                h.await(what = "the successful launch") { backend.specs.size == 3 }
+                h.await(what = "its turn") { h.framesOf<TurnDone>().size == 4 }
+                assertEquals("sonnet", backend.specs[2].model)
+                assertEquals(listOf("✓ Now using sonnet.\n\n"), h.appliedNotices(), h.texts().toString())
+                val notice = h.frames.indexOfFirst { it is AssistantChunk && (it.piece as? StreamPiece.Text)?.text?.startsWith("✓ Now using") == true }
+                assertTrue(notice > h.frames.indexOfFirst { it is PocketError }, "confirmed only after the failure")
+                assertTrue(notice < h.frames.indexOfLast { it is TurnDone }, "and ahead of the turn it explains")
+                assertEquals(1, h.deferredNotices().size)
+            } finally {
+                h.close()
+            }
+        }
+    }
+
+    @Test
     fun pending_question_deferral_is_announced_with_its_own_reason() = withGrace("0") {
         runBlocking {
             if (LifecycleHarness.isWindows()) return@runBlocking
