@@ -80,9 +80,9 @@
 |---|---|---|---|
 | EP-21 | [SessionFilesService][session-files]、[FileExportService][exports]、[FileChunkAssembler][file-assembler]：读取/授权、下载分片、缺尾片/乱序、接收后解码 | file_kind、declared/received_bytes、expected/received_chunks、read/transfer/assemble、result_quality；`file_read_failed`、`file_transfer_incomplete` | 当前请求缺片/断连、文件消失、读取 I/O 失败；主动关闭预览、旧读取分片、权限拒绝不当作内部异常；不记录文件名/路径/内容 |
 | EP-22 | [FileInboxService][inbox]、[UploadReassembler][upload]：上传 Base64 错误、预算拒绝、乱序缓存满、临时文件/最终落盘失败 | upload/decode/assemble/write/commit、字节数、分片数、fixed reject_code；`upload_decode_failed`、`upload_commit_failed` | 错误 Base64、断片、模拟写满、最终 rename 失败；合法重复片不重复提交/上报，用户取消不报错，磁盘满使用测试文件系统/注入器 |
-| EP-23 | [SessionArchive][archive]、[ScheduleStore][schedule-store]、[ReviewStore][review-store]、[SqliteRelayStore][relay-store] 等存储边界 | store_kind、read/parse/write/commit、schema_version、fallback_used、缓存来源；`state_read_failed`、`state_commit_failed` | 数据损坏、只读/模拟空间不足、原子替换失败；首次无文件与空数据正常。区分“UI 已变”和“持久化完成”，测试不覆盖真实用户数据 |
+| EP-23 | [SessionArchive][archive]、[ScheduleStore][schedule-store]、[SqliteRelayStore][relay-store] 等存储边界（原 `ReviewStore` 已随评审请求于 2026-10-05 下线删除） | store_kind、read/parse/write/commit、schema_version、fallback_used、缓存来源；`state_read_failed`、`state_commit_failed` | 数据损坏、只读/模拟空间不足、原子替换失败；首次无文件与空数据正常。区分“UI 已变”和“持久化完成”，测试不覆盖真实用户数据 |
 | EP-24 | [SchedulerService][scheduler]、[BackgroundJobRegistry][jobs]、[WorkflowTracker][workflows]：tick、派发失败、任务启动/进度/终态、重启后的状态恢复 | scheduler/workflow/background_job、due/start/dispatch/terminal、delay、result_source、固定状态；`schedule_dispatch_failed`、`background_terminal_missing` | 注入 fire 抛错、dispatch 后失败、正常晚唤醒错过窗口、重启恢复；fire 返回成功只证明派发完成，不能标成任务执行成功；未观测到终态标 unknown，不能猜任务已挂 |
-| EP-25 | [PeerInboxClient][peer-inbox]、[ReviewService][review]、[HandoffService][handoff]：落 outbox、连接/发送、ACK、重试/过期、撤销/召回 | operation、persisted/sent/transport_ack/business_ack/applied、attempt、deadline、授权状态类别；`peer_delivery_failed`、`handoff_transition_failed` | 丢 ACK、收到后未保存、断网重试、重复消息、撤销/召回时失败；offline/retry_pending 不等于最终失败；发送成功不等于对方已接受评审/交接 |
+| EP-25 | **已于 2026-10-05 下线，不再上报**：评审请求与会话交接一并删除，`ErrorPath.PEER_DELIVERY` 只为解读历史数据保留。原覆盖 `PeerInboxClient`、`ReviewService`、`HandoffService`：落 outbox、连接/发送、ACK、重试/过期、撤销/召回 | operation、persisted/sent/transport_ack/business_ack/applied、attempt、deadline、授权状态类别；`peer_delivery_failed`、`handoff_transition_failed` | 丢 ACK、收到后未保存、断网重试、重复消息、撤销/召回时失败；offline/retry_pending 不等于最终失败；发送成功不等于对方已接受评审/交接 |
 | EP-26 | [GitService][git]、请求结果消费：仓库解析、git 子进程、worktree 操作、结果应用 | 允许表内 verb、phase、exit_code、耗时、是否冲突/取消；`git_process_failed`、`worktree_action_failed` | 临时仓库内模拟锁冲突、命令启动失败、已存在 worktree、合并冲突；正常 conflict 为业务结果，禁止上传命令参数、分支名和 diff，也不自动解决冲突 |
 | EP-27 | [UpdateChecker][update-check]、[UpdateService][update]、[ServiceInstaller][service]：检查版本、下载、校验、解包、切换、服务重启 | install_kind、from/to release、download/verify/extract/switch/restart、verification_result、启动版本；`update_verify_failed`、`update_restart_unconfirmed` | fixture 工件校验不匹配、解包/切换失败；区分 verified/skipped/failed，不能把跳过校验记成功验证；安装完不等于新进程健康，下一启动关联只用安全随机操作编号 |
 | EP-28 | [PushController][push-controller]、[PushService][push]、[PushSender][push-sender]：系统权限、注册、目标缺失、发送、失效 token 清理 | platform、permission_state、target_count、provider_result、pruned_count、失败连续次数；`push_send_failed`、`push_registration_failed` | 模拟永久失效与临时发送失败；用户关通知/无 token 为覆盖限制，provider accepted 不能标设备已展示；不上传 token/title/body |
@@ -107,7 +107,7 @@
 | OBS-05 审批闭环 | ApprovalCoordinator、PermissionBridge、App approval；EP-20 | P2，依赖 OBS-01/02/04 | 送达/呈现/裁决/应用分阶段，等待语义与幂等/撤销不变，专项安全验收 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
 | OBS-06 内容、文件与前后台 | App media/UI/data、文件服务；EP-15、21、22、29 | P2，依赖 OBS-01/03 | 展示回退/读取/上传下载分片/落盘/恢复的证据；正常回退/取消不形成错误风暴 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
 | OBS-07 存储与后台执行 | daemon/relay stores、schedule、background/workflow；EP-23、24 | P2，依赖 OBS-01/04 | 读失败回退/写失败/调度派发/执行终态区分，隔离存储故障与重启恢复测试 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
-| OBS-08 协作与推送 | review/handoff、peer transport、App/relay push；EP-25、28 | P2，依赖 OBS-01/02/07 | 本地持久化、传输 ACK、业务 ACK 分开；撤销/失效 token/重试与手机关闭场景 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
+| OBS-08 协作与推送 | review/handoff、peer transport、App/relay push；EP-25、28（review/handoff 与 EP-25 已于 2026-10-05 下线） | P2，依赖 OBS-01/02/07 | 本地持久化、传输 ACK、业务 ACK 分开；撤销/失效 token/重试与手机关闭场景 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
 | OBS-09 Git 与升级 | GitService、update、service；EP-26、27 | P2，依赖 OBS-01/02 | 操作/冲突/退出码、升级阶段与重启后版本证据；临时仓库/工件/服务替身验收 | 已接主要来源，集中验证中；未支持的结果明确为 unknown，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
 | OBS-10 发布和排障验收 | 文档、查询、发布配置；全 EP-01–30 | P3，依赖 OBS-01–09 | 每条路径真实证据与正常对照索引、平台缺口、符号、配额/迟到/丢弃、7 天运行观察、回滚 | 进行中：首批实际部署及 iOS/relay 日志有回执，完整验收未完成，见 [实施进度](../archive/observability-2026-09/IMPLEMENTATION.md) |
 
@@ -188,13 +188,9 @@ fixture 中放三份历史：两份可读、一份读取抛错。期望 EP-09 �
 [inbox]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/disk/FileInboxService.kt
 [upload]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/disk/UploadReassembler.kt
 [schedule-store]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/schedule/ScheduleStore.kt
-[review-store]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/review/ReviewStore.kt
 [relay-store]: ../../relay/src/main/kotlin/dev/ccpocket/relay/store/SqliteRelayStore.kt
 [jobs]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/conversation/BackgroundJobRegistry.kt
 [workflows]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/conversation/WorkflowTracker.kt
-[peer-inbox]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/review/PeerInboxClient.kt
-[review]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/review/ReviewService.kt
-[handoff]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/handoff/HandoffService.kt
 [git]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/git/GitService.kt
 [update-check]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/update/UpdateChecker.kt
 [update]: ../../daemon/src/main/kotlin/dev/ccpocket/daemon/update/UpdateService.kt

@@ -18,7 +18,7 @@
 | `app_platform` | ios / android / desktop | 由平台出口决定，业务参数不能覆盖 |
 | `app_environment` | development / staging / production / unknown | 复用显式 Sentry 环境配置；缺失/非法配置按 unknown，不猜成 production |
 | `internal_traffic` | 1 / 0 / unknown | development/staging 和 Android debuggable 标 1；显式 production 默认按发布流量标 0，desktop 可用 CCPOCKET_ANALYTICS_INTERNAL 覆盖为 1/0；缺少环境配置为 unknown。这是构建流量声明，不识别具体人的身份 |
-| `usage_mode` | own / shared / demo / real / unknown | demo=1 或 demo_entered 为 demo；新结果和已取得绑定角色的配对/连接入口声明 own/shared；旧已核查 Demo 标记的意图事件仍可为 real；未取得角色的配对尝试不猜 own，共享入口分支从 paired 起 |
+| `usage_mode` | own / shared / demo / real / unknown | demo=1 或 demo_entered 为 demo；新结果和已取得绑定角色的配对/连接入口声明 own/shared；旧已核查 Demo 标记的意图事件仍可为 real；未取得角色的配对尝试不猜 own，共享入口分支从 paired 起。`shared`（文件夹共享的访客）已于 2026-10-05 下线，不再上报，仅用于解读历史数据 |
 | `demo` | 保留原来的 1 / 缺省语义 | 不追溯补改旧事件，不把全局 app_launch 无 demo 标记等同真实会话使用 |
 | `tool` | 内置工具允许表；自定义/MCP 名称为 other | 允许 Bash、Read、Write、Edit、MultiEdit、Glob、Grep、Task、WebFetch、WebSearch、NotebookEdit、AskUserQuestion、ExitPlanMode、EnterPlanMode、TodoWrite；不发送自定义原名 |
 
@@ -120,10 +120,10 @@ value_reached 目前由会话内容布局、提示输出实际可见、文件可
 
 | feature | 触发点（一次用户操作一条） | 平台 |
 |---|---|---|
-| review_request | 发出评审请求，或收件方对评审执行动作（`sendReview` / `actOnReview`） | 手机、桌面 |
-| session_handoff | 发起交接或接受交接（`createHandoff` / `acceptHandoff`） | 手机、桌面 |
-| collaborator_invite | 生成协作联系人连接票据；兑换方已由 `paired`/`pair_failed` 的 `source=collaborator` 覆盖 | 手机、桌面 |
-| folder_share | 创建文件夹共享邀请；加入方已由 `pair_*` 的 `source=share` 覆盖 | 手机、桌面 |
+| review_request | 发出评审请求，或收件方对评审执行动作（`sendReview` / `actOnReview`）。**已于 2026-10-05 下线，不再上报** | 手机、桌面 |
+| session_handoff | 发起交接或接受交接（`createHandoff` / `acceptHandoff`）。**已于 2026-10-05 下线，不再上报** | 手机、桌面 |
+| collaborator_invite | 生成协作联系人连接票据；兑换方已由 `paired`/`pair_failed` 的 `source=collaborator` 覆盖。**已于 2026-10-05 下线，不再上报；`source=collaborator` 同样不再出现** | 手机、桌面 |
+| folder_share | 创建文件夹共享邀请；加入方已由 `pair_*` 的 `source=share` 覆盖。**已于 2026-10-05 下线，不再上报；`source=share` 同样不再出现** | 手机、桌面 |
 | workflow_run | 打开 Workflow 运行详情（`openWorkflow`） | 手机、桌面 |
 | voice_memo | 打开语音备忘页（`openMemos`，实验开关打开时） | 手机 |
 | git_panel / worktree | Git 面板 / Worktree 页进入组合（每次打开一条） | 手机、桌面 |
