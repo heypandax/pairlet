@@ -64,8 +64,8 @@
       "kind": "screenshot",
       "language": "en",
       "generator": "mobile/composeApp/src/desktopTest/kotlin/dev/ccpocket/app/desktop/DesktopScreenshotTest.kt#generate",
-      "bytes": 481080,
-      "sha256": "abbf9c014efd128f7de219ea9eb2ea3941b44c4af2c78e4680264838754e8b32",
+      "bytes": 364578,
+      "sha256": "e1a0928b2f140039070cc189b826fbb8a9616bff33956dc66649289fab9e7fb9",
       "description": "The desktop app's two-pane console: paired machines on the left, the live session on the right.",
       "width": 1600,
       "height": 1082
@@ -75,8 +75,8 @@
       "kind": "composite",
       "language": "en",
       "generator": "marketing/site/generate-assets.sh",
-      "bytes": 200631,
-      "sha256": "80f333c75ec035e7bcc789d772bfaf22ca7d60da606786369fb8a310990e3bb6",
+      "bytes": 173581,
+      "sha256": "da25c4f2aa854ff7aa443e77a239f90253d7c0daf43e2d5366120e200675103b",
       "description": "README overview: the desktop console beside two stills from the same phone reel.",
       "width": 1200,
       "height": 630
