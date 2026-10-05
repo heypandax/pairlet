@@ -237,6 +237,8 @@ class CodexObserveParityTest {
         )
         Files.setLastModifiedTime(rollout, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis()))
         val frames = java.util.Collections.synchronizedList(mutableListOf<Frame>())
+        // iterate a copy taken under the list's lock: the observer keeps appending from another thread
+        fun snapshot(): List<Frame> = synchronized(frames) { frames.toList() }
 
         // No agent field on the wire decodes as CLAUDE for compatibility with old Apps.
         val convo = registry.open(
@@ -246,9 +248,9 @@ class CodexObserveParityTest {
 
         assertTrue(registry.observing(convo))
         withTimeout(3_000) {
-            while (frames.none { it is SessionLive } || frames.none { it is ConvoHistory }) delay(20)
+            while (snapshot().none { it is SessionLive } || snapshot().none { it is ConvoHistory }) delay(20)
         }
-        assertEquals(AgentKind.CODEX, frames.filterIsInstance<SessionLive>().last().agent)
-        assertEquals(listOf("from codex", "restored"), frames.filterIsInstance<ConvoHistory>().last().messages.map { it.text })
+        assertEquals(AgentKind.CODEX, snapshot().filterIsInstance<SessionLive>().last().agent)
+        assertEquals(listOf("from codex", "restored"), snapshot().filterIsInstance<ConvoHistory>().last().messages.map { it.text })
     }
 }
