@@ -366,9 +366,9 @@ class RelayClient(
     /** Ask the relay to mint a pairing ticket, and remember it as the next device's handshake PSK.
      *  [headless] mints a BRIDGE ticket (issue #91): it skips the interactive-mint exclusion stamp so
      *  only real phone pairings block a headless mint — the caller records the intent right after.
-     *  [collaborator] additionally marks it a Collaborator Link INBOX (§3.4) — still headless (presence-
-     *  invisible, outside the owner's push fan-out) but allowed to hold its own push token and be woken by
-     *  a targeted NotifyPush. Only [dev.ccpocket.daemon.handoff.CollaboratorService] passes it. */
+     *  [collaborator] sets the relay's `collaborator` ticket marker — still headless (presence-invisible,
+     *  outside the owner's push fan-out). Only the #367 execution mint passes it now ([installExecutionPlanes]);
+     *  the marker is named after the retired Collaborator Link that introduced it. */
     /**
      * @param arm normally true: the raw relay ticket becomes the first-contact PSK. #367 passes FALSE —
      *   an execution link's PSK is `HKDF(ticket ‖ inviteSecret)` and the caller arms THAT instead. Arming

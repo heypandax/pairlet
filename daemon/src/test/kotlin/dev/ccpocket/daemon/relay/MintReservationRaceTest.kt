@@ -2,8 +2,6 @@ package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.daemon.bridge.BridgeRegistry
 import dev.ccpocket.daemon.bridge.BridgeSpec
-import dev.ccpocket.daemon.handoff.CollaboratorService
-import dev.ccpocket.daemon.handoff.CollaboratorStore
 import dev.ccpocket.protocol.CreateBridge
 import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.PairTicket
@@ -19,8 +17,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * The issue #207 mint race, closed: every ticket-backed restricted mint (collaborator link, folder
- * share, bridge credential) must hold the ONE mint slot ACROSS its suspending relay round-trip.
+ * The issue #207 mint race, closed: every ticket-backed restricted mint (folder share, bridge
+ * credential, execution grant) must hold the ONE mint slot ACROSS its suspending relay round-trip.
  *
  * The broken shape these tests were first proven RED against: `intentPending()` checked before the
  * suspending `mintTicket()`, the intent recorded only after — so two overlapping mints both passed the
@@ -52,32 +50,14 @@ class MintReservationRaceTest {
         File(dir, "bridges-$tag.json"), File(dir, "guests-$tag.json"), File(dir, "gs-$tag.json"),
     )
 
-    private fun collaboratorService(reg: BridgeRegistry, relay: GatedRelay) = CollaboratorService(
+    private fun bridgeService(reg: BridgeRegistry, mint: suspend () -> PairTicket?) = BridgeService(
         accountId = "acct", daemonPubB64 = "pub", relayWsBase = "wss://relay",
-        ownerLabel = { null }, registry = reg,
-        store = CollaboratorStore.load(File(dir, "collab-${System.nanoTime()}.json")),
-        mintTicket = { relay.mint() },
+        registry = reg,
+        mintTicket = { _ -> mint() },
         interactivePairingPending = { false },
         revokeCredential = {},
+        liveSessions = { emptyList() },
     )
-
-    @Test
-    fun an_overlapping_collaborator_mint_is_refused_while_the_first_round_trip_is_in_flight() = runBlocking {
-        val relay = GatedRelay()
-        val service = collaboratorService(registry("collab"), relay)
-
-        val first = async { service.createTicket("Frank") }
-        while (relay.mintCalls == 0) yield() // first is now parked inside its relay round-trip
-
-        val second = service.createTicket("Alex")
-        assertFalse(second.ok, "the overlapped mint must be refused, not raced")
-        assertTrue(second.error!!.contains("another pairing"), "got: ${second.error}")
-
-        relay.answer.complete(Unit)
-        val f = first.await()
-        assertTrue(f.ok, f.error)
-        assertEquals(1, relay.mintCalls, "the refused mint must never have burned a second relay ticket")
-    }
 
     @Test
     fun an_overlapping_share_mint_is_refused_while_the_first_round_trip_is_in_flight() = runBlocking {
@@ -129,13 +109,13 @@ class MintReservationRaceTest {
         assertEquals(1, relay.mintCalls, "the refused mint must never have burned a second relay ticket")
     }
 
-    /** Overlaps ACROSS mint classes must serialize on the same slot — a share mint during a
-     *  collaborator's round-trip is exactly the two-button shape v1.6.1 added. */
+    /** Overlaps ACROSS mint classes must serialize on the same slot — a share mint during a bridge's
+     *  round-trip is exactly the two-button shape v1.6.1 added. */
     @Test
-    fun a_share_mint_during_a_collaborator_round_trip_is_refused_too() = runBlocking {
+    fun a_share_mint_during_a_bridge_round_trip_is_refused_too() = runBlocking {
         val reg = registry("cross")
         val relay = GatedRelay()
-        val collaborator = collaboratorService(reg, relay)
+        val bridge = bridgeService(reg) { relay.mint() }
         val share = ShareService(
             accountId = "acct", daemonPubB64 = "pub", relayWsBase = "wss://relay",
             ownerLabel = { null }, registry = reg,
@@ -145,7 +125,7 @@ class MintReservationRaceTest {
             liveSessions = { emptyList() },
         )
 
-        val first = async { collaborator.createTicket("Frank") }
+        val first = async { bridge.create(CreateBridge("bot-a", listOf(sharedRoot.path))) }
         while (relay.mintCalls == 0) yield()
 
         assertFalse(share.create(CreateShare(sharedRoot.path)).ok)
@@ -161,18 +141,11 @@ class MintReservationRaceTest {
     fun a_failed_mint_releases_the_slot_for_the_next_attempt() = runBlocking {
         val reg = registry("release")
         var relayUp = false
-        val service = CollaboratorService(
-            accountId = "acct", daemonPubB64 = "pub", relayWsBase = "wss://relay",
-            ownerLabel = { null }, registry = reg,
-            store = CollaboratorStore.load(File(dir, "collab-release.json")),
-            mintTicket = { if (relayUp) PairTicket("ticket-ok", 120, "111111") else null },
-            interactivePairingPending = { false },
-            revokeCredential = {},
-        )
-        assertFalse(service.createTicket("Frank").ok, "relay down: the mint fails")
+        val service = bridgeService(reg) { if (relayUp) PairTicket("ticket-ok", 120, "111111") else null }
+        assertFalse(service.create(CreateBridge("bot-a", listOf(sharedRoot.path))).ok, "relay down: the mint fails")
         assertFalse(reg.intentPending(), "…and the slot must not stay claimed")
         relayUp = true
-        assertTrue(service.createTicket("Frank").ok, "the next attempt goes through")
+        assertTrue(service.create(CreateBridge("bot-a", listOf(sharedRoot.path))).ok, "the next attempt goes through")
     }
 
     // ---- the slot's own semantics (BridgeRegistry.reserveMint / releaseMint) ----

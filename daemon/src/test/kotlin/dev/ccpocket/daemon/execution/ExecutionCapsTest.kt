@@ -2,8 +2,6 @@ package dev.ccpocket.daemon.execution
 
 import dev.ccpocket.daemon.bridge.BridgeCaps
 import dev.ccpocket.daemon.bridge.GuestCaps
-import dev.ccpocket.daemon.handoff.CollaboratorCaps
-import dev.ccpocket.protocol.CollaboratorPurpose
 import dev.ccpocket.protocol.ExecutionGrantInfo
 import dev.ccpocket.protocol.ExecutionGrantQuery
 import dev.ccpocket.protocol.ExecutionRunAccepted
@@ -22,7 +20,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
 /**
- * EXHAUSTIVE over the sealed request/response hierarchies, like CollaboratorCapsTest: a frame added to the
+ * EXHAUSTIVE over the sealed request/response hierarchies: a frame added to the
  * protocol later is denied to an execution link until someone edits the expected set below on purpose.
  */
 class ExecutionCapsTest {
@@ -66,12 +64,10 @@ class ExecutionCapsTest {
             .map { instantiateFrame(it) as Frame }.filter { ExecutionCaps.egressAllowed(it) && it !is PocketError }
         assertEquals(5, requests.size); assertEquals(4, replies.size)
         for (f in requests) {
-            for (p in CollaboratorPurpose.entries) assertFalse(CollaboratorCaps.ingressAllowed(f, p), "collaborator $p ingress ${f.name()}")
             assertFalse(BridgeCaps.ingressAllowed(f), "bridge ingress ${f.name()}")
             assertFalse(GuestCaps.ingressAllowed(f), "guest ingress ${f.name()}")
         }
         for (f in replies) {
-            for (p in CollaboratorPurpose.entries) assertFalse(CollaboratorCaps.egressAllowed(f, p), "collaborator $p egress ${f.name()}")
             assertFalse(BridgeCaps.egressAllowed(f), "bridge egress ${f.name()}")
             assertFalse(GuestCaps.egressAllowed(f), "guest egress ${f.name()}")
         }

@@ -27,17 +27,17 @@ import java.nio.file.attribute.PosixFilePermissions
  *    in the target-owner's [dev.ccpocket.daemon.execution.ExecutionGrant] named by [BridgeSpec.grantId],
  *    never in this spec. It is the only kind that is barred from the direct-LAN gate EXPLICITLY as well as
  *    structurally, and the only one that never receives a [dev.ccpocket.protocol.DaemonInfo].
- *  - [COLLABORATOR] (SESSION-HANDOFF.md §4.1): a long-lived Collaborator Link contact. Its BASELINE is
- *    ZERO session access ([workdirs] is empty — nothing is ever in scope) — it may only receive/act on
- *    Handoff offers addressed to its own deviceId; per-handoff session access is a separate temporary
- *    Grant decided by the handoff state machine, never by this credential. No expiry (the link lives
- *    until either side severs it).
+ *  - [COLLABORATOR]: the Collaborator Link credential of session handoff / review contacts, RETIRED
+ *    2026-10. Nothing mints, loads or honours one any more; the value stays so the startup cleanup can
+ *    recognise old rows ([BridgeRegistry]) and the transport can refuse the kind outright. Never remove it:
+ *    PocketJson coerces an unknown enum value to the property default, which would read an old
+ *    `"kind":"COLLABORATOR"` row as a [BRIDGE].
  *
  * Old bridges.json entries (pre-#115) carry no `kind` → default [BRIDGE], so #91 credentials keep their
- * exact behaviour. A GUEST is persisted to a SEPARATE file (guests.json), a COLLABORATOR to
- * collaborator-keys.json, so a downgraded daemon that predates either never loads it and fails that key
- * closed — the same downgrade-safety argument that keeps bridge keys out of devices.json. An EXECUTION
- * credential extends the same chain one file further (execution-credentials.json).
+ * exact behaviour. A GUEST is persisted to a SEPARATE file (guests.json), so a downgraded daemon that
+ * predates it never loads it and fails that key closed — the same downgrade-safety argument that keeps
+ * bridge keys out of devices.json. An EXECUTION credential extends the same chain one file further
+ * (execution-credentials.json).
  */
 @Serializable
 enum class CredentialKind { BRIDGE, GUEST, COLLABORATOR, EXECUTION }
@@ -83,15 +83,6 @@ data class BridgeSpec(
      * extra auto-runs). Normalized (trimmed, blanks dropped, deduped, capped) by [clamped].
      */
     val allowedCommands: List<String> = emptyList(),
-    /**
-     * COLLABORATOR only (REVIEW-REQUEST.md §13.3): what the contact link this credential establishes is
-     * FOR. Chosen by the owner at mint time and read back by [dev.ccpocket.daemon.handoff.CollaboratorService.onRedeemed]
-     * when it writes the contact row, so the redeeming peer never gets to name its own scope.
-     *
-     * Trailing with the historical default: a `bridges.json` entry written before this field existed
-     * describes a Session Handoff contact, which is exactly what every pre-ReviewRequest link was.
-     */
-    val purpose: dev.ccpocket.protocol.CollaboratorPurpose = dev.ccpocket.protocol.CollaboratorPurpose.SESSION_HANDOFF,
     /**
      * [CredentialKind.EXECUTION] only (issue #367): which [dev.ccpocket.daemon.execution.ExecutionGrant]
      * this link credential belongs to. It is a POINTER, not an authority — every scope decision (workspaces,
@@ -156,32 +147,7 @@ data class BridgeSpec(
         const val MAX_ALLOWED_COMMANDS = 64
 
         /**
-         * Build a COLLABORATOR spec (SESSION-HANDOFF.md §4.1). [workdirs] is deliberately EMPTY: the
-         * baseline capability of a Collaborator Link is zero session/path access ([PathScope.contains]
-         * over an empty root list is always false — fail closed), and every rate bound is the tightest.
-         * Session access is granted per-handoff by the handoff state machine (the temporary Grant), so
-         * nothing here may widen; [tier] REVIEW is only the fallback ceiling for that grant's mode clamp.
-         * No [expiresAt]: the LINK persists until severed (each redeem TICKET's TTL is the relay's).
-         */
-        fun collaborator(
-            label: String,
-            purpose: dev.ccpocket.protocol.CollaboratorPurpose = dev.ccpocket.protocol.CollaboratorPurpose.SESSION_HANDOFF,
-        ) = BridgeSpec(
-            name = label,
-            workdirs = emptyList(),
-            maxSessions = 1, // at most the one handed-off Source Session
-            opensPerMin = COLLAB_OPENS_PER_MIN,
-            promptsPerMin = GUEST_PROMPTS_PER_MIN, // interactive human, same prompt cadence as a guest
-            kind = CredentialKind.COLLABORATOR,
-            expiresAt = null,
-            tier = AccessTier.REVIEW,
-            purpose = purpose,
-        )
-
-        const val COLLAB_OPENS_PER_MIN = 6
-
-        /**
-         * Build an EXECUTION spec (issue #367 G1). Like [collaborator] its baseline is ZERO: [workdirs] is
+         * Build an EXECUTION spec (issue #367 G1). Its baseline is ZERO: [workdirs] is
          * empty so [PathScope.contains] is false for every path, and every rate bound is the floor — none of
          * them is ever consulted, because an execution link reaches no session/bridge/guest code path at all
          * (its own whitelist, [dev.ccpocket.daemon.execution.ExecutionCaps], admits only the execution frames,
