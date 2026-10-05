@@ -243,8 +243,12 @@ class DeviceSessions(
                 // An interactive ticket past its local lifetime is gone before the pop: a late announce —
                 // or one the relay forges long after the owner ran `pairlet pair` — finds nothing to anchor on.
                 val popped = synchronized(psks) { dropExpiredArmed(clock()); psks.removeLastOrNull() }
-                pairingId = popped?.pairingId
-                val armed = popped?.bytes?.takeIf { it.isNotEmpty() }
+                // …and an owner ticket at the very edge must also claim its pairing: the watch decides expiry
+                // for this announce and for a waiting `pairlet pair` under one lock, so the CLI can never report
+                // "expired" for a ticket that went on to anchor a key. A failed claim = the ticket is gone.
+                val usable = popped != null && (popped.pairingId == null || ownerPairings.tryClaim(popped.pairingId))
+                pairingId = popped?.pairingId?.takeIf { usable }
+                val armed = popped?.takeIf { usable }?.bytes?.takeIf { it.isNotEmpty() }
                 pskFor[deviceId] = armed ?: ByteArray(0)
                 provisionalBridge = armed != null && bridges.looksHeadless(armed)
                 // issue #207: an armed ticket that is NOT itself a pending restricted intent, while such

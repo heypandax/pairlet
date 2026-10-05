@@ -458,10 +458,12 @@ internal class PairCmd : CliktCommand(name = "pair") {
                     val id = res.deviceId.orEmpty()
                     echo("")
                     echo("  ✓ Paired: device ${id.take(8)}…")
-                    echo("      fingerprint:  ${res.fingerprint}")
-                    echo("    Check that the app shows the SAME value under \"This device's fingerprint\"")
-                    echo("    (Settings → Support & about → About; desktop App: Settings → About) — all five groups.")
-                    echo("    If it differs, that is not your device: pairlet devices revoke ${id.take(8)}")
+                    echo("      device fingerprint:    ${res.fingerprint}")
+                    res.computerFingerprint?.let { echo("      computer fingerprint:  $it") }
+                    echo("    In the app (Settings → Support & about → About; desktop App: Settings → About) check that")
+                    echo("    \"This device's fingerprint\" and \"Computer fingerprint\" show these SAME values — all five groups.")
+                    echo("    Device value differs: that is not your device — pairlet devices revoke ${id.take(8)}")
+                    echo("    Computer value differs: the app is not talking to this computer — delete it in the app and pair again.")
                     return
                 }
                 "expired" -> fail("no device paired before the code expired — run `pairlet pair` again")

@@ -149,7 +149,8 @@ class DevicesCliTest {
             assertTrue("123 456" in res.output, "the code is still shown: ${res.output}")
             assertTrue("Paired: device NewPhone…" in res.output, res.output)
             assertTrue(PairingFingerprint.of(pub) in res.output, res.output)
-            assertTrue("This device's fingerprint" in res.output, res.output)
+            assertTrue(PairingFingerprint.of(plane.computer) in res.output, "the computer's own value too: ${res.output}")
+            assertTrue("This device's fingerprint" in res.output && "Computer fingerprint" in res.output, res.output)
         }
     }
 

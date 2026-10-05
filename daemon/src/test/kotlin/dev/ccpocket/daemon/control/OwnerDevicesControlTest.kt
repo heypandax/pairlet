@@ -152,6 +152,7 @@ class OwnerDevicesControlTest {
             assertEquals("paired", paired.state)
             assertEquals("devNew", paired.deviceId)
             assertEquals(PairingFingerprint.of(pub), paired.fingerprint)
+            assertEquals(PairingFingerprint.of(p.computer), paired.computerFingerprint, "the CLI shows both values to compare")
             p.outcome = OwnerPairingWatch.Outcome.Expired
             assertEquals("expired", state().state)
             p.outcome = OwnerPairingWatch.Outcome.Refused

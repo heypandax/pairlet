@@ -56,6 +56,8 @@ data class LocalPairingRes(
     val state: String,
     val deviceId: String? = null,
     val fingerprint: String? = null,
+    /** On `paired`: THIS computer's fingerprint — the value the phone must show as "Computer fingerprint". */
+    val computerFingerprint: String? = null,
     /** How much longer the pairing can still complete. */
     val remainingMs: Long = 0,
 )
@@ -121,7 +123,10 @@ fun Route.installOwnerDevicesControl(plane: OwnerDevicesPlane, token: String) {
         val waitMs = call.request.queryParameters["waitMs"]?.toLongOrNull()?.coerceIn(0, MAX_PAIRING_WAIT_MS) ?: 0
         val res = when (val o = plane.awaitPairing(id, waitMs)) {
             is OwnerPairingWatch.Outcome.Paired ->
-                LocalPairingRes(pairingId = id, state = "paired", deviceId = o.deviceId, fingerprint = PairingFingerprint.of(o.pub))
+                LocalPairingRes(
+                    pairingId = id, state = "paired", deviceId = o.deviceId, fingerprint = PairingFingerprint.of(o.pub),
+                    computerFingerprint = PairingFingerprint.of(plane.computerPub),
+                )
             OwnerPairingWatch.Outcome.Pending -> LocalPairingRes(pairingId = id, state = "pending", remainingMs = plane.pairingRemainingMs(id))
             OwnerPairingWatch.Outcome.Expired -> LocalPairingRes(pairingId = id, state = "expired")
             OwnerPairingWatch.Outcome.Refused -> LocalPairingRes(pairingId = id, state = "refused")

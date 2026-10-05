@@ -101,6 +101,18 @@ class DeviceSessionsOwnerDevicesTest {
     }
 
     @Test
+    fun an_announce_at_the_expiry_edge_is_reported_by_the_pairing_it_anchored_on() = runBlocking<Unit> {
+        val h = Harness(dir)
+        val pairingId = h.sessions.onMintedTicket("ticket-edge")!!
+        h.now += 129_999 // one millisecond of local lifetime left
+        val keys = E2ECrypto.generateKeyPair()
+        h.sessions.onDevicePaired("devEdge", b64.encodeToString(keys.publicRaw))
+        h.now += 60_000 // the CLI only asks well after the expiry time
+        assertEquals("devEdge", assertIs<OwnerPairingWatch.Outcome.Paired>(h.sessions.awaitOwnerPairing(pairingId, 10)).deviceId)
+        assertEquals(setOf("devEdge"), h.allowListed())
+    }
+
+    @Test
     fun a_pairing_nobody_completes_expires() = runBlocking<Unit> {
         val h = Harness(dir)
         val pairingId = h.sessions.onMintedTicket("ticket-x")!!
