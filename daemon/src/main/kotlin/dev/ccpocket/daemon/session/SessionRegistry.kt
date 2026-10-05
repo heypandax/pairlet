@@ -113,6 +113,16 @@ class SessionRegistry(
     /** Test-only race seam between the optimistic live lookup and its authoritative atomic claim. */
     internal var beforeLiveReattachClaim: (suspend () -> Unit)? = null
 
+    /** Test-only race seam (lifecycle design S0): a cold open has decided to CREATE a conversation (no live
+     *  match) and is about to insert it. Two opens of one resume id parked here are the D10 double-create. */
+    @Volatile
+    internal var beforeColdInsert: (suspend () -> Unit)? = null
+
+    /** Test-only race seam (lifecycle design S0): the reaper has removed a conversation from the map and is
+     *  about to close it — the window in which a re-open sees no live match while the old process still runs. */
+    @Volatile
+    internal var beforeReapClose: (suspend (Conversation) -> Unit)? = null
+
     /** Test-only handle on the LIVE conversation behind [convoId] (issue #375), so a test can read the
      *  authoritative state — [Conversation.currentMode], fan-out membership — and install
      *  [Conversation.fanOutProbe], instead of inferring any of it from one client's frame history.
@@ -550,6 +560,7 @@ class SessionRegistry(
         // issue #360 security review M1: the three-way owner fact, fixed at open — a bridge (origin), a guest (its path
         // scope) or a collaborator (its handoff grant) never registers into the owner's managed list
         c.ownerCreated = origin == null && pathScope == null && handoffAccess == null
+        beforeColdInsert?.invoke()
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
         // MIGHT still be writing this transcript. Fork (branch to a fresh id, dodging a two-writer clobber) ONLY
@@ -858,6 +869,7 @@ class SessionRegistry(
             // of a vanished background task needs from the daemon log (issue #105 was undiagnosable
             // from the RelayClient's bare reap count)
             log.info("reapIdle: closing ${it.convoId.take(8)}… (sid=${it.sessionId?.take(8) ?: "-"}, idle ${now - it.lastActivityMs}ms)")
+            beforeReapClose?.invoke(it)
             it.close(); noteSelfClosed(it)
         }
         return stale.size

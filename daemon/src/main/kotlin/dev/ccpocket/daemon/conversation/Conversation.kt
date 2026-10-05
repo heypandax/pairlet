@@ -324,6 +324,36 @@ class Conversation(
         fun dispatched(frame: Frame, to: Set<Any>)
     }
 
+    /**
+     * Test seam (lifecycle design S0): a suspension point at each process-lifecycle transition whose
+     * check-then-act window is a known race (design-conversation-lifecycle §1 D1–D12). A test parks the
+     * transition here on a gate, drives the competing call, then releases it — a deterministic interleaving
+     * instead of a sleep. Same family as [beforeFullControlExpiryCommit] and the registry's
+     * `beforeLiveReattachClaim`.
+     *
+     * Null in production — nothing installs one, so every site costs one volatile read and a null check.
+     */
+    @Volatile
+    internal var lifecycleProbe: (suspend (LifecyclePoint) -> Unit)? = null
+
+    /** Where [lifecycleProbe] fires. Each names the window it opens, not a behaviour. */
+    internal enum class LifecyclePoint {
+        /** sendPrompt's lazy start: `proc == null` was observed and the spec is built; the spawn has not happened. */
+        AFTER_SPAWN_DECISION,
+        /** launchProcess: the OS process is started; `proc` is not published yet and the backend not attached. */
+        LAUNCH_AFTER_START,
+        /** The pump's unexpected-death branch, right after `awaitExit` returned. */
+        DEATH_AFTER_AWAIT_EXIT,
+        /** The clean one-shot exit branch, right after the dead handle was dropped (`proc = null`). */
+        ONE_SHOT_AFTER_NULL,
+        /** stopProcess, right after the process shutdown returned and before the handle is dropped. */
+        STOP_AFTER_SHUTDOWN,
+        /** The OpenCode startup watchdog, after it killed its process and `awaitExit` returned. */
+        WATCHDOG_AFTER_EXIT,
+        /** pumpCrashed, after its process shutdown returned. */
+        PUMP_CRASHED_AFTER_SHUTDOWN,
+    }
+
     // every existing emit site goes through this fan-out; one failing transport must not break the rest
     private val sink: OutboundSink = OutboundSink { f ->
         if (f is PromptAck) promptDiagnostics.ack(f.promptId)
@@ -1725,6 +1755,7 @@ class Conversation(
         // so a new backend gets it without a per-launcher edit.
         if (remoteExecution) dev.ccpocket.daemon.execution.ExecutionSandbox.stripChildEnv(builder.environment())
         val p = AgentProcess.start(builder, scope)
+        lifecycleProbe?.invoke(LifecyclePoint.LAUNCH_AFTER_START)
         val io = AgentIo(
             writeLine = p::writeLine,
             emit = { sink.emit(it) }, // read sink dynamically (reattach)
@@ -1908,6 +1939,7 @@ class Conversation(
                     revokeAllBridgeGrants()
                     p.shutdown(eofGraceMs = 1_000, termGraceMs = 1_000, forceGraceMs = 1_000)
                     p.awaitExit()
+                    lifecycleProbe?.invoke(LifecyclePoint.WATCHDOG_AFTER_EXIT)
                     // Null proc + clear state so the next sendPrompt triggers a fresh relaunch
                     // (without this, subsequent prompts would write into the dead stdin and be lost)
                     proc = null
@@ -1958,6 +1990,7 @@ class Conversation(
         if (!owned && (proc != null || intentionalStop)) return
         if (owned) proc = null
         runCatching { p.shutdown() }
+        lifecycleProbe?.invoke(LifecyclePoint.PUMP_CRASHED_AFTER_SHUTDOWN)
         revokeAllBridgeGrants()
         clearTurnWork()
         runCatching { bridge?.cancelAll() }
@@ -2446,6 +2479,7 @@ class Conversation(
             // stdout EOF precedes the last transcript flush, so wait for the real process exit before
             // classifying it (intentional stops settle in stopProcess)
             p.awaitExit()
+            lifecycleProbe?.invoke(LifecyclePoint.DEATH_AFTER_AWAIT_EXIT)
             if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && turnCompleted && p.isCleanTurnExit()) {
                 // The completed turn's ACTIVE authority always dies here. A later prompt that raced this
                 // clean edge keeps its still-staged token: pending authority grants nothing until that exact
@@ -2457,6 +2491,7 @@ class Conversation(
                 bridge?.cancelAll()
                 bridge = null
                 proc = null // dead handle dropped FIRST — a failed drain-launch below must not leave prompts writing into it
+                lifecycleProbe?.invoke(LifecyclePoint.ONE_SHOT_AFTER_NULL)
                 if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
                     // Argv one-shot: drain ONE queued prompt per process. Pop it, then re-record it as the
                     // next launch's initialSend so SessionInit is its consumption receipt.
@@ -2862,13 +2897,15 @@ class Conversation(
             // A truly stale id is recovered at process death (SESSION_NOT_FOUND clears the lineage).
             val anchor = sessionId ?: openedResumeId
             val fork = if (sessionId == null) openedWithFork else false
+            val lazySpec = AgentSpec(
+                workdir, anchor, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
+                permissionMode = permissionMode, serviceTier = serviceTier,
+                forkSession = fork, initialPrompt = outgoing,
+            )
+            lifecycleProbe?.invoke(LifecyclePoint.AFTER_SPAWN_DECISION)
             val launched = runCatching {
                 launchProcess(
-                    AgentSpec(
-                        workdir, anchor, model, mode, effort = effort, thinking = thinking, agentPreset = agentPreset,
-                        permissionMode = permissionMode, serviceTier = serviceTier,
-                        forkSession = fork, initialPrompt = outgoing,
-                    ),
+                    lazySpec,
                     armExecuting = true,
                     initialSend = initialSend,
                 )
@@ -3231,6 +3268,7 @@ class Conversation(
         bridgeRequestPermit.set(false)
         bridge?.cancelAll()
         proc?.shutdown() // waits for real exit (force-kill fallback) — file is quiet after this
+        lifecycleProbe?.invoke(LifecyclePoint.STOP_AFTER_SHUTDOWN)
         proc = null
         bridge = null
         settleSubagents(includeBackground = true) // sub-agents died with the tree — stop their cards spinning
