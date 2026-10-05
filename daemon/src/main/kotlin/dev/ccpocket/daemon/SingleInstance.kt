@@ -19,18 +19,28 @@ import kotlin.system.exitProcess
 object SingleInstance {
     private val log = logger("SingleInstance")
 
-    fun ensureSolo(pairPort: Int, takeover: Boolean, echo: (String) -> Unit) {
-        if (!portInUse(pairPort)) return
+    /**
+     * Returns normally only when this process may run as THE daemon: true = it stopped a running one
+     * (`--takeover`), false = none was running. Otherwise it ends the process through [exit] — injectable
+     * so a test can observe a rejected start without the JVM going down with it.
+     */
+    fun ensureSolo(
+        pairPort: Int,
+        takeover: Boolean,
+        exit: (Int) -> Nothing = { exitProcess(it) },
+        echo: (String) -> Unit,
+    ): Boolean {
+        if (!portInUse(pairPort)) return false
         if (takeover) {
             echo("another cc-pocket daemon already holds 127.0.0.1:$pairPort — stopping it and taking over")
-            if (stopRunning(pairPort)) return
+            if (stopRunning(pairPort)) return true
             echo("could not free 127.0.0.1:$pairPort — the running daemon didn't exit; aborting")
-            exitProcess(69) // EX_UNAVAILABLE
+            exit(69) // EX_UNAVAILABLE
         }
         echo("another cc-pocket daemon is already running (holds 127.0.0.1:$pairPort) — leaving it alone, exiting.")
         echo("  two daemons would fight over the port and connect to the relay under one account.")
         echo("  to run THIS build instead: stop the other one first, or re-run with --takeover.")
-        exitProcess(0) // not a failure: a daemon IS running, just not this instance
+        exit(0) // not a failure: a daemon IS running, just not this instance
     }
 
     /** True iff something accepts a loopback TCP connection on [port] — i.e. a daemon is already listening. */
@@ -50,6 +60,26 @@ object SingleInstance {
             if (waitMs > 0) Thread.sleep(waitMs)
         }
         return !portInUse(port)
+    }
+
+    /**
+     * Run [bind] until it succeeds or [attempts] are spent; the last failure is rethrown. For the direct
+     * listener after a `--takeover`: [stopRunning] waits only for the PAIR port, while the stopped daemon's
+     * Ktor servers each close in their own shutdown hook, so the direct port may still be held a moment
+     * longer. (TIME_WAIT is not the obstacle: JDK server channels set SO_REUSEADDR on POSIX and Ktor never
+     * clears it.)
+     */
+    internal fun <T> retryBind(attempts: Int = 50, waitMs: Long = 100, bind: () -> T): T {
+        var last: Exception? = null
+        repeat(attempts) { i ->
+            try {
+                return bind()
+            } catch (e: Exception) {
+                last = e
+                if (i < attempts - 1 && waitMs > 0) Thread.sleep(waitMs)
+            }
+        }
+        throw last ?: IllegalStateException("retryBind: no attempts")
     }
 
     /** Wait for a newly started daemon to claim its loopback singleton port. */
