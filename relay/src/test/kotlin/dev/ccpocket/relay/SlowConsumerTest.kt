@@ -31,9 +31,10 @@ class SlowConsumerTest {
             val hello = RelayWsHarness.seedDevice(store, "acct", deviceId)
             h.device(reading = false).sendControl(hello)
             withTimeout(5_000) { while (h.relay.broker.deviceCount("acct") == 0) delay(20) }
-            // 48 MiB toward a reader that takes none of it; every send must still return at once (the daemon's
-            // read loop is the caller and must never stall on one device)
-            withTimeout(10_000) { repeat(48) { h.relay.broker.toDevice("acct", deviceId, ByteArray(1 shl 20)) } }
+            // past the per-socket cap toward a reader that takes none of it; every send must still return at once
+            // (the daemon's read loop is the caller and must never stall on one device)
+            val frames = (RelayServer.MAX_OUTBOUND_BYTES shr 20).toInt() + 8
+            withTimeout(10_000) { repeat(frames) { h.relay.broker.toDevice("acct", deviceId, ByteArray(1 shl 20)) } }
             // cut after the close grace period (3 s), not at the 60 s ping timeout
             val gone = withTimeoutOrNull(8_000) { while (h.relay.broker.deviceCount("acct") != 0) delay(50) }
             assertNotNull(gone, "the stalled socket is still attached, its backlog held in relay memory")

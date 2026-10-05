@@ -195,9 +195,12 @@ class RelayClient(
     /** Exposes the pairing-ceremony gate to the direct-LAN listener (see DeviceSessions.firstContactPending). */
     suspend fun deviceFirstContactPending(deviceId: String): Boolean = sessions.firstContactPending(deviceId)
 
-    /** #367: is [deviceId] a restricted credential (bridge / guest / execution)? The LAN
-     *  gate refuses these EXPLICITLY as well as structurally — see [dev.ccpocket.daemon.server.LanE2E]. */
-    fun deviceIsRestrictedCredential(deviceId: String): Boolean = sessions.bridges.isRestricted(deviceId)
+    /** #367: is [deviceId] a restricted credential (bridge / guest / execution) — or a tombstoned one (retired,
+     *  or revoked by the owner and not yet confirmed by the relay)? The LAN gate refuses these EXPLICITLY as well
+     *  as structurally — see [dev.ccpocket.daemon.server.LanE2E]; for a revoked device that matters when the
+     *  devices.json rewrite failed (disk full) and the file the gate reads still lists it. */
+    fun deviceIsRestrictedCredential(deviceId: String): Boolean =
+        sessions.bridges.isRestricted(deviceId) || sessions.bridges.isRetiredCredential(deviceId)
 
     /** …and how stale is its liveness signal (ms since the last Pong, or since attach before the first one). */
     fun lastPongAgeMs(): Long? = lastPongAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }

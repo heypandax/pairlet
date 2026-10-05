@@ -104,7 +104,7 @@ class OwnerDeviceRevocationIsolationTest {
 
     private suspend fun owner(id: String): E2ECrypto.KeyPair {
         val keys = E2ECrypto.generateKeyPair()
-        harness.sessions.onMintedTicket("t-$id", headless = true) // headless: no #91 exclusion stamp
+        harness.sessions.onMintedTicket("t-$id") // interactive: the only kind that anchors a full-power device
         harness.sessions.onDevicePaired(id, b64.encodeToString(keys.publicRaw))
         exchange(id, assertNotNull(handshakeAs(id, keys, "t-$id")), ClientCaps())
         return keys

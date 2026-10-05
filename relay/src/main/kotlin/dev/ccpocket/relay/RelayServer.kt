@@ -742,16 +742,19 @@ class RelayServer(
         const val MAX_PUSH_IN_FLIGHT = 256
         // how long a supersede/revoke close may take to go out cleanly before the socket is cut (audit M3)
         const val CLOSE_GRACE_MS = 3_000L
-        // audit H1: bytes one socket may owe before it is cut as a slow consumer. Four full-size (4 MiB) frames:
-        // a healthy link drains as the daemon produces, so this only fills when the peer has stopped reading
-        // or is minutes behind. Per socket; MAX_RELAY_OUTBOUND_BYTES below bounds the sum.
-        const val MAX_OUTBOUND_BYTES = 16L * 1024 * 1024
+        // audit H1: bytes one socket may owe before it is cut as a slow consumer. Sized to hold ONE largest chunked
+        // file download: the daemon pushes all chunks without waiting for the device (SessionFilesService.emitChunks,
+        // MAX_CHUNKED_READ_BYTES = 50 MiB raw, about 67 MiB as base64), so a phone slower than the computer's uplink
+        // owes most of the file here while it drains — a 16 MiB cap cut exactly those downloads, every retry too.
+        // A stalled reader can therefore hold this much; MAX_RELAY_OUTBOUND_BYTES below is what bounds the heap.
+        // Lower it again once chunked reads are paced by the receiver.
+        const val MAX_OUTBOUND_BYTES = 72L * 1024 * 1024
         // Relay-wide sum of every socket's backlog. Sized from the unit's -Xmx256m (deploy/cc-pocket-relay.service):
         // 96 MiB is 3/8 of the heap, leaving 160 MiB for the JVM/Ktor/SQLite/push baseline, the frames being READ
         // (up to MAX_FRAME each, not yet in any queue) and GC headroom. Normal use stays far below it: a healthy
         // socket owes a frame or two while it drains, so it takes 24 full-size (4 MiB) history frames queued at
-        // the same instant — e.g. a dozen devices each two windows behind — to reach it, whereas six readers
-        // stalled at the per-socket cap already would. Over it, the largest backlogs are cut first (a stalled
+        // the same instant — e.g. a dozen devices each two windows behind — to reach it; a single stalled
+        // reader in the middle of a large download can come close on its own. Over it, the largest backlogs are cut first (a stalled
         // reader, almost always), so a healthy device is reached only after every bigger one is gone.
         // ExitOnOutOfMemoryError in the unit stays the last resort.
         const val MAX_RELAY_OUTBOUND_BYTES = 96L * 1024 * 1024
@@ -763,8 +766,8 @@ class RelayServer(
         // against an unbounded share today. The reverse risk — someone burning the budget so nobody can pair by
         // code — is why it is not lower: one source can spend at most 10/min = 100 per window, so blocking takes
         // at least six distinct IPv4 addresses or IPv6 /64s kept at their limit, real users' typos stay a
-        // handful per window, the block lifts by itself within the window, and QR pairing (straight to
-        // /v1/pair/redeem) is never affected.
+        // handful per window, and the block lifts by itself within the window. The QR is NOT a way around
+        // it: it encodes the same code and goes through this lookup too.
         const val PAIR_CODE_FAILURE_BUDGET = 600
         const val PAIR_CODE_FAILURE_WINDOW_MS = 10 * 60_000L
         const val PAIR_CODE_FAILURES_KEY = "paircode:fail:global"

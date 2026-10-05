@@ -37,7 +37,7 @@ class DaemonPrefs private constructor(private val path: File) {
 
     fun setPushEnabled(v: Boolean) {
         pushEnabled = v
-        persist()
+        persist { it.copy(pushEnabled = pushEnabled) }
     }
 
     /** Issue #201: the owner's OWN approval asks wait for a manual decision instead of auto-denying.
@@ -85,38 +85,43 @@ class DaemonPrefs private constructor(private val path: File) {
 
     fun setDirectConnect(v: DirectConnectMode?) {
         directConnect = v
-        persist()
+        persist { it.copy(directConnect = directConnect?.wire) }
     }
 
     fun setAutoUpdate(v: Boolean?) {
         autoUpdate = v
-        persist()
+        persist { it.copy(autoUpdate = autoUpdate) }
     }
 
     fun setDshBin(v: String?) {
         dshBin = v?.takeIf { it.isNotBlank() }
-        persist()
+        persist { it.copy(dshBin = dshBin) }
     }
 
     fun setIsolatedClaudeAuth(v: Boolean) {
         isolatedClaudeAuth = v
-        persist()
+        persist { it.copy(isolatedClaudeAuth = isolatedClaudeAuth) }
     }
 
     fun setAskNoAutoDeny(v: Boolean) {
         askNoAutoDeny = v
-        persist()
+        persist { it.copy(askNoAutoDeny = askNoAutoDeny) }
     }
 
     fun setFullControlExpiryMs(v: Long) {
         fullControlExpiryMs = v.coerceAtLeast(0L)
-        persist()
+        persist { it.copy(fullControlExpiryMs = fullControlExpiryMs) }
     }
 
-    private fun persist() {
+    /** Write ONE changed field. The file is shared with the `config` command (another process): a running daemon
+     *  holds the values it read at startup, so rewriting the whole file from memory would silently undo a
+     *  `config --direct-connect local` / `--auto-update off` made since. Re-read, change one field, write. */
+    private fun persist(change: (Stored) -> Stored) {
         runCatching {
             path.parentFile?.mkdirs()
-            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth, askNoAutoDeny, fullControlExpiryMs, autoUpdate, dshBin, directConnect?.wire)))
+            val onDisk = if (path.exists()) runCatching { JSON.decodeFromString<Stored>(path.readText()) }.getOrNull() else null
+            val base = onDisk ?: Stored(pushEnabled, isolatedClaudeAuth, askNoAutoDeny, fullControlExpiryMs, autoUpdate, dshBin, directConnect?.wire)
+            path.writeText(JSON.encodeToString(change(base)))
         }
     }
 

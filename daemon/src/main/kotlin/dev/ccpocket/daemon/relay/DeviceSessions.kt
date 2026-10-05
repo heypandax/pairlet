@@ -271,7 +271,11 @@ class DeviceSessions(
                 // serialization refuses every interactive mint for as long as an intent pends, so this
                 // announce cannot be an ordinary interactive pairing. Anchoring it would write what is
                 // really a restricted credential's key into the full-power allow-list; park it instead.
-                unanchored = armed == null || (!provisionalBridge && bridges.intentPending())
+                // Only an INTERACTIVE ticket (`pairlet pair`, the one flow where the owner is present and it expires
+                // locally) may anchor a full-power key. A headless-armed ticket anchors nothing but its own pending
+                // restricted intent: once that intent lapsed the ticket still sits here (it has no local expiry), and
+                // a late or relay-forged announce popping it must not be written into devices.json.
+                unanchored = armed == null || (!provisionalBridge && (popped?.pairingId == null || bridges.intentPending()))
                 if (unanchored || provisionalBridge) bridges.holdProvisional(deviceId, pub)
                 else devicePubs[deviceId] = pub
             }

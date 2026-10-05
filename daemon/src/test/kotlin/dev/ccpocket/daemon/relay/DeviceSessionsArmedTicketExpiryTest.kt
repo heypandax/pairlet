@@ -154,12 +154,22 @@ class DeviceSessionsArmedTicketExpiryTest {
     }
 
     @Test
-    fun restricted_mints_keep_their_existing_lifetime() = runBlocking<Unit> {
-        // bridge / execution tickets are armed headless; their own intent TTLs govern them, unchanged here
+    fun a_headless_ticket_without_its_intent_never_anchors_full_power() = runBlocking<Unit> {
+        // bridge / execution tickets are armed headless and anchor only through their recorded intent. With no
+        // intent (lapsed, or never recorded) a late or relay-forged announce pops the ticket and must find nothing
+        // to anchor on — it used to be written into devices.json (pre-release review 2026-10-05, HIGH-1).
         val h = Harness(dir)
         h.sessions.onMintedTicket("ticket-headless", headless = true)
         h.now += 10 * 60_000L
         h.sessions.onDevicePaired("devH", b64.encodeToString(E2ECrypto.generateKeyPair().publicRaw))
-        assertEquals(setOf("devH"), h.allowListed(), "a headless-armed ticket is still popped as before")
+        assertEquals(emptySet<String>(), h.allowListed(), "a headless-armed ticket must not anchor a full-power device")
+    }
+
+    @Test
+    fun a_headless_ticket_without_its_intent_does_not_anchor_right_away_either() = runBlocking<Unit> {
+        val h = Harness(dir)
+        h.sessions.onMintedTicket("ticket-headless", headless = true)
+        h.sessions.onDevicePaired("devH", b64.encodeToString(E2ECrypto.generateKeyPair().publicRaw))
+        assertEquals(emptySet<String>(), h.allowListed())
     }
 }
