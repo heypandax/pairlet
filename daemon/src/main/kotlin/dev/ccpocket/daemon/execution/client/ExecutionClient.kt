@@ -3,10 +3,10 @@ package dev.ccpocket.daemon.execution.client
 import dev.ccpocket.daemon.execution.ExecutionFingerprint
 import dev.ccpocket.daemon.execution.ExecutionRelayPolicy
 import dev.ccpocket.daemon.execution.ExecutionSource
+import dev.ccpocket.daemon.peer.PeerChannel
 import dev.ccpocket.daemon.peer.PeerLinkStore
-import dev.ccpocket.daemon.review.PeerChannel
-import dev.ccpocket.daemon.review.PeerSession
-import dev.ccpocket.daemon.review.PeerTransport
+import dev.ccpocket.daemon.peer.PeerSession
+import dev.ccpocket.daemon.peer.PeerTransport
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ExecutionGrantInfo
 import dev.ccpocket.protocol.ExecutionGrantQuery
@@ -332,6 +332,6 @@ class ExecutionClient(
                 dev.ccpocket.daemon.peer.AtomicStoreFiles.path("execution-link-secrets.json")
 
         /** A caller that supplies no requestId gets a fresh one; retrying then means REUSING it. */
-        fun newRequestId(): String = "rq_" + dev.ccpocket.daemon.review.b64(ByteArray(12).also { RNG.nextBytes(it) })
+        fun newRequestId(): String = "rq_" + dev.ccpocket.daemon.peer.b64(ByteArray(12).also { RNG.nextBytes(it) })
     }
 }

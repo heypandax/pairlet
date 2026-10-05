@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.daemon.peer.b64
+import dev.ccpocket.daemon.peer.validDaemonPub
 import dev.ccpocket.protocol.e2e.E2ECrypto
 
 /**

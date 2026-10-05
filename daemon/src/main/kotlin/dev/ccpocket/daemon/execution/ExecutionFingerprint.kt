@@ -1,7 +1,7 @@
 package dev.ccpocket.daemon.execution
 
-import dev.ccpocket.daemon.review.b64
-import dev.ccpocket.daemon.review.b64d
+import dev.ccpocket.daemon.peer.b64
+import dev.ccpocket.daemon.peer.b64d
 import dev.ccpocket.protocol.e2e.E2ECrypto
 import java.security.MessageDigest
 
@@ -77,7 +77,7 @@ object ExecutionFingerprint {
  * relay cannot compute.
  *
  * The derived value is returned as base64url TEXT so it can ride [dev.ccpocket.daemon.peer.PeerLinkSecret.ticket]
- * unchanged — [dev.ccpocket.daemon.review.PeerHandshake.psk] mixes its UTF-8 bytes, and the target arms exactly
+ * unchanged — [dev.ccpocket.daemon.peer.PeerHandshake.psk] mixes its UTF-8 bytes, and the target arms exactly
  * those bytes.
  */
 object ExecutionPsk {

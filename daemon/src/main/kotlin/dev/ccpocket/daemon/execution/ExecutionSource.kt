@@ -1,11 +1,11 @@
 package dev.ccpocket.daemon.execution
 
+import dev.ccpocket.daemon.peer.PeerChannel
 import dev.ccpocket.daemon.peer.PeerLink
 import dev.ccpocket.daemon.peer.PeerLinkSecret
 import dev.ccpocket.daemon.peer.PeerLinkStore
-import dev.ccpocket.daemon.review.PeerChannel
-import dev.ccpocket.daemon.review.PeerSession
-import dev.ccpocket.daemon.review.PeerTransport
+import dev.ccpocket.daemon.peer.PeerSession
+import dev.ccpocket.daemon.peer.PeerTransport
 import dev.ccpocket.protocol.ExecutionGrantInfo
 import dev.ccpocket.protocol.ExecutionGrantQuery
 import dev.ccpocket.protocol.Frame
@@ -22,7 +22,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * and [PeerLinkStore] — but in its OWN files, so the review inbox never dials an execution link.
  *
  * [PeerLinkSecret.ticket] holds the DERIVED first-contact PSK ([ExecutionPsk]), not the raw relay ticket:
- * [dev.ccpocket.daemon.review.PeerHandshake.psk] is unchanged and mixes whatever that field holds. The raw
+ * [dev.ccpocket.daemon.peer.PeerHandshake.psk] is unchanged and mixes whatever that field holds. The raw
  * ticket is used exactly once, for the relay redeem.
  *
  * Deliberately NOT here: any fallback to an empty PSK while the first-contact PSK is held, any relay bearer

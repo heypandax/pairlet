@@ -4,7 +4,7 @@ import com.github.ajalt.clikt.core.parse
 import dev.ccpocket.daemon.peer.PeerLink
 import dev.ccpocket.daemon.peer.PeerLinkSecret
 import dev.ccpocket.daemon.peer.PeerLinkStore
-import dev.ccpocket.daemon.review.RelayPeerTransport
+import dev.ccpocket.daemon.peer.RelayPeerTransport
 import dev.ccpocket.daemon.schedule.ScheduleEntry
 import dev.ccpocket.daemon.schedule.ScheduleStore
 import dev.ccpocket.protocol.AgentKind

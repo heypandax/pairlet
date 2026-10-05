@@ -421,7 +421,7 @@ class RunJournal(
 
         fun validRequestId(id: String): Boolean = REQUEST_ID.matches(id)
 
-        fun newRunId(): String = "xr_" + dev.ccpocket.daemon.review.b64(ByteArray(16).also { RNG.nextBytes(it) })
+        fun newRunId(): String = "xr_" + dev.ccpocket.daemon.peer.b64(ByteArray(16).also { RNG.nextBytes(it) })
 
         /** The idempotency payload digest. Covers everything a retry must not be able to change. */
         @OptIn(ExperimentalStdlibApi::class)
