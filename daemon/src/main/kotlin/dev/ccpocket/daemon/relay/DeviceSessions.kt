@@ -653,10 +653,6 @@ class DeviceSessions(
                 // owner attach; the recipient filter — not just the egress whitelist — keeps every other
                 // handoff's updates away from this sink.
                 svc.attach(sink, recipientDeviceId = deviceId)
-                // …and the same filter for the ReviewRequest plane (REVIEW-REQUEST.md §11.1): this sink
-                // only ever receives rows addressed to THIS deviceId. A handoff-purpose link attaches too
-                // and is filtered on the way out instead — one gate to reason about, not two.
-                core.reviews.attach(sink, recipientDeviceId = deviceId)
                 when (val v = guard.vet(env.body)) {
                     is dev.ccpocket.daemon.handoff.CollaboratorGuard.Verdict.Deny -> {
                         log.warn("collaborator ${deviceId.take(8)}… ${env.body::class.simpleName} denied: ${v.code}")
@@ -739,7 +735,6 @@ class DeviceSessions(
                 // frame just refreshes the same slot; owner devices only (a restricted credential's egress
                 // whitelist would drop HandoffUpdated anyway — this keeps it out of the target set entirely).
                 core.registry.handoffs?.attach(sink)
-                core.reviews.attach(sink) // an owner device sees every review request this machine sent
                 // project-pin pushes (issue #362): ONE subscriber per device key, idempotent across frames, and
                 // resolved entirely at emission by [deliverProjectPins]. Attaching delivers nothing by itself —
                 // the device's CURRENT connection must also have declared the capability and fetched.
@@ -787,15 +782,6 @@ class DeviceSessions(
                         // than vanish, mirroring what the router's fall-through used to produce
                         if (!handled) runCatching { sink.emit(PocketError("unsupported", "the daemon isn't ready for ${body::class.simpleName}", null)) }
                     }
-                    return
-                }
-                if (isOffReaderRouterFrame(env.body)) {
-                    // Same head-of-line argument as the branch above, for an owner frame the ROUTER
-                    // handles: it reaches a mint that waits on a PairTicket this very reader delivers.
-                    // The owner checks live in the router, so the frame still goes through it — just not
-                    // on the loop it depends on.
-                    val body = env.body
-                    core.scope.launch { route(body, sink, origin, guestScope, collabScope, deviceId, capsNow) }
                     return
                 }
             }

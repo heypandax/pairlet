@@ -284,10 +284,6 @@ class RelayClient(
         )
         sessions.collaboratorControl = collaboratorService
         core.handoffs.collaborators = collaboratorService
-        // ReviewRequest reuses the SAME contact ledger (REVIEW-REQUEST.md §13.1): one address book, one
-        // "is this link still alive" answer. Until this line runs, `review send` refuses rather than
-        // minting a request addressed to a contact nobody has verified.
-        core.reviews.collaborators = collaboratorService
         // #367: the execution planes, on exactly the same relay-only footing as the three planes above —
         // approving a grant mints a connect ticket, and the source half dials the relay. They load HERE
         // only on a machine with evidence of use (grants, an execution credential, a run journal, source

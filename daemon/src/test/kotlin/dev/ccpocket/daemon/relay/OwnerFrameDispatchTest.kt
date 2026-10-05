@@ -1,10 +1,10 @@
 package dev.ccpocket.daemon.relay
 
+import dev.ccpocket.protocol.CreateBridge
 import dev.ccpocket.protocol.CreateCollaboratorTicket
 import dev.ccpocket.protocol.CreateReviewInvite
 import dev.ccpocket.protocol.Frame
-import dev.ccpocket.protocol.ListReviewContacts
-import dev.ccpocket.protocol.ListReviewInbox
+import dev.ccpocket.protocol.ListBridges
 import dev.ccpocket.protocol.PairTicket
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
@@ -27,9 +27,7 @@ import kotlin.test.fail
  * the duration.
  *
  * Minting is exactly that shape — `createTicket` suspends until the relay answers with a [PairTicket] —
- * which is why the share/bridge/collaborator mints already run off the loop. `pocket/review.contact_invite`
- * reaches the SAME mint but goes through the router (its owner check lives there), so it needs the same
- * treatment via [isOffReaderRouterFrame].
+ * which is why the share/bridge/collaborator mints run off the loop, selected by [isOwnerControlFrame].
  *
  * This models the loop rather than standing up a relay: the property under test is the DISPATCH DECISION,
  * and a socket would add nothing but flakiness.
@@ -42,6 +40,8 @@ class OwnerFrameDispatchTest {
         val completed = CompletableDeferred<String>()
         suspend fun run() = completed.complete(ticket.await().ticket)
     }
+
+    private val bridgeMint = CreateBridge("ci", listOf("/w"))
 
     /**
      * The reader loop, in the shape [DeviceSessions.route] gives it: owner frames that need the loop free
@@ -57,7 +57,7 @@ class OwnerFrameDispatchTest {
             for (frame in inbound) {
                 when {
                     frame is PairTicket -> mint.ticket.complete(frame)
-                    frame is CreateReviewInvite || frame is CreateCollaboratorTicket ->
+                    frame is CreateBridge || frame is CreateCollaboratorTicket ->
                         if (offReader(frame)) launch { mint.run() } else mint.run()
                     else -> handledInline += frame
                 }
@@ -72,21 +72,21 @@ class OwnerFrameDispatchTest {
     }
 
     @Test
-    fun a_review_invite_leaves_the_reader_free_to_deliver_the_pair_ticket_it_waits_for() = runBlocking {
+    fun a_ticket_mint_leaves_the_reader_free_to_deliver_the_pair_ticket_it_waits_for() = runBlocking {
         val inbound = Channel<Frame>(Channel.UNLIMITED)
         val mint = Mint()
-        inbound.send(CreateReviewInvite("Frank"))
+        inbound.send(bridgeMint)
         // the relay's answer arrives through the SAME reader, AFTER the frame that is waiting for it
         inbound.send(PairTicket("TICKET-123", 120, "482913"))
-        // …and an unrelated device's frame, which must not be stuck behind the mint either
-        inbound.send(ListReviewInbox())
+        // …and an unrelated frame, which must not be stuck behind the mint either
+        inbound.send(ListBridges)
 
         val handledInline = mutableListOf<Frame>()
-        readerLoop(inbound, mint, ::isOffReaderRouterFrame, handledInline)
+        readerLoop(inbound, mint, ::isOwnerControlFrame, handledInline)
 
         assertEquals("TICKET-123", mint.completed.await())
         assertTrue(
-            handledInline.any { it is ListReviewInbox },
+            handledInline.any { it is ListBridges },
             "an unrelated frame behind the mint must still have been served",
         )
     }
@@ -100,7 +100,7 @@ class OwnerFrameDispatchTest {
     fun dispatching_the_same_frame_inline_deadlocks_the_reader() = runBlocking {
         val inbound = Channel<Frame>(Channel.UNLIMITED)
         val mint = Mint()
-        inbound.send(CreateReviewInvite("Frank"))
+        inbound.send(bridgeMint)
         inbound.send(PairTicket("TICKET-123", 120, "482913"))
 
         try {
@@ -111,15 +111,12 @@ class OwnerFrameDispatchTest {
         }
     }
 
-    /** The predicate itself: the review invite needs the off-loop path, its siblings on the OWNER-LOCAL
-     *  plane do not (they answer from local state and never wait on the relay). */
+    /** The predicate itself: the ticket-minting owner frames take the off-loop path. A retired review
+     *  invite mints nothing any more — it goes to the router, which answers it inline. */
     @Test
-    fun only_the_ticket_minting_owner_frames_take_the_off_reader_path() {
-        assertTrue(isOffReaderRouterFrame(CreateReviewInvite()))
-        assertFalse(isOffReaderRouterFrame(ListReviewContacts))
-        assertFalse(isOffReaderRouterFrame(ListReviewInbox()))
-        // the pre-existing mints keep their own path, which the router never sees
+    fun the_ticket_minting_owner_frames_take_the_off_reader_path() {
+        assertTrue(isOwnerControlFrame(bridgeMint))
         assertTrue(isOwnerControlFrame(CreateCollaboratorTicket()))
-        assertFalse(isOffReaderRouterFrame(CreateCollaboratorTicket()))
+        assertFalse(isOwnerControlFrame(CreateReviewInvite()))
     }
 }

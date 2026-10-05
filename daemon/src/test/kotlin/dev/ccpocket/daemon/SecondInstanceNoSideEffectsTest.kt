@@ -35,7 +35,7 @@ import kotlin.test.fail
  *    isolation on ([dev.ccpocket.daemon.claude.ClaudeHome.prepare]), a peer-link secret whose handshake counter
  *    a dial would bump — plus a whole-tree snapshot that catches any write not named here;
  *  - scheduled trigger + child process: a schedule already due whose "claude" is a script that leaves a marker;
- *  - outbound connection: a review peer link pointing at a local listener that counts accepts;
+ *  - outbound connection: an execution peer link pointing at a local listener that counts accepts;
  *  - port binding: the E2E direct listener's port must still be free afterwards;
  *  - resident threads: the diagnostics preference watcher must not have been started.
  *
@@ -103,16 +103,16 @@ class SecondInstanceNoSideEffectsTest {
             ),
         )
 
-        // ④ outbound connection — a review peer link whose "relay" is a listener counting accepts
+        // ④ outbound connection — an execution (#367) peer link whose "relay" is a listener counting accepts
         val peerRelay = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).also(closeables::add)
         val peerDials = AtomicInteger()
         Thread {
             while (!peerRelay.isClosed) runCatching { peerRelay.accept().close(); peerDials.incrementAndGet() }
         }.apply { isDaemon = true; start() }
         val keys = RelayPeerTransport().generateKeys()
-        PeerLinkStore.load(File(store, "peer-links.json"), File(store, "peer-link-secrets.json")).put(
-            PeerLink("pl_1", "Peer", "ws://127.0.0.1:${peerRelay.localPort}", "acct", keys.publicKeyB64, "devB", "fp", now),
-            PeerLinkSecret("pl_1", "credential", keys.privateKeyB64, keys.publicKeyB64),
+        PeerLinkStore.load(File(store, "execution-links.json"), File(store, "execution-link-secrets.json")).put(
+            PeerLink("xg_1", "Peer", "ws://127.0.0.1:${peerRelay.localPort}", "acct", keys.publicKeyB64, "devB", "fp", now),
+            PeerLinkSecret("xg_1", "credential", keys.privateKeyB64, keys.publicKeyB64),
         )
 
         val diagnosticsThreadBefore = diagnosticsWatcherRunning()
@@ -147,7 +147,7 @@ class SecondInstanceNoSideEffectsTest {
             if (File(store, "identity.json").exists()) add("created identity.json")
             if (File(store, "claude-home").exists()) add("built the isolated claude-home")
             if (marker.exists()) add("fired the due schedule and spawned an agent")
-            if (peerDials.get() > 0) add("dialled the review peer's relay ${peerDials.get()}×")
+            if (peerDials.get() > 0) add("dialled the execution peer's relay ${peerDials.get()}×")
             if (SingleInstance.portInUse(directPort)) add("bound the direct listener port $directPort")
             if (!diagnosticsThreadBefore && diagnosticsWatcherRunning()) add("started the diagnostics watcher thread")
             val after = snapshot(home)

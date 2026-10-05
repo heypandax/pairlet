@@ -239,8 +239,6 @@ internal class RunCmd(
             kimiModels = dev.ccpocket.daemon.kimi.KimiModelService(kimiBin),
             zcodeModels = dev.ccpocket.daemon.zcode.ZCodeModelService(),
             dshModels = dev.ccpocket.daemon.dsh.DshModelService(dshBinEffective),
-            reviews = dev.ccpocket.daemon.review.ReviewService(),
-            peerInboxFactory = { dev.ccpocket.daemon.review.PeerInboxService(it) },
         )
         if (claudeHome != null) {
             echo("claude credential isolation: ON — daemon login store: $claudeHome")
