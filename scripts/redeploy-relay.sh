@@ -19,9 +19,12 @@ python3 scripts/check-production-caddy.py
 [ -f .env ] && { set -a; . ./.env; set +a; }
 
 : "${RELAY_HOST_HK:?set RELAY_HOST_HK in .env (HK origin IP)}"
-: "${SSHPASS_HK:?set SSHPASS_HK in .env (HK server root password)}"
+# RELAY_SSH_KEY=1：服务器只接受密钥登录时（密码登录被拒）改用本机已登记的 SSH key，不读 SSHPASS_HK。
+if [ "${RELAY_SSH_KEY:-0}" != "1" ]; then
+  : "${SSHPASS_HK:?set SSHPASS_HK in .env (HK server root password), or run with RELAY_SSH_KEY=1}"
+  export SSHPASS="$SSHPASS_HK"   # sshpass -e reads SSHPASS
+fi
 RELAY_HOST="$RELAY_HOST_HK"
-export SSHPASS="$SSHPASS_HK"   # sshpass -e reads SSHPASS
 DIST=relay/build/install/cc-pocket-relay
 [ -d "$DIST/lib" ] || { echo "build first: JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :relay:installDist"; exit 1; }
 
@@ -33,6 +36,10 @@ DIST=relay/build/install/cc-pocket-relay
 # command arrays incrementally so a missing optional jump host remains valid on the macOS shell.
 SSH=(sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new)
 SCP=(sshpass -e scp -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new)
+if [ "${RELAY_SSH_KEY:-0}" = "1" ]; then
+  SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+  SCP=(scp -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+fi
 if [ -n "${RELAY_SSH_JUMP:-}" ]; then
   SSH+=(-o "ProxyJump=$RELAY_SSH_JUMP")
   SCP+=(-o "ProxyJump=$RELAY_SSH_JUMP")
