@@ -133,12 +133,6 @@ import dev.ccpocket.app.resources.done
 import dev.ccpocket.app.resources.tool_process_unknown_one
 import dev.ccpocket.app.resources.split_pane_close
 import dev.ccpocket.app.resources.split_pane_focus
-import dev.ccpocket.app.resources.ho_continuing
-import dev.ccpocket.app.resources.ho_copy_invite
-import dev.ccpocket.app.resources.ho_finish_return
-import dev.ccpocket.app.resources.ho_recall
-import dev.ccpocket.app.resources.ho_spectating
-import dev.ccpocket.app.resources.ho_waiting_title
 import dev.ccpocket.app.resources.action_launch
 import dev.ccpocket.app.resources.allow_chip_prefix
 import dev.ccpocket.app.resources.autorun_basis_session
@@ -265,16 +259,6 @@ import dev.ccpocket.app.ui.atInsertText
 import dev.ccpocket.app.ui.slashQueryOf
 import dev.ccpocket.app.ui.slashSuggestions
 import dev.ccpocket.app.ui.turnDurLabel
-import dev.ccpocket.app.ui.handoff.HandoffAvatar
-import dev.ccpocket.app.ui.handoff.HandoffAvatarPair
-import dev.ccpocket.app.ui.handoff.HandoffLockedComposer
-import dev.ccpocket.app.ui.handoff.HandoffResultCard
-import dev.ccpocket.app.ui.handoff.HandoffWatchBar
-import dev.ccpocket.app.ui.handoff.elapsedLabel
-import dev.ccpocket.app.ui.handoff.expiresCountdown
-import dev.ccpocket.app.ui.handoff.inviteBlob
-import dev.ccpocket.app.ui.handoff.shortCode
-import dev.ccpocket.protocol.HandoffStatus
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.isQuestion
@@ -361,8 +345,6 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
     // embedded terminal (issue #153): the open-mode menu's anchor (null = closed); drag math and
     // the PANEL menu anchor read the panel's own measured height off the controller.
     var termMenuFrom by remember { mutableStateOf<TermMenuAnchor?>(null) }
-    // the recipient's "Finish & return" dialog (design Frame 12) — pane-scoped scrim + centered card
-    var showHandoffReturn by remember { mutableStateOf(false) }
     @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
     Box(
         modifier.fillMaxSize().dragAndDropTarget(
@@ -380,7 +362,6 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         // Reset per question so a fresh ask doesn't inherit the last card's ownership.
         var questionOwnsInput by remember(model.ask?.askId) { mutableStateOf(false) }
         ChatSubHeader(model, onTerminalMenu = { termMenuFrom = TermMenuAnchor.HEADER })
-        HandoffPaneRibbon(model, onFinishReturn = { showHandoffReturn = true })
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             // the QuestionCard docks inside the LazyColumn's unbounded tail item — hand it a bound from the
             // pane's real viewport so its #125 cap+inner-scroll works instead of falling back to full natural
@@ -618,9 +599,8 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                 }
             }
         }
-        HandoffReturnedCard(model)
         SessionHealthStrip(model)
-        HandoffComposerZone(model, questionOwnsInput)
+        ComposerZone(model, questionOwnsInput)
         // embedded terminal dock (issue #153): divider + panel / collapsed strip at the pane bottom.
         // The heavyweight Swing terminal swaps out for a flat stand-in while any overlay, this
         // pane's own open-mode menu, or the file-drop scrim is up — SwingPanel would otherwise
@@ -636,17 +616,6 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
     termMenuFrom?.let { anchor ->
         TerminalMenuOverlay(model, anchor) { termMenuFrom = null }
     }
-    if (showHandoffReturn) {
-        Box(
-            Modifier.fillMaxSize().background(Dk.backdrop.copy(alpha = 0.72f))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { showHandoffReturn = false },
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}) {
-                HandoffReturnModal(model) { showHandoffReturn = false }
-            }
-        }
-    }
     }
     }
     // rewind/fork confirmation (issue #282) — a popup over the whole pane, so the numbers land in the
@@ -654,107 +623,10 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
     RewindConfirmPopup(model)
 }
 
-/**
- * Role ribbon (design Frames 11/12): terracotta only when THIS device is the acting recipient —
- * it carries the persistent "Finish & return"; the spectating side is neutral with the elapsed readout.
- */
+/** The composer zone: the observe bar while watching a terminal session, otherwise the composer. */
 @Composable
-private fun HandoffPaneRibbon(model: DesktopModel, onFinishReturn: () -> Unit) {
-    val ho = model.activeHandoff ?: return
-    if (ho.status != HandoffStatus.IN_PROGRESS) return
-    val recipient = model.handoffIsRecipient()
-    val ownerLabel = ho.initiatorLabel ?: model.activeComputer?.name ?: "?"
-    val recLabel = ho.recipientLabel ?: "?"
-    val fg = if (recipient) Tok.accent else Tok.tx2
-    Row(
-        Modifier.fillMaxWidth().background(if (recipient) Tok.accent.copy(alpha = 0.10f) else Tok.surface)
-            .padding(horizontal = 18.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
-        if (recipient) HandoffAvatarPair(ownerLabel, recLabel, Tok.accent) else HandoffAvatar(recLabel, accent = true)
-        Text(
-            stringResource(if (recipient) Res.string.ho_continuing else Res.string.ho_spectating, if (recipient) ownerLabel else recLabel),
-            color = fg, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-        )
-        elapsedLabel(ho.acceptedAt)?.let { Text(it, color = fg, fontFamily = Dk.mono, fontSize = 11.sp) }
-        if (recipient) {
-            Text(
-                stringResource(Res.string.ho_finish_return), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                style = tightCenter(12.sp),
-                modifier = Modifier.clip(RoundedCornerShape(9.dp)).background(Tok.accent.copy(alpha = 0.10f))
-                    .border(1.dp, Tok.accent, RoundedCornerShape(9.dp))
-                    .clickable(onClick = onFinishReturn).padding(horizontal = 11.dp, vertical = 6.dp),
-            )
-        }
-    }
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-}
-
-/** The RETURNED result card (design Frame 12): docks above the composer at the 820dp cap, findings
- *  two-up, until the initiator's "Mark reviewed" completes the handoff. */
-@Composable
-private fun HandoffReturnedCard(model: DesktopModel) {
-    val ho = model.activeHandoff ?: return
-    if (ho.status != HandoffStatus.RETURNED) return
-    val ui = desktopHandoffResultUi(model) ?: return
-    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
-        HandoffResultCard(
-            ui, twoColumn = true,
-            onMarkReviewed = { model.handoffComplete() },
-            onOpenFull = { },
-            modifier = Modifier.widthIn(max = 820.dp),
-        )
-    }
-}
-
-/** The composer zone with the handoff states folded in (design Frames 11/7): WAITING = lock bar +
- *  dimmed composer stand-in; spectating IN_PROGRESS = watch bar; otherwise the normal chain. */
-@Composable
-private fun HandoffComposerZone(model: DesktopModel, questionOwnsInput: Boolean) {
-    val ho = model.activeHandoff
+private fun ComposerZone(model: DesktopModel, questionOwnsInput: Boolean) {
     when {
-        ho != null && ho.status == HandoffStatus.WAITING -> Column(Modifier.fillMaxWidth()) {
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-            Row(
-                Modifier.padding(horizontal = 18.dp, vertical = 10.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                    .background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp),
-            ) {
-                Box(Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(Tok.tx2))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        stringResource(Res.string.ho_waiting_title, ho.recipientLabel ?: "?"),
-                        color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        // §6: rendered from the daemon's grant, never hardcoded to REVIEW / READ ONLY
-                        "${dev.ccpocket.app.ui.handoff.kindChip(ho.kind)} · ${dev.ccpocket.app.ui.handoff.accessChip(ho.access)} · ${ho.shortCode()} · ${ho.expiresCountdown()}",
-                        color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-                val clipboard = LocalClipboardManager.current
-                Text(
-                    stringResource(Res.string.ho_copy_invite), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                    style = tightCenter(12.sp),
-                    modifier = Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.hair, RoundedCornerShape(9.dp))
-                        .clickable { clipboard.setText(AnnotatedString(ho.inviteBlob())) }
-                        .padding(horizontal = 11.dp, vertical = 7.dp),
-                )
-                Text(
-                    stringResource(Res.string.ho_recall), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                    style = tightCenter(12.sp),
-                    modifier = Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.danger.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
-                        .clickable { model.handoffCancel() }.padding(horizontal = 11.dp, vertical = 7.dp),
-                )
-            }
-            HandoffLockedComposer()
-        }
-        ho != null && ho.status == HandoffStatus.IN_PROGRESS && !model.handoffIsRecipient() -> Column(Modifier.fillMaxWidth()) {
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-            HandoffWatchBar(onRecall = { model.handoffRecall() })
-        }
         model.observing -> ObserveBar(model)
         else -> Column(Modifier.fillMaxWidth()) {
             // A refused rewind (issue #282) docks above the composer, like every other transient chat

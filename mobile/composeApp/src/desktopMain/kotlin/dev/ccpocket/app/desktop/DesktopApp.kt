@@ -59,7 +59,6 @@ import dev.ccpocket.app.data.paneIndexForSlot
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.Tok
-import dev.ccpocket.app.ui.handoff.canInitiateSessionHandoff
 import dev.ccpocket.protocol.isQuestion
 import org.jetbrains.compose.resources.stringResource
 
@@ -98,11 +97,6 @@ fun DesktopApp(
     LaunchedEffect(Unit) {
         delay(STARTUP_UPDATE_CHECK_DELAY_MS)
         if (model.updateState is DkUpdateState.Idle) model.checkForUpdates()
-    }
-    // A session switch can change the backend while the draft modal is open. Clear the stale state as
-    // well as hiding the surface, otherwise anyOverlay would keep treating an invisible modal as active.
-    LaunchedEffect(model.chatAgent) {
-        if (!model.chatAgent.canInitiateSessionHandoff()) model.showHandoff = false
     }
     // Whether the pointer sits in the left-edge band that peeks a hidden sidebar. Observed on the ROOT
     // container's pointer moves rather than a hit-test Box at the edge: the outermost pixels of an
@@ -357,19 +351,6 @@ fun DesktopApp(
         if (model.showSettings) {
             Overlay(onDismiss = { model.showSettings = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
                 SettingsModal(model, settingsTab) { model.showSettings = false }
-            }
-        }
-        if (model.showHandoff && model.handoffInvite == null && model.chatAgent.canInitiateSessionHandoff()) {
-            // session-handoff draft dialog (design Frame 11) — centered scrim, two-column trust layout.
-            // A fresh invite yields to the QR card below (the draft's job is done once the invite exists).
-            Overlay(onDismiss = { model.showHandoff = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
-                HandoffModal(model) { model.showHandoff = false }
-            }
-        }
-        if (model.handoffInvite != null) {
-            // fresh invite → the QR/short-code card; also closes the draft dialog (state flips it)
-            Overlay(onDismiss = { model.dismissHandoffInvite() }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
-                HandoffInviteModal(model) { model.dismissHandoffInvite() }
             }
         }
     }

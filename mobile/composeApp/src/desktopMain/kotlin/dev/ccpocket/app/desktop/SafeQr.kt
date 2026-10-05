@@ -33,7 +33,7 @@ import io.nayuki.qrcodegen.QrCode
  *  2. The desktop call sites passed no `onFailure`, so even the failures it DOES catch were swallowed
  *     into a blank square with nothing logged — the user got "it just broke" either way.
  *
- * And the payload itself can throw before the generator is even reached: `CollaboratorInvite.encode()`
+ * And the payload itself can throw before the generator is even reached: an invite's `encode()`
  * serializes + base64s daemon-supplied fields, and any QR encoder rejects a blob beyond its capacity.
  *
  * So this builds a pure-Java QR MODULE MATRIX synchronously inside [runCatching] — which catches

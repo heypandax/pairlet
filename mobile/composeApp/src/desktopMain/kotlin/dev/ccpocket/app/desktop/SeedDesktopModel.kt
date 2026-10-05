@@ -184,7 +184,6 @@ open class SeedDesktopModel : DesktopModel {
     override var showAddComputer by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
-    override var showHandoff by mutableStateOf(false)
     override var showFolderPicker by mutableStateOf(false)
     override var showModelPopover by mutableStateOf(false)
     override var showQuotaPopover by mutableStateOf(false)
