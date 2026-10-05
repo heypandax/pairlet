@@ -270,6 +270,7 @@
     <string name="voice_daemon_unreachable">Couldn't reach the daemon — check the connection</string>
     <string name="voice_transcribe_failed">Couldn't transcribe — try again</string>
     <string name="voice_no_response">No response — check the connection</string>
+    <string name="voice_still_waiting">Slow connection — still waiting for the transcript…</string>
     <string name="voice_dictation_failed">dictation failed</string>
     <string name="voice_speech_unavailable">speech recognition unavailable</string>
     <string name="voice_audio_engine">audio engine failed to start</string>

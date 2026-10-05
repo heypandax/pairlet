@@ -327,7 +327,7 @@ class ResetInventoryTest {
             listOf("scope", "pinnedTo", "projectPinRegistry", "relay", "directE2E")
                 .forEach { put(it, "constructor dependency / transport instance") }
             listOf("directLinkUp", "pushDial", "registrarOverride", "linkHealthOverride", "onSendForTest", "pinWriterForTest",
-                "memoWriterForTest", "memoStoreForTest", "redeemForTest", "dialForTest")
+                "memoWriterForTest", "memoStoreForTest", "redeemForTest", "dialForTest", "voiceUploadForTest")
                 .forEach { put(it, "test seam / injected function") }
             listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply")
                 .forEach { put(it, "shell callback wiring, not state") }
@@ -649,6 +649,8 @@ class ResetInventoryTest {
             preferRemote                 K K K K K K K K
             keptAudio                    R R R R R R K R
             captureId                    R R R R R R K R
+            voiceAttempts                R R R R R R K R  # every exit but TKO abandons the capture (clearVoice)
+            voiceUploading               R R R R R R K R  # likewise; TKO keeps the capture running
             voiceTicker                  R R R R R R K R
             voiceTimeout                 R R R R R R K R
             levelsJob                    R R R R R R K R
