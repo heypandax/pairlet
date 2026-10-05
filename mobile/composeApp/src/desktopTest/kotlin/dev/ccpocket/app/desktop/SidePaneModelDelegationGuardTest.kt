@@ -206,9 +206,7 @@ class SidePaneModelDelegationGuardTest {
         "phonePush", "refreshPushPrefs",
         "approvalNoAutoDeny", "refreshApprovalPrefs", "approvalFullControlExpiryMs",
         "fullControlExpiryMs",
-        // folder-share + schedules
-        "shares", "sharesLoaded", "lastShareInvite", "refreshShares", "createShare", "revokeShare",
-        "clearLastShare", "redeemShareInvite",
+        // schedules
         "schedules", "schedulesLoaded", "schedulesStale", "refreshSchedules", "cancelSchedule",
         // account + API presets
         "authState", "refreshAuth", "switchAccount", "stopAuthBlocker", "submitAuthCode",

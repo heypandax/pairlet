@@ -280,15 +280,7 @@ class ProjectPinsRepositoryTest {
     }
 
     @Test
-    fun guest_and_demo_pins_stay_local_and_send_no_pin_frames() {
-        val sent = mutableListOf<Frame>()
-        val guest = repo(binding("acct-a", role = BindingRole.GUEST), sent)
-        guest.togglePin("/shared/folder")
-        guest.receiveForTest(DaemonInfo(supportsProjectPins = true))
-        assertTrue(sent.pins().isEmpty())
-        assertEquals(listOf("/shared/folder"), guest.pinnedPaths)
-        assertTrue(doc("acct-a").pending.isEmpty(), "a guest binding never writes the owner's list")
-
+    fun demo_pins_stay_local_and_send_no_pin_frames() {
         val demoSent = mutableListOf<Frame>()
         val demo = PocketRepository(scope, projectPinRegistry = registry).apply { capturePins(demoSent); useRelay = false }
         demo.enterDemo()
@@ -456,38 +448,28 @@ class ProjectPinsRepositoryTest {
     }
 
     @Test
-    fun retry_recovers_readable_storage_for_guest_and_unpaired_pins_and_sends_no_pin_frame() {
-        val guestBinding = binding("acct-g", role = BindingRole.GUEST)
-        repo(guestBinding, mutableListOf()).togglePin("/g/saved") // saved while storage worked
+    fun retry_recovers_readable_storage_for_unpaired_pins_and_sends_no_pin_frame() {
         ProjectPinLink(registry, scope, onVisible = {}).apply { bind(null, demo = false); setPinned("/u/saved", true) }
 
         val flaky = Flaky(FileProjectPinPersistence(dir)).apply { failRecover = true }
         val reg = seeded(ProjectPinRegistry(flaky))
         val sent = mutableListOf<Frame>()
-        val guest = repo(guestBinding, sent, reg)
         val unpairedVisible = mutableListOf<List<String>>()
         val unpaired = ProjectPinLink(reg, scope, onVisible = { unpairedVisible += it }).apply { bind(null, demo = false) }
         val owner = repo(binding("acct-a"), sent, reg)
-        for (notice in listOf(guest.projectPinIssueNotice.value, unpaired.notice.value, owner.projectPinIssueNotice.value)) {
+        for (notice in listOf(unpaired.notice.value, owner.projectPinIssueNotice.value)) {
             assertEquals(PinIssueKind.STORAGE_FAILED, notice?.kind)
             assertTrue(notice!!.retryable)
         }
-        assertTrue(guest.pinnedPaths.isEmpty())
 
-        guest.retryProjectPins()
         unpaired.retry()
-        assertEquals(PinIssueKind.STORAGE_FAILED, guest.projectPinIssueNotice.value?.kind, "still unreadable: still the problem")
         assertEquals(PinSyncIssue.StorageFailed, unpaired.issue.value)
 
         reg.refreshAfterPairingChange { listOf(binding("acct-a").copy(credential = "c-replaced"), binding("acct-b")) }
         flaky.failRecover = false
-        guest.retryProjectPins()
         unpaired.retry()
         owner.retryProjectPins()
 
-        assertEquals(listOf("/g/saved"), guest.pinnedPaths, "the guest's saved pins are back")
-        assertNull(guest.projectPinSyncIssue.value)
-        assertNull(guest.projectPinIssueNotice.value)
         assertEquals(listOf("/u/saved"), unpaired.visible())
         assertEquals(listOf("/u/saved"), unpairedVisible.last())
         assertNull(unpaired.issue.value)

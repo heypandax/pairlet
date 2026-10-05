@@ -54,7 +54,6 @@ import dev.ccpocket.app.ui.browseParentOf
 import dev.ccpocket.app.ui.browseProjectAt
 import dev.ccpocket.app.ui.browseRows
 import dev.ccpocket.app.ui.browseWorkdirOf
-import dev.ccpocket.app.ui.isGuestDirView
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -84,8 +83,7 @@ internal fun RemoteDirPickerCard(
     val rows = browseRows(listing, anchor, subPath)
     val failed = browseFailed(listing, anchor, subPath)
     val crumbs = browseCrumbsOf(anchor, subPath)
-    // owner-only + belt-and-suspenders: a guest never receives roots (daemon-gated), so keep the switcher off
-    val roots = if (isGuestDirView(dirs)) emptyList() else model.browseRoots
+    val roots = model.browseRoots
 
     Column(
         Modifier.width(440.dp).clip(RoundedCornerShape(14.dp)).background(Tok.raised)

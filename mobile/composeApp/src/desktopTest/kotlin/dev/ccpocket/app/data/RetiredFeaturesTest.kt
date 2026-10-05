@@ -17,8 +17,12 @@ import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
 import dev.ccpocket.app.telemetry.telemetryTap
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.app.desktop.FakeDesktopStore
+import dev.ccpocket.app.desktop.RepoDesktopModel
+import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.ui.ChatScreen
 import dev.ccpocket.app.util.B64Url
+import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Collaborator
 import dev.ccpocket.protocol.CollaboratorConnected
@@ -52,6 +56,12 @@ import dev.ccpocket.protocol.ReviewStatus
 import dev.ccpocket.protocol.ReviewUpdated
 import dev.ccpocket.protocol.SessionHandoff
 import dev.ccpocket.protocol.SessionLive
+import dev.ccpocket.protocol.ShareCreated
+import dev.ccpocket.protocol.ShareEnded
+import dev.ccpocket.protocol.ShareInfo
+import dev.ccpocket.protocol.ShareInvite
+import dev.ccpocket.protocol.ShareListing
+import dev.ccpocket.protocol.ShareRevoked
 import dev.ccpocket.protocol.inviteUriPrefix
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,14 +76,15 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Features the App has retired (2026-10): ReviewRequest, Session Handoff and Collaborator Links. What is left
- * of them on this side is only how the App behaves when the outside world still speaks them:
+ * Features the App has retired (2026-10): ReviewRequest, Session Handoff, Collaborator Links and Folder Share.
+ * What is left of them on this side is only how the App behaves when the outside world still speaks them:
  *
- *  - a `ccpocket://review-contact#…`, `ccpocket://collab#…` or `ccpocket://handoff?…` link (a QR on a
- *    colleague's screen, an old chat message) says the feature has been retired — and it is NOT a failed
- *    pairing: no failure card, no `pair_failed`;
+ *  - a `ccpocket://review-contact#…`, `ccpocket://collab#…`, `ccpocket://handoff?…` or `ccpocket://share#…`
+ *    link (a QR on a colleague's screen, an old chat message) says the feature has been retired — and it is
+ *    NOT a failed pairing: no failure card, no `pair_failed`;
  *  - a tapped Session Handoff offer push (an older daemon's, carrying only `hid`) lands on the same notice;
- *  - an older daemon may still push those features' frames; they are dropped without a trace;
+ *  - an older daemon may still push those features' frames; they are dropped without a trace — and a
+ *    directory it stamped as shared is an ordinary project;
  *  - this build itself never asks for any of them — opening a session sends no handoff/collaborator request.
  *
  * Unconfined makes `handle()` synchronous, so no daemon and no clock are needed.
@@ -110,6 +121,19 @@ class RetiredFeaturesTest {
 
     private val collabInvite = reviewInvite.copy(purpose = CollaboratorPurpose.SESSION_HANDOFF)
 
+    /** A folder-share invite as an older daemon minted it, and the link its owner handed out. */
+    private val shareInvite = ShareInvite(
+        relay = "wss://relay.test", accountId = "acct-frank", daemonPub = TEST_DAEMON_PUB, ticket = "SHARE-TICKET",
+        folderName = "acme-api", tier = AccessTier.COLLABORATE, expiresAt = 1_800_000_000_000, ttlSec = 600,
+        ownerLabel = "Frank",
+    )
+
+    private fun ShareInvite.legacyUri(): String =
+        "ccpocket://share#" + B64Url.encode(PocketJson.encodeToString(ShareInvite.serializer(), this).encodeToByteArray())
+
+    private fun paired(account: String) =
+        PairedDaemon(relay = "wss://test.invalid", accountId = account, daemonPub = "pub", deviceId = "dev", credential = "cred")
+
     /** The shared expectation: the retired notice, and nothing a pairing attempt would leave behind. */
     private fun assertRetiredNotice(r: PocketRepository, raw: String) {
         assertEquals(StatusMsg(Res.string.status_feature_retired), r.status.value, raw)
@@ -119,7 +143,6 @@ class RetiredFeaturesTest {
             synchronized(seen) { seen.none { it.first == TelEvent.PairFailed || it.first == TelEvent.PairStarted } },
             "no pairing attempt and no pair_failed for a retired link, saw $seen",
         )
-        assertNull(r.pendingShareInvite.value, "nothing parks at the share preview ($raw)")
     }
 
     @Test
@@ -139,7 +162,6 @@ class RetiredFeaturesTest {
                 synchronized(seen) { seen.none { it.first == TelEvent.PairFailed || it.first == TelEvent.PairStarted } },
                 "no pairing attempt and no pair_failed for a retired link, saw $seen",
             )
-            assertNull(r.pendingShareInvite.value, "…or at the share preview ($raw)")
         }
 
         // control: the same seam DOES see an unroutable link's pair_failed, so the silence above is real
@@ -177,6 +199,32 @@ class RetiredFeaturesTest {
             pasted.handleIncomingLink(collabInvite.legacyUri(), allowBareBlob = true),
         )
         assertRetiredNotice(pasted, "pasted collab link")
+    }
+
+    @Test
+    fun aFolderShareLinkSaysRetiredAndIsNotAFailedPairing() {
+        // a well-formed invite, a corrupt one, none at all, the new scheme: the host decides, the payload is never read
+        val cases = listOf(
+            shareInvite.legacyUri(),
+            "ccpocket://share#!!!not-base64!!!",
+            "ccpocket://share",
+            "pairlet://share#whatever",
+        )
+        for (raw in cases) {
+            synchronized(seen) { seen.clear() }
+            val r = repo()
+
+            assertEquals(IncomingLink.Retired(RetiredFeature.FOLDER_SHARE), r.handleIncomingLink(raw), raw)
+            assertRetiredNotice(r, raw)
+        }
+        // the explicit paste field included (the desktop "join a shared folder" box is gone; the pairing paste stays)
+        synchronized(seen) { seen.clear() }
+        val pasted = repo()
+        assertEquals(
+            IncomingLink.Retired(RetiredFeature.FOLDER_SHARE),
+            pasted.handleIncomingLink(shareInvite.legacyUri(), allowBareBlob = true),
+        )
+        assertRetiredNotice(pasted, "pasted share link")
     }
 
     /**
@@ -250,6 +298,72 @@ class RetiredFeaturesTest {
             ),
             seed = { receiveForTest(SessionLive("c1", "/w", "s1", executing = false)); connected.value = true },
         )
+    }
+
+    /**
+     * Folder Share's frames: an older daemon answers an older client's share requests, and sends `ShareEnded` to
+     * a guest credential right before cutting it. None of it may reach the chat, the status line or the send gate.
+     */
+    @Test
+    fun folderShareFramesFromAnOlderDaemonAreDroppedSilently() {
+        assertDroppedSilently(
+            listOf(
+                ShareEnded(ShareEnded.REASON_REVOKED, ownerLabel = "Frank"),
+                ShareEnded(ShareEnded.REASON_EXPIRED),
+                ShareListing(listOf(ShareInfo("guest-1", "/w", AccessTier.REVIEW, createdAt = 1, expiresAt = 2, guestLabel = "Alex"))),
+                ShareCreated(ok = true, invite = shareInvite),
+                ShareCreated(ok = false, error = "folder sharing has been removed"),
+                ShareRevoked("guest-1", ok = true),
+            ),
+            seed = { receiveForTest(SessionLive("c1", "/w", "s1", executing = false)); connected.value = true },
+        )
+    }
+
+    /** `ShareEnded` used to end the link for good (the re-pair screen) and leave a per-account marker behind.
+     *  From an older daemon it now does neither: the connection phase is whatever it was. */
+    @Test
+    fun aShareEndedFromAnOlderDaemonNeitherEndsTheLinkNorLeavesAMarker() {
+        val account = "acct-retired-share-ended"
+        val r = repo().apply { paired.value = paired(account) }
+        r.receiveForTest(SessionLive("c1", "/w", "s1", executing = false))
+        val before = r.phase.value
+
+        r.receiveForTest(ShareEnded(ShareEnded.REASON_REVOKED, ownerLabel = "Frank"))
+
+        assertEquals(before, r.phase.value, "the link is not ended by a retired feature's notice")
+        assertTrue(r.phase.value != ConnPhase.PairingInvalid)
+        assertNull(SecureStore.getString("share_ended:$account"), "no ended marker is written for the account")
+    }
+
+    /**
+     * An older daemon stamped a guest's shared roots with `sharedBy` / `shareExpiresAt` / `shareTier`. The fields
+     * still decode, and this build ignores them: the directory is listed like any other, and on the desktop the
+     * listed project keeps every owner verb (group editing, rename, archive) the stamp used to switch off.
+     */
+    @Test
+    fun aDirectoryAnOlderDaemonStampedSharedIsAnOrdinaryProject() {
+        val stamped = DirectoryEntry(
+            path = "/Users/alex/acme-api", name = "acme-api", isDir = true, hasSessions = true,
+            sharedBy = "panda-mbp", shareExpiresAt = 1_800_000_000_000, shareTier = AccessTier.COLLABORATE,
+        )
+        val mine = DirectoryEntry(path = "/Users/alex/mine", name = "mine", isDir = true, hasSessions = true)
+        val frame = Directories(listOf(stamped, mine))
+        val wire = PocketJson.decodeFromString(Frame.serializer(), PocketJson.encodeToString(Frame.serializer(), frame))
+        assertEquals(frame, wire, "an old daemon's stamped listing still decodes")
+
+        val r = repo().apply { paired.value = paired("acct-retired-shared-dir") }
+        val statusBefore = r.status.value
+        r.receiveForTest(wire)
+        assertEquals(setOf(stamped.path, mine.path), r.directories.map { it.path }.toSet())
+        assertEquals(statusBefore, r.status.value)
+        assertTrue(r.messages.isEmpty())
+
+        r.sessionsDir.value = stamped.path
+        r.groupsSupported.value = true; r.renameSupported.value = true; r.archiveSupported.value = true
+        val m = RepoDesktopModel(r, scope, store = FakeDesktopStore())
+        assertTrue(m.canEditGroups, "group editing on the stamped project")
+        assertTrue(m.canRenameSessions, "rename on the stamped project")
+        assertTrue(m.canArchiveSessions, "archive on the stamped project")
     }
 
     private fun assertDroppedSilently(frames: List<Frame>, seed: PocketRepository.() -> Unit = {}) {

@@ -90,7 +90,7 @@ class UnscopedErrorRoutingTest {
 
     private fun sysRows(r: PocketRepository) = r.messages.filterIsInstance<ChatItem.Sys>()
 
-    /** A folder-share guest's quota refresh is refused by the daemon's guard — the message names the frame. It
+    /** A bridge credential's quota refresh is refused by the daemon's guard — the message names the frame. It
      *  answered the allowance pill, not the session the user just tapped. */
     @Test
     fun aGuardRefusalNamingAQuotaRequestLeavesTheOpenAndTheChatAlone() {
@@ -105,7 +105,7 @@ class UnscopedErrorRoutingTest {
             assertTrue(r.openSession("/w", "sid-2"))
             assertTrue(r.opening.value && !quotaEnded, "preconditions")
 
-            r.receiveForTest(PocketError("share_forbidden", "not permitted for a folder-share guest: ClaudeQuotaGet"))
+            r.receiveForTest(PocketError("bridge_forbidden", "not permitted for a bridge credential: ClaudeQuotaGet"))
 
             assertTrue(r.opening.value, "the quota refusal must not end the open")
             assertTrue(sysRows(r).isEmpty(), "nor land in the chat: ${sysRows(r)}")
@@ -172,7 +172,7 @@ class UnscopedErrorRoutingTest {
         try {
             r.fetchUsage()
             assertTrue(r.openSession("/w", "sid-2"))
-            r.receiveForTest(PocketError("share_forbidden", "not permitted for a folder-share guest: OpenSession"))
+            r.receiveForTest(PocketError("bridge_forbidden", "not permitted for a bridge credential: OpenSession"))
             assertFalse(r.opening.value)
             assertTrue(r.usageLoading.value, "the usage request is still waiting for its own answer")
         } finally {

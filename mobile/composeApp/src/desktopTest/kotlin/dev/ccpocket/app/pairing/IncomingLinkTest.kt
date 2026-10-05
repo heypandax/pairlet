@@ -10,7 +10,6 @@ import dev.ccpocket.protocol.inviteUriPrefix
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertTrue
 
 /**
  * The unified deep-link dispatch table (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §7).
@@ -20,10 +19,8 @@ import kotlin.test.assertTrue
  * must hold for every caller now:
  *
  *  - the HOST decides the route, before any base64 is touched;
- *  - a link that names itself `share` and then fails to decode is INVALID, never retried as something
- *    else — a truncated fragment must not be probed as a pairing URL;
- *  - a link for a RETIRED feature (`collab`, `review-contact`, `handoff`) says so whatever its payload;
- *  - a bare base64 blob is only an invite where a human explicitly pasted one.
+ *  - a link for a RETIRED feature (`collab`, `review-contact`, `handoff`, `share`) says so whatever its payload;
+ *  - a bare base64 blob is no invite anywhere any more: every feature that minted one is retired.
  */
 class IncomingLinkTest {
 
@@ -34,6 +31,7 @@ class IncomingLinkTest {
     )
     /** The same establishment material, minted for the OTHER (also retired) feature (REVIEW-REQUEST.md §13.3). */
     private val reviewContact = collab.copy(ticket = "tkt-3", purpose = CollaboratorPurpose.REVIEW)
+    /** What an older build put behind `ccpocket://share#…` (Folder Share, retired). */
     private val share = ShareInvite(
         relay = "wss://relay.test", accountId = "acct-a", daemonPub = "PUBKEY", ticket = "tkt-2", folderName = "cc-pocket",
         tier = dev.ccpocket.protocol.AccessTier.REVIEW, expiresAt = 1_800_000_000_000, ttlSec = 600,
@@ -48,15 +46,14 @@ class IncomingLinkTest {
     private val retiredCollab = IncomingLink.Retired(RetiredFeature.COLLABORATOR)
     private val retiredReview = IncomingLink.Retired(RetiredFeature.REVIEW)
     private val retiredHandoff = IncomingLink.Retired(RetiredFeature.HANDOFF)
+    private val retiredShare = IncomingLink.Retired(RetiredFeature.FOLDER_SHARE)
+
+    /** The bytes an older build published for a folder-share invite: its door + the JSON as base64url. */
+    private fun ShareInvite.legacyUri(): String =
+        "ccpocket://share#" +
+            dev.ccpocket.app.util.B64Url.encode(PocketJson.encodeToString(ShareInvite.serializer(), this).encodeToByteArray())
 
     // ── full URIs route by host ───────────────────────────────────────────────────────────────────
-
-    @Test
-    fun fullShareUriRoutesToTheGuestPreview() {
-        val link = parseIncomingLink(share.encode())
-        assertIs<IncomingLink.Share>(link)
-        assertEquals("cc-pocket", link.invite.folderName)
-    }
 
     @Test
     fun pairUriAndShortCodeStayOnTheirOldPaths() {
@@ -79,34 +76,40 @@ class IncomingLinkTest {
     // ── malformed input fails loudly, in the right lane ───────────────────────────────────────────
 
     @Test
-    fun badBase64UnderAKnownHostIsInvalid() {
-        assertEquals(IncomingLink.Unknown, parseIncomingLink("ccpocket://share#!!!not-base64!!!"))
-    }
-
-    @Test
     fun unknownHostsAndEmptyInputAreRejected() {
         assertEquals(IncomingLink.Unknown, parseIncomingLink("ccpocket://whatever?x=1"))
         assertEquals(IncomingLink.Unknown, parseIncomingLink("   "))
         assertEquals(IncomingLink.Unknown, parseIncomingLink("https://example.com/collab#abc"))
     }
 
-    // ── bare blobs: paste-only ────────────────────────────────────────────────────────────────────
-
-    @Test
-    fun bareShareBlobStillWorksAtThePasteEntry() {
-        val bare = share.encode().removePrefix(SHARE_URI_PREFIX)
-        val link = parseIncomingLink(bare, allowBareBlob = true)
-        assertIs<IncomingLink.Share>(link)
-        assertEquals("tkt-2", link.invite.ticket)
-    }
-
-    @Test
-    fun theShareCodecNeverClaimsACollaboratorBlob() {
-        // both were base64url JSON — the paste path tries share first, so this guards the ordering
-        assertTrue(decodeShareInvite(collab.legacyUri()) == null)
-    }
-
     // ── retired features: the host alone decides ─────────────────────────────────────────────────
+
+    /** Folder Share is retired: `ccpocket://share` says so whatever its fragment — a well-formed invite, none
+     *  at all, corrupt base64 — and whatever the host's case, at a deep link and at the paste entry alike.
+     *  Never "invalid link", never a pairing (the repository side is pinned in RetiredFeaturesTest). */
+    @Test
+    fun aFolderShareLinkIsRetiredWhateverItsFragment() {
+        listOf(
+            share.legacyUri(),
+            "ccpocket://share",
+            "ccpocket://share#",
+            "ccpocket://share#!!!not-base64!!!",
+            "ccpocket://Share#" + share.legacyUri().substringAfter('#'),
+            "CCPOCKET://SHARE#x",
+        ).forEach { raw ->
+            assertEquals(retiredShare, parseIncomingLink(raw), raw)
+            assertEquals(retiredShare, parseIncomingLink(raw, allowBareBlob = true), "the paste entry agrees: $raw")
+        }
+    }
+
+    /** The `#…` part of an old share link, pasted alone, is no invite any more — and, like every bare blob, it
+     *  is not guessed at from a generic deep link either. */
+    @Test
+    fun aBareShareBlobIsNoInvite() {
+        val bare = share.legacyUri().substringAfter('#')
+        assertEquals(IncomingLink.Unknown, parseIncomingLink(bare, allowBareBlob = true))
+        assertEquals(IncomingLink.Unknown, parseIncomingLink(bare, allowBareBlob = false))
+    }
 
     /** Collaborator Links are retired: `ccpocket://collab` says so whatever its fragment — a current invite,
      *  a v1.6.0 one without a `purpose` key, none at all, corrupt base64, the wrong JSON, another purpose's

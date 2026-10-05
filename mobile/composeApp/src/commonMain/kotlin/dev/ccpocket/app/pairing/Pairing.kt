@@ -25,20 +25,21 @@ data class PairingInfo(val relay: String, val accountId: String, val daemonPub: 
 
 /**
  * What a local binding's credential is (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.2.1). Purely a LOCAL
- * routing/display fact — the daemon enforces the real authority — but the app must not treat three very
- * different credentials as one "computer":
+ * routing/display fact — the daemon enforces the real authority — but the app must not treat different
+ * credentials as one "computer":
  *
  *  - [OWNER]        a computer you paired: directories, sessions, settings, the lot;
- *  - [GUEST]        a folder-share invite you redeemed (issue #115): one folder on someone else's machine;
  *  - [COLLABORATOR] a Collaborator Link — RETIRED (2026-10). The value stays only so records an older build
  *                   wrote still decode; this build never creates, loads or connects such a binding.
  *
  * Persisted as a plain STRING with a tolerant decode: records written before this field existed have no
- * `role` at all (the default applies) and a value only a NEWER build knows degrades to [OWNER] — the
- * pre-role reading — instead of failing the whole list decode and unpairing every computer.
+ * `role` at all (the default applies) and a value this build does not know degrades to [OWNER] — the
+ * pre-role reading — instead of failing the whole list decode and unpairing every computer. That covers a
+ * value only a NEWER build knows and the retired `guest` (folder share, removed 2026-10; no released build
+ * ever stored it).
  */
 @Serializable(with = BindingRoleSerializer::class)
-enum class BindingRole { OWNER, GUEST, COLLABORATOR }
+enum class BindingRole { OWNER, COLLABORATOR }
 
 private object BindingRoleSerializer : KSerializer<BindingRole> {
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("BindingRole", PrimitiveKind.STRING)
@@ -158,8 +159,8 @@ object Pairing {
      *  - `(accountId, role)` keeps "re-pairing the same computer refreshes its credential in place" true:
      *    a second OWNER redeem supersedes the first rather than leaving a dead duplicate row.
      *
-     * Together they stop the bug this rule exists for: redeeming a folder-share (GUEST) invite for a daemon
-     * you already own used to REPLACE the owner binding, downgrading the whole machine to one folder.
+     * Together they stop the bug this rule exists for: redeeming a (since retired) folder-share invite for a
+     * daemon you already own used to REPLACE the owner binding, downgrading the whole machine to one folder.
      * (Collaborator links never reached this list: an older build kept them in a separate `collab_links`
      * entry, which this build neither reads nor clears.)
      */

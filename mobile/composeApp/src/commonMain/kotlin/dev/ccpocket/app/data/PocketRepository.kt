@@ -112,16 +112,6 @@ import dev.ccpocket.protocol.ControlBridgeRunner
 import dev.ccpocket.protocol.CreateBridge
 import dev.ccpocket.protocol.ListBridges
 import dev.ccpocket.protocol.RevokeBridge
-import dev.ccpocket.protocol.CreateShare
-import dev.ccpocket.protocol.ListShares
-import dev.ccpocket.protocol.RevokeShare
-import dev.ccpocket.protocol.ShareCreated
-import dev.ccpocket.protocol.ShareEnded
-import dev.ccpocket.protocol.ShareInfo
-import dev.ccpocket.protocol.ShareInvite
-import dev.ccpocket.protocol.ShareListing
-import dev.ccpocket.protocol.ShareRevoked
-import dev.ccpocket.app.pairing.toPairingInfo
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.SlashCommand
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
@@ -819,8 +809,8 @@ class PocketRepository(
     val appLock: AppLockController by lazy { AppLockController(scope, createBiometrics()) }
 
     /** Projects the user pinned to the top, newest pin first: the pins of the computer this repository speaks for
-     *  (issue #362). An owner computer's list is owned by its daemon and shared by every paired client; a guest
-     *  binding, no binding, and the demo keep theirs on this device. Always a mirror of [pinLink]'s visible list. */
+     *  (issue #362). An owner computer's list is owned by its daemon and shared by every paired client; no
+     *  binding and the demo keep theirs on this device. Always a mirror of [pinLink]'s visible list. */
     val pinnedPaths = mutableStateListOf<String>()
 
     /** By the daemon's identity where it is known: a spelling the computer resolved to a pinned project is that pin. */
@@ -1130,14 +1120,14 @@ class PocketRepository(
     /** True when THIS connection may manage groups (issue #119): the daemon sent a groups array (owner on a
      *  group-aware daemon). Distinguishes it from the two "no groups" cases that both leave [sessionGroups]
      *  empty — a group-aware daemon with zero groups yet (show "+ New group" so the FIRST one is creatable)
-     *  vs an older daemon / a guest connection that omits groups entirely (hide the affordance). */
+     *  vs an older daemon that omits groups entirely (hide the affordance). */
     val groupsSupported = mutableStateOf(false)
     /** True when THIS connection may rename sessions (issue #158): the daemon stamped
-     *  [Sessions.renameSupported] (owner on a rename-aware daemon). False — an older daemon or a guest —
+     *  [Sessions.renameSupported] (owner on a rename-aware daemon). False — an older daemon —
      *  hides the rename entry instead of sending a frame the daemon would silently drop. */
     val renameSupported = mutableStateOf(false)
     /** True when THIS connection may archive sessions (issue #202): the daemon stamped
-     *  [Sessions.archiveSupported] (owner on an archive-aware daemon). False — an older daemon or a guest —
+     *  [Sessions.archiveSupported] (owner on an archive-aware daemon). False — an older daemon —
      *  hides every archive affordance instead of firing frames the daemon would silently drop. */
     val archiveSupported = mutableStateOf(false)
 
@@ -1317,7 +1307,7 @@ class PocketRepository(
     // 放在这里跟着会话走：查看器来回一趟原地不动，换会话则复位。
     val filesAllView = mutableStateOf(false)                 // true = 全部视角（默认 false = 变更）
     val fileTreeSubPath = mutableStateOf("")                 // 全部视角当前所在层（'/'-keyed）
-    val browseRoots = mutableStateOf<List<String>>(emptyList()) // #176: fs roots latched from the "~" home-anchor reply (owner-only; empty on old daemon / guest → root switcher hidden)
+    val browseRoots = mutableStateOf<List<String>>(emptyList()) // #176: fs roots latched from the "~" home-anchor reply (empty on an old daemon → root switcher hidden)
     private var lastBrowseAnchor: String = BROWSE_HOME       // #176: anchor of the LATEST browseDirs request — a real fs root ("/", "C:\") routes its reply by matching this
     private var lastBrowseSub: String? = null                // subPath of the LATEST browseDirs request — only its reply may land in browseListing (#152 复核: stale out-of-order replies dropped)
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
@@ -1429,7 +1419,7 @@ class PocketRepository(
     val historyLayoutToken = mutableStateOf<String?>(null)
     val latestDiagnosticId = mutableStateOf<String?>(null)
     private fun productDimensions() = demoTag() + mapOf<TelKey, Any>(
-        TelKey.UsageMode to if (demoMode.value) "demo" else if (paired.value?.role?.let { it != BindingRole.OWNER } == true) "shared" else "own",
+        TelKey.UsageMode to if (demoMode.value) "demo" else "own",
         TelKey.Backend to (sessionAgent.value ?: AgentKind.CLAUDE).name.lowercase(),
     )
     val contentLayoutToken: String? get() = if (!appIsForeground.value) null else historyLayoutToken.value ?: promptOutcomes.layoutToken(convoId.value)
@@ -1944,10 +1934,6 @@ class PocketRepository(
             val bound = redeemForTest?.let { fake -> fake(info).also { Pairing.upsert(it); Pairing.setActive(it.accountId) } }
                 ?: Pairing.redeem(info, keys, client!!)
             projectPinRegistry.refreshAfterPairingChange { Pairing.loadAll() } // #362: a replaced credential retires old pin leases now
-            // a FRESH pairing (e.g. a guest redeeming a new invite for the same daemon/accountId) supersedes
-            // any recorded "share ended" terminal state — else the new binding would open on the dead card.
-            // Removed BEFORE a switch below, which re-reads it for the target account.
-            SecureStore.remove(K_SHARE_ENDED_PREFIX + bound.accountId)
             // A pair link opened (system camera, tapped URL) while a link to ANOTHER computer is live — or while
             // the demo / a LAN-direct link holds the session. startRelay() below would no-op on that live link:
             // the title would say B while A's socket, chat and pending approvals stayed up, the fleet would then
@@ -1964,7 +1950,6 @@ class PocketRepository(
                 return
             }
             paired.value = bound
-            shareEnded.value = null
             bindProjectPins() // #362: the new binding's own pins (and, once, where the legacy list belongs)
             firstTicket = info.ticket
             Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source, TelKey.Attempt to attempt) + productDimensions())
@@ -2778,12 +2763,11 @@ class PocketRepository(
         diagnosticConnectionId = null
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         // The frozen features' cached LISTINGS of this daemon's truth (their logic is not touched here). Each is
-        // re-pulled from the next daemon when its surface opens (bridges page → ListBridges, shares page →
-        // ListShares); kept, they crossed machines. Request results, one-shot artefacts and this device's own
-        // invites/links are not listings and stay.
+        // re-pulled from the next daemon when its surface opens (bridges page → ListBridges); kept, they crossed
+        // machines. Request results, one-shot artefacts and this device's own invites/links are not listings
+        // and stay.
         bridgesDeadline?.cancel(); bridgesDeadline = null
         bridges.clear(); bridgesLoaded.value = false; bridgesUnavailable.value = false
-        shares.clear(); sharesLoaded.value = false
         // the link is down: the coordinator must stop submitting into nothing (its round parks on
         // `connected` instead of burning attempts). The per-pairing CONFIRMATION deliberately survives —
         // a reconnect is not evidence that the relay forgot the token — while a machine SWITCH retargets
@@ -2906,7 +2890,7 @@ class PocketRepository(
                 // #362: a first owner computer may be where the legacy list belongs; re-adding the ACTIVE computer
                 // leaves this binding stale, which the rebind reports instead of syncing with it
                 bindProjectPins()
-                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "code-add", TelKey.UsageMode to if (newBinding.role == BindingRole.OWNER) "own" else "shared"))
+                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "code-add", TelKey.UsageMode to "own"))
                 onDone(true)
             } catch (t: Throwable) {
                 status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
@@ -2934,7 +2918,6 @@ class PocketRepository(
         onBeforeSwitch?.invoke(target.accountId)
         disconnect()
         paired.value = target
-        shareEnded.value = loadShareEnded(target.accountId) // per-account guest ending follows the switch
         loadWorkingSet(target.accountId) // #165: and so does the switcher's memory — see [workingSetMru]
         bindProjectPins() // #362: and so do its pins — the target computer's own scope, never the outgoing list
         Pairing.setActive(target.accountId)
@@ -3195,8 +3178,7 @@ class PocketRepository(
         val remaining = Pairing.remove(target.accountId) // also re-points the active account if it was this one
         projectPinRegistry.refreshAfterPairingChange { Pairing.loadAll() } // #362: the removed binding holds no pin lease from here
         replace(pairedList, remaining)
-        SecureStore.remove(K_SHARE_ENDED_PREFIX + target.accountId) // a removed binding's guest ending goes with it
-        if (wasActive) { disconnect(); paired.value = remaining.lastOrNull(); shareEnded.value = loadShareEnded(paired.value?.accountId); bindProjectPins() }
+        if (wasActive) { disconnect(); paired.value = remaining.lastOrNull(); bindProjectPins() }
     }
 
     /** Remove the currently active binding (the "re-pair" escape hatch when a pairing goes invalid). */
@@ -3436,10 +3418,6 @@ class PocketRepository(
             is FileChunk -> if (frame.last) {
                 handle(FileUploaded(frame.convoId, frame.captureId, path = ".ccpocket/inbox/${frame.captureId}/${frame.name}", name = frame.name, size = frame.totalBytes))
             }
-            // folder-share (issue #115): loop the owner control plane back with sample data
-            is CreateShare -> handle(ShareCreated(ok = true, invite = DemoData.sampleInvite(frame.path, frame.tier, frame.expiresInSec)))
-            is ListShares -> handle(ShareListing(DemoData.shares()))
-            is RevokeShare -> handle(ShareRevoked(frame.deviceId, ok = true))
             else -> {} // CloseSession / SwitchDirectory / AudioCancel / FileUploadCancel — nothing to echo
         }
     }
@@ -3640,7 +3618,7 @@ class PocketRepository(
                     if (managedCapable()) refreshManagedList(f.workdir)
                     replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
                     groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
-                    renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
+                    renameSupported.value = f.renameSupported // #158: false from an older daemon
                     archiveSupported.value = f.archiveSupported // #202: same contract as renameSupported
                 }
                 if (f.workdir == sessionsOpening.value?.dir) clearSessionsOpening()
@@ -4445,20 +4423,10 @@ class PocketRepository(
                 }
                 f.workdir == lastBrowseAnchor -> browseListing.value = foldBrowseReply(browseListing.value, f, lastBrowseSub)
             }
-            // ── folder-share (issue #115): owner control-plane replies ──
-            is ShareCreated -> { lastShareCreated.value = f; sharesRefreshing.value = false }
-            is ShareListing -> { replace(shares, f.items); sharesLoaded.value = true; sharesRefreshing.value = false }
-            is ShareRevoked -> {
-                sharesRefreshing.value = false
-                if (f.ok) shares.removeAll { it.deviceId == f.deviceId } // optimistic; a follow-up listShares() refreshes for real
-            }
-            // guest side (#115 follow-up): the daemon's precise "your share ended" — arrives right before
-            // the cut, so the terminal card can say revoked-vs-expired instead of a bare disconnect
-            is ShareEnded -> onShareEnded(f)
             // everything else is dropped silently — including the frames of features this build retired
             // (ReviewRequest: ReviewListing, ReviewUpdated, …; Session Handoff: HandoffListing, HandoffUpdated,
-            // …; Collaborator Links: CollaboratorListing, CollaboratorUpdated, …), which an older daemon may
-            // still push
+            // …; Collaborator Links: CollaboratorListing, CollaboratorUpdated, …; Folder Share: ShareListing,
+            // ShareEnded, …), which an older daemon may still push
             else -> {}
         }
     }
@@ -5222,70 +5190,11 @@ class PocketRepository(
         armPromptWatchdog()
     }
 
-    // ── folder-share (issue #115): OWNER control plane + GUEST redeem ──
-    /** Folders I've shared out (the management page) — the latest [ShareListing]. */
-    val shares = mutableStateListOf<ShareInfo>()
-    /** True once the first [ShareListing] of this session lands — distinguishes "empty" from "still loading". */
-    val sharesLoaded = mutableStateOf(false)
-    /** A create/list/revoke round-trip is in flight (spinner + button disable). */
-    val sharesRefreshing = mutableStateOf(false)
-    /** The most recent [ShareCreated] — the invite-ready screen reads its `invite`, or its `error`. */
-    val lastShareCreated = mutableStateOf<ShareCreated?>(null)
-
-    // ── guest side (issue #115 follow-up): the precise "your share ended" notice ──
-
-    /** Set when the daemon told this GUEST its folder share ended ([ShareEnded]): the precise reason
-     *  behind the disconnect that follows, driving the "Access ended · revoked/expired" terminal instead
-     *  of the generic re-pair screen. Persisted per account (the frame can only ever precede the cut once —
-     *  a relaunch must still light the card) and cleared when the binding is removed. Never set for an
-     *  owner device: the daemon emits the frame exclusively to guest credentials. */
-    val shareEnded = mutableStateOf(loadShareEnded(paired.value?.accountId))
-
-    private fun loadShareEnded(accountId: String?): ShareEnded? {
-        val raw = accountId?.let { SecureStore.getString(K_SHARE_ENDED_PREFIX + it) } ?: return null
-        val t = raw.split('\t')
-        return ShareEnded(reason = t[0], ownerLabel = t.getOrNull(1)?.takeIf { it.isNotEmpty() })
-    }
-
-    internal fun onShareEnded(f: ShareEnded) { // internal: exercised directly by ShareRepoTest
-        shareEnded.value = f
-        paired.value?.let { SecureStore.putString(K_SHARE_ENDED_PREFIX + it.accountId, f.reason + "\t" + (f.ownerLabel ?: "")) }
-        // the credential dies with the notice — the disconnect that follows must not auto-retry (same
-        // terminal treatment as AuthError; the gate renders the ended card off shareEnded, not the generic copy)
-        pairingInvalid = true; retryJob?.cancel(); recomputePhase()
-    }
-
-    /** Owner: mint a scoped, expiring invite for [path]. Reply lands in [lastShareCreated]. */
-    fun createShare(path: String, tier: AccessTier, expiresInSec: Long, label: String? = null) {
-        useFeature(ProductFeature.FOLDER_SHARE) // the guest's join is already counted as pair_*/source=share
-        lastShareCreated.value = null; sharesRefreshing.value = true
-        scope.launch { runCatching { send(CreateShare(path, tier, expiresInSec, label)) } }
-    }
-
-    /** Owner: refresh the list of folders I've shared + who's using them (the management page). */
-    fun listShares() { sharesRefreshing.value = true; scope.launch { runCatching { send(ListShares) } } }
-
-    /** Owner: revoke a share by its guest [deviceId] — cuts the live link now, kills the credential. */
-    fun revokeShare(deviceId: String) { sharesRefreshing.value = true; scope.launch { runCatching { send(RevokeShare(deviceId)) } } }
-
-    /** Guest: redeem a scanned/pasted folder-share invite — the same relay redeem as pairing a computer,
-     *  but the daemon scopes this binding to the one shared folder (issue #115). */
-    fun redeemShareInvite(invite: ShareInvite) {
-        status.value = StatusMsg(Res.string.status_pairing)
-        scope.launch { doPair("share") { invite.toPairingInfo() } }
-    }
-
-    /** A scanned/opened `ccpocket://share#…` waiting for the guest accept-preview (§7): a deep link or a QR
-     *  must NEVER redeem on sight — the user reviews what they are joining and says yes first. */
-    val pendingShareInvite = mutableStateOf<ShareInvite?>(null)
-
     /**
-     * THE deep-link front door (§7). iOS `onOpenURL`, the Android VIEW intent, the pairing scanner and the
-     * Join Folder paste field all come through here, so the routing table lives in exactly one place and an
-     * invite QR can't be redeemed by whichever entry point happens to see it first.
+     * THE deep-link front door (§7). iOS `onOpenURL`, the Android VIEW intent and the pairing scanner all
+     * come through here, so the routing table lives in exactly one place.
      *
-     * [allowBareBlob] is the explicit-paste opt-in: a naked base64 string is only treated as an invite when
-     * a human deliberately pasted it into a field that asks for one.
+     * [allowBareBlob] marks an explicit paste; see [parseIncomingLink] (no bare blob is an invite any more).
      *
      * [fromScan] is telemetry-only origin: the camera and a tapped deep link hand over the SAME payload, so
      * only the entry point can tell them apart (issue #278). It changes no routing and no behaviour.
@@ -5295,8 +5204,6 @@ class PocketRepository(
         when (link) {
             is IncomingLink.Code -> pairWithCode(link.code, fromScan = fromScan)
             is IncomingLink.Pair -> pair(link.url, fromScan = fromScan)
-            // an invite parks in its trust screen; it never redeems here
-            is IncomingLink.Share -> pendingShareInvite.value = link.invite
             is IncomingLink.Session -> requestOpenSession(link.workdir, link.sessionId)
             // a link for a feature this build no longer has: say so and do nothing else. It is a known
             // link, not a failed pairing — so no setPairFailure and no pair_failed, unlike Unknown below.
@@ -5360,7 +5267,7 @@ class PocketRepository(
     fun managedImportAvailable(): Boolean =
         managedCapable() && daemonManagedAgents.value.any { it in dev.ccpocket.app.ui.session.IMPORTABLE_AGENTS }
 
-    /** The managed surface is owner-only: a guest or collaborator binding sends no managed frame and never waits for one. */
+    /** The managed surface is owner-only: any other binding sends no managed frame and never waits for one. */
     private fun managedCapable(): Boolean =
         daemonManagedSessions.value && daemonManagedAgents.value.isNotEmpty() && paired.value?.role == BindingRole.OWNER
 
@@ -5710,7 +5617,7 @@ class PocketRepository(
 
     // Session groups (issue #119). Every mutation targets the currently-listed project ([sessionsDir]); the
     // daemon answers each by re-pushing that dir's Sessions frame, so [sessions]/[sessionGroups] refresh
-    // themselves — no optimistic local edit. Guest connections are owner-gated at the daemon (no-op there).
+    // themselves — no optimistic local edit.
     fun createGroup(name: String, wd: String? = null) {
         val dir = wd ?: sessionsDir.value ?: return
         if (name.isBlank()) return
@@ -6805,9 +6712,7 @@ class PocketRepository(
      *  filesystem root ("/", "C:\") the daemon reported; its NIO resolve accepts '/'-keyed subPaths on
      *  Windows too. The reply lands in [browseListing] only while it answers the LATEST request — a stale
      *  reply from a drilled-past level is dropped at fold time (#152 复核), and the picker additionally
-     *  keys rendering on its own (anchor, subPath). A guest credential gets a PocketError instead
-     *  (GuestGuard denies the "~" anchor and any out-of-scope root), which the picker never sees — the
-     *  entry is owner-only client-side and the daemon stays the authority. */
+     *  keys rendering on its own (anchor, subPath). */
     fun browseDirs(anchor: String, subPath: String) {
         lastBrowseAnchor = anchor
         lastBrowseSub = subPath
@@ -7797,7 +7702,7 @@ class PocketRepository(
         private const val ERROR_INTERNAL = "internal"
 
         /** The daemon's refusals that name the refused frame by its class name: the unhandled-frame fall-through,
-         *  the control plane not being wired yet, and the bridge / guest / collaborator ingress guards. */
+         *  the control plane not being wired yet, and the restricted-credential ingress guards. */
         private val REFUSED_FRAME_PATTERNS = listOf(
             Regex("""^frame not handled by daemon: ([A-Z][A-Za-z0-9]*)$"""),
             Regex("""^the daemon isn't ready for ([A-Z][A-Za-z0-9]*)$"""),
@@ -7922,7 +7827,6 @@ class PocketRepository(
         const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
         const val K_ACCENT_THEME = "appearance_accent_theme"  // SecureStore: AccentTheme name (POCKET/CODEX; issue #204)
         const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
-        const val K_SHARE_ENDED_PREFIX = "share_ended:"        // SecureStore: "share_ended:<accountId>" → "reason\townerLabel" — the guest's ShareEnded notice (#115 follow-up)
         const val K_FILES_HIDDEN_PREFIX = "files_show_hidden:" // SecureStore: "files_show_hidden:<workdir>" → "1" = 文件浏览显示 . 开头的隐藏项
         const val FILE_TREE_LIMIT = 2_000                      // 文件浏览每层的条目上限（= daemon listPathEntries 的硬上限）
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)

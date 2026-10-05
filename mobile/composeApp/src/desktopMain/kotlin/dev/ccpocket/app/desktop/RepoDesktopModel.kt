@@ -327,11 +327,7 @@ class RepoDesktopModel(
         DkComputer(accountId = accountId, name = displayName(), os = dkOs(), online = online, meta = if (online) "online" else "")
 
     private fun DirectoryEntry.toDkProject() =
-        DkProject(
-            path = path, name = name.ifBlank { path }, running = open || busy,
-            // guest share provenance (issue #115) rides along so every project surface can render the pill
-            sharedBy = sharedBy, shareExpiresAt = shareExpiresAt,
-        )
+        DkProject(path = path, name = name.ifBlank { path }, running = open || busy)
 
     override val activeComputer: DkComputer?
         get() = repo.paired.value?.toDk(online = repo.phase.value == ConnPhase.Ready)
@@ -848,9 +844,6 @@ class RepoDesktopModel(
         if (!liveDir.isNullOrBlank() && keys.none { normCwd(it.path) == normLive }) keys.add(0, Visit(acct, liveDir))
         // sessions the user removed from RECENT via the row ✕ (issue #62) — filtered out of every group
         val hidden = hiddenState.filter { it.accountId == acct }.mapTo(HashSet()) { it.sessionId }
-        // guest share provenance (issue #115): visits carry only account+path, so the "Shared" pill's
-        // owner/expiry re-derive from the directory list (the daemon stamps a guest's shared roots there)
-        val sharedDirs = repo.directories.filter { it.sharedBy != null }.associateBy { normCwd(it.path) }
         // ── the running dot ──────────────────────────────────────────────────────────────────────
         // This layer stays even though [sessionsDerived] now corrects its own rows: only the CURRENT group
         // reads that list. Every other group renders [Visit.snapshot] — rows frozen the moment the user left
@@ -869,14 +862,11 @@ class RepoDesktopModel(
             else repo.managedAcceptedFor(v.path)?.let { a -> a.rows.map { it.toSnapshotRow(a.missing, a.ambiguous) } } ?: v.snapshot
             if (live != null) rows = rows.map { it.runningFromDaemon(live, openId, streaming) }
             if (hidden.isNotEmpty()) rows = rows.filterNot { it.sessionId in hidden }
-            val share = sharedDirs[norm]
             DkSessionGroup(
                 path = v.path,
                 name = folderName(v.path),
                 current = current,
                 sessions = rows,
-                sharedBy = share?.sharedBy,
-                shareExpiresAt = share?.shareExpiresAt,
                 // the groups come from where the rows do (#360): the listing's own, else the copy the snapshot kept
                 customGroups = if (current) listedGroups else v.groups,
             )
@@ -960,15 +950,13 @@ class RepoDesktopModel(
     override val customGroups: List<DkGroup>
         get() = repo.sessionGroups.map { DkGroup(it.id, it.name, it.order) }.sortedBy { it.order }
 
-    // owner-only AND group-aware daemon: groupsSupported is true only when the daemon sent a groups array
-    // (owner on a group-aware daemon) — so this shows "+ New group" even at zero groups (first one creatable)
-    // yet hides it on an older daemon / guest that omits groups. The sharedBy check is belt-and-suspenders
-    // (a guest already reports groups=null → groupsSupported false). Editable requires a listed current dir.
+    // group-aware daemon: groupsSupported is true only when the daemon sent a groups array (owner on a
+    // group-aware daemon) — so this shows "+ New group" even at zero groups (first one creatable) yet hides
+    // it on an older daemon that omits groups. Editable requires a listed current dir.
     override val canEditGroups: Boolean
         get() {
             if (!repo.groupsSupported.value) return false
-            val dir = repo.sessionsDir.value ?: return false
-            return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
+            return repo.sessionsDir.value != null
         }
 
     override fun createGroup(name: String) { repo.createGroup(name) }
@@ -976,13 +964,12 @@ class RepoDesktopModel(
     override fun deleteGroup(groupId: String) { repo.deleteGroup(groupId) }
     override fun assignGroup(sessionId: String, groupId: String?) { repo.assignGroup(sessionId, groupId) }
 
-    // session rename (issue #158) — same gating shape as canEditGroups: the daemon's capability stamp,
-    // plus the belt-and-suspenders guest check (a guest's Sessions already comes stamped false)
+    // session rename (issue #158) — same gating shape as canEditGroups: the daemon's capability stamp and
+    // a listed current dir
     override val canRenameSessions: Boolean
         get() {
             if (!repo.renameSupported.value) return false
-            val dir = repo.sessionsDir.value ?: return false
-            return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
+            return repo.sessionsDir.value != null
         }
     override fun renameSession(sessionId: String, title: String, wd: String?) {
         // acting on another project's row makes that project the listed one FIRST (the navigation
@@ -1774,12 +1761,11 @@ class RepoDesktopModel(
             )
         }
 
-    /** Mirrors [canRenameSessions]: the daemon's capability stamp AND not a guest's shared directory. */
+    /** Mirrors [canRenameSessions]: the daemon's capability stamp and a listed current dir. */
     override val canArchiveSessions: Boolean
         get() {
             if (!repo.archiveSupported.value) return false
-            val dir = repo.sessionsDir.value ?: return false
-            return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
+            return repo.sessionsDir.value != null
         }
 
     override fun archiveSession(s: DkSession) {
@@ -1860,19 +1846,6 @@ class RepoDesktopModel(
     private fun paired(c: DkComputer) = repo.pairedList.firstOrNull { it.accountId == c.accountId }
     override fun renameComputer(c: DkComputer, label: String?) { paired(c)?.let { repo.renameDaemon(it, label) } }
     override fun removeComputer(c: DkComputer) { paired(c)?.let { repo.unpair(it) } }
-
-    // ── folder-share (issue #115) ──
-    override val shares get() = repo.shares.toList()
-    override val sharesLoaded get() = repo.sharesLoaded.value
-    override val lastShareInvite get() = repo.lastShareCreated.value?.takeUnless { it.ok == false }?.invite
-    override fun refreshShares() { repo.listShares() }
-    override fun createShare(path: String, tier: dev.ccpocket.protocol.AccessTier, expiresInSec: Long) { repo.createShare(path, tier, expiresInSec) }
-    override fun revokeShare(deviceId: String) { repo.revokeShare(deviceId) }
-    override fun clearLastShare() { repo.lastShareCreated.value = null }
-    override fun redeemShareInvite(blob: String): Boolean {
-        val inv = dev.ccpocket.app.pairing.decodeShareInvite(dev.ccpocket.app.pairing.canonicalLinkScheme(blob)) ?: return false
-        repo.redeemShareInvite(inv); return true
-    }
 
     private companion object {
         const val K_PINS = "desktop_pins"

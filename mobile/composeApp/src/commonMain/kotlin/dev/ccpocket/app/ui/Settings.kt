@@ -83,8 +83,6 @@ import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.voice.NativeDictation
 import dev.ccpocket.app.ui.session.Hairline
-import dev.ccpocket.app.ui.share.JoinFolderScreen
-import dev.ccpocket.app.ui.share.SharedFoldersScreen
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.AgentKind
@@ -167,11 +165,6 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     // scheduled tasks (issue #137): list + cancel, full-screen like usage
     var showSchedules by remember { mutableStateOf(false) }
     if (showSchedules) { ScheduleScreen(repo, onBack = { showSchedules = false }); return }
-    // folder-share (issue #115): owner management + guest redeem, each full-screen like usage
-    var showShares by remember { mutableStateOf(false) }
-    if (showShares) { SharedFoldersScreen(repo, onBack = { showShares = false }); return }
-    var showJoin by remember { mutableStateOf(false) }
-    if (showJoin) { JoinFolderScreen(repo, onBack = { showJoin = false }, onJoined = { showJoin = false; onBack() }); return }
     // headless bridges (issue #91 follow-up): monitor + revoke the IM bots driving this machine
     var showBridges by remember { mutableStateOf(false) }
     if (showBridges) { dev.ccpocket.app.ui.bridge.BridgesScreen(repo, onBack = { showBridges = false }); return }
@@ -207,8 +200,6 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     // switching and pairing both tear this screen down, so they leave Settings first
                     onSwitch = { target -> onBack(); repo.switchDaemon(target) },
                     onAdd = { onBack(); repo.beginAddDevice() },
-                    onShares = { showShares = true },
-                    onJoin = { showJoin = true },
                     onBridges = { showBridges = true },
                 )
 
@@ -684,18 +675,12 @@ private fun ConnectionsPage(
     repo: PocketRepository,
     onSwitch: (dev.ccpocket.app.pairing.PairedDaemon) -> Unit,
     onAdd: () -> Unit,
-    onShares: () -> Unit,
-    onJoin: () -> Unit,
     onBridges: () -> Unit,
 ) {
     SectionLabel(stringResource(Res.string.settings_paired_computers))
     DeviceList(repo = repo, onSwitch = onSwitch, onAdd = onAdd)
 
     SectionLabel(stringResource(Res.string.settings_sharing_section))
-    Hairline()
-    FirstHopRow(stringResource(Res.string.settings_shared_folders), onClick = onShares)
-    Hairline()
-    FirstHopRow(stringResource(Res.string.join_title), onClick = onJoin)
     Hairline()
     FirstHopRow(stringResource(Res.string.settings_bridges), onClick = onBridges)
     Hairline()

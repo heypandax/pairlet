@@ -25,7 +25,6 @@ import dev.ccpocket.protocol.ScheduleInfo
 import dev.ccpocket.protocol.ScheduleState
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.SessionSummary
-import dev.ccpocket.protocol.ShareListing
 import dev.ccpocket.protocol.SkillCatalog
 import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.Usage
@@ -247,7 +246,7 @@ class ResetInventoryTest {
         r.receiveForTest(ArchivedSessions(listOf(SessionSummary("old-a", "t", "p", 1, "/inv/w", 0))))
         r.receiveForTest(PathEntries(workdir = PocketRepository.BROWSE_HOME, subPath = "", roots = listOf("C:\\")))
         // the frozen / per-daemon features: contents don't matter, only that the repository took them in
-        listOf(BridgeListing::class.java, ShareListing::class.java,
+        listOf(BridgeListing::class.java,
             AuthState::class.java, PresetsState::class.java, SkillCatalog::class.java, ApprovalPrefs::class.java)
             .forEach { r.receiveForTest(assertNotNull(Arbitrary.of(it) as? dev.ccpocket.protocol.Frame, "build ${it.simpleName}")) }
         r.receiveForTest(PushPrefs(enabled = false))
@@ -362,10 +361,8 @@ class ResetInventoryTest {
         // GAP-* = 疑似缺陷，待单独决定 — the cells marked K are the "should probably clear but doesn't" points of the
         // proposal's §4.4, confirmed by this run. Do NOT fix them here; a fix is its own commit and edits these rows.
         //   GAP-桥接   DSC/SWC keep the bridge request state (busy/error/credential/merge check) — frozen feature
-        //   GAP-共享   DSC/SWC keep share request state + the pending invite (shareEnded: DSC only — the cold switch
-        //              reloads it per account) — frozen feature
         //   GAP-会话视图 DSC/SWC keep allow rules (DEM clears them) — verified harmless, deliberately untouched
-        //   FIX-桥接 / FIX-共享: DSC/SWC drop only the frozen features' cached LISTINGS (+ their loaded flags /
+        //   FIX-桥接: DSC/SWC drop only the frozen features' cached LISTINGS (+ their loaded flags /
         //              list deadline), which each surface re-pulls from the next daemon on open
         // FIX-* = a former GAP that disconnect() now clears (the cold switch inherits it); OK-* = a former GAP judged
         // harmless after reading every reader, kept on purpose:
@@ -720,12 +717,6 @@ class ResetInventoryTest {
             limitConfirmed               R R K R K K K K  # OK-降级
             repairOffer                  R R K R K K K K  # OK-降级
             repairProgress               R R K R K K K K  # OK-降级
-            shares                       R R K K K K K K  # FIX-共享
-            sharesLoaded                 R R K K K K K K  # FIX-共享
-            sharesRefreshing             K K K K K K K K  # GAP-共享
-            lastShareCreated             K K K K K K K K  # GAP-共享
-            shareEnded                   K R K K K K K K  # GAP-共享（只在 DSC；冷换机按目标账户重载）
-            pendingShareInvite           K K K K K K K K  # GAP-共享
             sessionsOpening              R R R K K K K R
             sessionsOpeningJob           R R R K K K K R
             managedFailed                R R K K K K K K

@@ -101,7 +101,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.SUPPORT_URL
-import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.dir_refresh
@@ -143,7 +142,6 @@ import dev.ccpocket.app.resources.status_reconnecting
 import dev.ccpocket.app.resources.switcher_all_projects
 import dev.ccpocket.app.resources.switcher_recent
 import dev.ccpocket.app.resources.new_session_here
-import dev.ccpocket.app.resources.shared_badge
 import dev.ccpocket.app.resources.pin_project
 import dev.ccpocket.app.resources.recent_forget_project
 import dev.ccpocket.app.resources.this_machine
@@ -166,9 +164,6 @@ import dev.ccpocket.app.ui.fleet.AttentionBadge
 import dev.ccpocket.app.ui.modelAlias
 import dev.ccpocket.app.ui.sameDirPath
 import dev.ccpocket.app.ui.tilde
-import dev.ccpocket.app.ui.share.SharedPill
-import dev.ccpocket.app.ui.share.expiryLeft
-import dev.ccpocket.app.ui.share.expiryLeftText
 import dev.ccpocket.protocol.AgentKind
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.filterNotNull
@@ -618,7 +613,6 @@ private fun RunningRow(r: DkRunningRow, onBrowse: () -> Unit, onClick: () -> Uni
             p.name, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, style = tightCenter(10.sp),
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 72.dp),
         )
-        if (p.sharedBy != null) SharedPill() // a guest's shared folder (issue #115) — provenance at a glance
         if (hovered) Text(
             "≡", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, style = tightCenter(13.sp),
             modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClick = onBrowse).padding(horizontal = 3.dp),
@@ -846,8 +840,8 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                             onNewSession = { model.openNewSession(tilde(g.path)) },
                             onForget = { model.forgetProject(g) },
                             onToggle = { model.setProjectCollapsed(g.path, !row.closed) },
-                            // #360: a guest's shared folder has no owner verbs; the path is this header's own
-                            canImport = model.canImportManagedSessions && g.sharedBy == null,
+                            // #360: the path is this header's own
+                            canImport = model.canImportManagedSessions,
                             onImport = { model.openManagedImport(g.path) },
                         )
                     }
@@ -1069,7 +1063,7 @@ private fun recentRows(
         // issue #119: the daemon lists groups per dir. The live-listed project's come from the model, whose
         // group verbs all act on that listing; any other project renders the copy its RECENT snapshot kept
         // (#360) — the same sections in the same order, READ-ONLY, since a verb issued there would land on
-        // the listed project. No groups (an older daemon, a guest, none made yet) renders FLAT.
+        // the listed project. No groups (an older daemon, none made yet) renders FLAT.
         // #282: the rewound originals leave the visible list before anything else groups it,
         // so the fold holds across custom groups and the flat fallback alike.
         val shown = visibleSessions(g.sessions)
@@ -1082,18 +1076,15 @@ private fun recentRows(
         // right-click "Rename session" (issue #158) — EVERY group's rows now: the row hands its
         // own dir to the rename, so the frame resolves against the right project wherever the
         // listing points (the old current-only gate existed because the UI defaulted the dir).
-        // A guest's shared project stays out — its rename would be refused daemon-side anyway.
-        val renameable = model.canRenameSessions && g.sharedBy == null
+        val renameable = model.canRenameSessions
         // Archive too (#202's gate lifted): the verb always carried the row's own cwd, and its
         // Sessions(thatProject) echo repointing the listing now MATCHES the convention that the
         // listed project follows wherever the user acts, instead of contradicting it.
-        // guest-shared rows keep archive off too (same asymmetry rename already closed): a
-        // guest's SetSessionArchived is a silent daemon-side no-op with no error surface.
-        val canArchive = model.canArchiveSessions && g.sharedBy == null
+        val canArchive = model.canArchiveSessions
         // "+ New group" sits at the TOP of the project's sessions (matches mobile) — a bottom
         // entry forces scrolling past a long session list to create a group. Current + group-aware
         // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group
-        // from a still-flat list; an older daemon / guest / RECENT snapshot shows nothing.
+        // from a still-flat list; an older daemon / RECENT snapshot shows nothing.
         if (editable) add(RecentRow.NewGroup(g.path))
         if (custom.isEmpty()) {
             if (shown.isEmpty()) add(RecentRow.Empty(g.path))
@@ -1237,11 +1228,6 @@ private fun GroupHeader(
  * - One glyph size (12dp), one 1.5 stroke, one rest color; the ＋ is the row's only terracotta.
  * - "Open now" is no longer a pill: the name lifts to primary/medium and a muted mono label follows it,
  *   giving way (ellipsis) before the name drops under 60dp.
- *
- * Deliberate departure from the board: a guest's shared folder keeps its pin and refresh slots (the board
- * assumed neither applies to another user's folder, but both work there today). At rest those two slots step
- * out of the layout so the "Shared · who · time left" trail has room; hovering brings them back and the trail
- * ellipsizes, while the ＋ keeps its place.
  */
 @Composable
 private fun GroupHeaderBody(
@@ -1279,7 +1265,7 @@ private fun GroupHeaderBody(
                     maxLines = 1, overflow = TextOverflow.Ellipsis, style = tightCenter(11.5.sp),
                 )
             },
-            trail = if (!current && !running && g.sharedBy == null) null else ({
+            trail = if (!current && !running) null else ({
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     // #211: the currently-listed dir is always present (it re-enters as the synthetic live group
                     // even after "clear"); this quiet label names it as the open directory, not a leftover entry
@@ -1290,21 +1276,6 @@ private fun GroupHeaderBody(
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     if (running) PulseDot(Tok.ok, 5.dp)
-                    if (g.sharedBy != null) {
-                        // a guest's shared folder (issue #115): a neutral hairline tag — provenance, not
-                        // attention — plus "who · how long"
-                        Text(
-                            stringResource(Res.string.shared_badge), color = Tok.tx2, fontFamily = Dk.mono,
-                            fontSize = 9.sp, fontWeight = FontWeight.Medium, maxLines = 1, style = tightCenter(9.sp),
-                            modifier = Modifier.border(1.dp, Tok.hair, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp),
-                        )
-                        val left = g.shareExpiresAt?.let { expiryLeftText(expiryLeft(it, epochMillis())) }
-                        Text(
-                            listOfNotNull(g.sharedBy, left).joinToString(" · "),
-                            color = Tok.muted, fontFamily = Dk.mono, fontSize = 9.5.sp, style = tightCenter(9.5.sp),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
-                        )
-                    }
                 }
             }),
             trailGap = if (current) 7.dp else 8.dp,
@@ -1312,11 +1283,8 @@ private fun GroupHeaderBody(
         )
         Spacer(Modifier.width(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-            // A shared folder's "who · time left" needs the room the two hidden slots hold, so on that row a hidden
-            // slot leaves the layout instead of fading in place. Only the name side reflows; the ＋ stays put.
-            val shared = g.sharedBy != null
             val pinLabel = stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project)
-            if (!shared || hovered || pinned) RowActionSlot(
+            RowActionSlot(
                 label = pinLabel, visible = hovered || pinned, onClick = onTogglePin,
             ) { slotHovered ->
                 when {
@@ -1326,7 +1294,7 @@ private fun GroupHeaderBody(
                 }
             }
             val refreshLabel = stringResource(Res.string.dir_refresh)
-            if (!shared || hovered || refreshing) RowActionSlot(
+            RowActionSlot(
                 label = refreshLabel, visible = hovered || refreshing,
                 // a click while the list is already on its way would only queue a second round trip
                 onClick = { if (!refreshing) onRefresh() },
@@ -1354,7 +1322,7 @@ private fun GroupHeaderBody(
 }
 
 /**
- * The project name and what trails it ("open now", the running dot, the shared tag). When both do not fit they
+ * The project name and what trails it ("open now", the running dot). When both do not fit they
  * shrink the way the board's flexbox does: in proportion to their widths, the trail [TRAIL_SHRINK] times as
  * fast, and the name never below [NAME_MIN] (or its full width if shorter). Fills the width it is given, so it
  * also serves as the row's spacer.
@@ -1846,7 +1814,7 @@ private fun SessionRowContent(
                         add(PocketMenuItem(grp.name, mutedPrefix = "$moveTo ·") { model.assignGroup(s.sessionId, grp.id) })
                     }
                     // "out" only beside "to": [menuGroups] is empty wherever this row's groups aren't the listing's to
-                    // edit — another project's RECENT copy (#360), a guest, an older daemon — and moving out is a verb
+                    // edit — another project's RECENT copy (#360), an older daemon — and moving out is a verb
                     // on that same listing
                     if (s.group != null && menuGroups.isNotEmpty()) add(PocketMenuItem(moveOut) { model.assignGroup(s.sessionId, null) })
                 },
