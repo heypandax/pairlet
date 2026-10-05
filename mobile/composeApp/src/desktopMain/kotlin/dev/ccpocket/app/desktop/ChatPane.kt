@@ -361,6 +361,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         // must not yank focus back with its land-ready requestFocus loop, or the box goes unresponsive (#76).
         // Reset per question so a fresh ask doesn't inherit the last card's ownership.
         var questionOwnsInput by remember(model.ask?.askId) { mutableStateOf(false) }
+        // this pane's place for an ask card (permission or question — they replace each other in the tail), for
+        // the double-tap guard; a split column has its own, so a card in one never times another's
+        val askSurface = remember { newChatAskSurface() }
         ChatSubHeader(model, onTerminalMenu = { termMenuFrom = TermMenuAnchor.HEADER })
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             // the QuestionCard docks inside the LazyColumn's unbounded tail item — hand it a bound from the
@@ -521,6 +524,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                             onAnswer = { answers, response -> if (model.isStillAsking(ask)) model.answerQuestions(answers, response) },
                                             onSkip = { if (model.isStillAsking(ask)) model.skipQuestions("User skipped the questions") },
                                             onOwnsInput = { questionOwnsInput = it },
+                                            arrivalSurface = askSurface,
                                         )
                                     }
                                 }
@@ -572,6 +576,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     risk = model.askRisk,
                                     onAllowTask = { if (model.isStillAsking(ask)) model.resolveTaskGrant() },
                                     onRetrySafer = { if (model.isStillAsking(ask)) model.retrySafer(it) },
+                                    arrivalSurface = askSurface,
                                 )
                             } else if (model.turnStalled) {
                                 // delivered but the agent started no turn within the deadline (issue #104) —

@@ -40,6 +40,7 @@ import dev.ccpocket.app.resources.attention_stats
 import dev.ccpocket.app.resources.deny
 import dev.ccpocket.app.resources.tray_needs_you
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.approval.rememberApprovalArmed
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -87,9 +88,11 @@ fun AttentionPopover(model: DesktopModel) {
             )
         } else {
             Column(Modifier.padding(horizontal = 6.dp, vertical = 8.dp)) {
-                model.attention.forEach { a ->
+                model.attention.forEachIndexed { i, a ->
                     AttentionRow(
                         a,
+                        // deciding a row slides the next one into its place: guarded per row slot
+                        armed = rememberApprovalArmed("bell:$i", a.arrivalKey()),
                         onDeny = { model.resolveAttention(a, allow = false) },
                         onAllow = { model.resolveAttention(a, allow = true) },
                         onOpen = {
@@ -111,7 +114,7 @@ fun AttentionPopover(model: DesktopModel) {
 
 /** One approval: MachineChip · tool · countdown, mono preview, cursor-sized Deny/Allow; hover reveals open. */
 @Composable
-private fun AttentionRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Unit, onOpen: () -> Unit) {
+private fun AttentionRow(a: DkAttention, armed: Boolean, onDeny: () -> Unit, onAllow: () -> Unit, onOpen: () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     Column(
@@ -145,17 +148,20 @@ private fun AttentionRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Unit
         ) {
             if (hovered) Text(stringResource(Res.string.attention_open_session), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.5.sp, style = tightCenter(10.5.sp))
             Spacer(Modifier.weight(1f))
+            // guard window: the desktop's existing disabled look — outline → muted ink on a hairline; fill → surface +
+            // muted, with SettingsModal's hairline so it still reads as a button on a hovered (surface) row
             Text(
-                stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                stringResource(Res.string.deny), color = if (armed) Tok.danger else Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 style = tightCenter(11.sp),
-                modifier = Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.danger.copy(alpha = 0.33f), RoundedCornerShape(7.dp))
-                    .clickable(onClick = onDeny).padding(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, if (armed) Tok.danger.copy(alpha = 0.33f) else Tok.hair, RoundedCornerShape(7.dp))
+                    .clickable(enabled = armed) { if (armed) onDeny() }.padding(horizontal = 12.dp, vertical = 4.dp),
             )
             Text(
-                stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                stringResource(Res.string.allow), color = if (armed) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Bold,
                 style = tightCenter(11.sp),
-                modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.accent)
-                    .clickable(onClick = onAllow).padding(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(if (armed) Tok.accent else Tok.surface)
+                    .then(if (armed) Modifier else Modifier.border(1.dp, Tok.hair, RoundedCornerShape(7.dp)))
+                    .clickable(enabled = armed) { if (armed) onAllow() }.padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
     }

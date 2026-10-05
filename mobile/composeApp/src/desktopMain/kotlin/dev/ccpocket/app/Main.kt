@@ -226,6 +226,10 @@ private fun ApplicationScope.PocketShell() {
     }
     val repo = fleet.primary
     val model = remember { RepoDesktopModel(fleet.primary, scope, fleet) }
+    // the double-tap guard on every approval control: one per app, fed with the fleet's arrival times (it follows
+    // a hot-promoted primary), shared by the main window and the menu-bar window
+    val approvalGuard = remember { dev.ccpocket.app.ui.approval.ApprovalArrivalGuard() }
+    dev.ccpocket.app.ui.approval.ObserveApprovalArrivals(approvalGuard, repo)
     LaunchedEffect(Unit) {
         dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.AppLaunch)
         if (repo.paired.value != null) repo.startRelay() // paired → connect straight away
@@ -305,13 +309,18 @@ private fun ApplicationScope.PocketShell() {
     // application scope, so they outlast minimize/unfocus — the whole point of the environment layer.
     // Composed to nothing where the platform has no tray (headless / some Linux desktops).
     if (model.menuBarEnabled && traySupported) {
-        dev.ccpocket.app.desktop.MenuBarExtra(
-            model = model,
-            onActivateWindow = activateMainWindow,
-            // #189 changes Windows only. macOS/Linux keep their existing menu-bar shape and close semantics.
-            onExitApplication = if (windows) ::exitApplication else null,
-            onAvailabilityChanged = { trayReady = it },
-        )
+        // the menu-bar window composes under this one, so the shared double-tap guard reaches its rows too
+        androidx.compose.runtime.CompositionLocalProvider(
+            dev.ccpocket.app.ui.approval.LocalApprovalArrivalGuard provides approvalGuard,
+        ) {
+            dev.ccpocket.app.desktop.MenuBarExtra(
+                model = model,
+                onActivateWindow = activateMainWindow,
+                // #189 changes Windows only. macOS/Linux keep their existing menu-bar shape and close semantics.
+                onExitApplication = if (windows) ::exitApplication else null,
+                onAvailabilityChanged = { trayReady = it },
+            )
+        }
     }
 
     Window(
@@ -650,6 +659,7 @@ private fun ApplicationScope.PocketShell() {
                 // one menu for the whole shell (design "Context Menu v1"): the sidebar's session menus and
                 // every text field's cut/copy/paste stop rendering the stock Swing-grey dropdown
                 androidx.compose.foundation.LocalContextMenuRepresentation provides dev.ccpocket.app.desktop.PocketContextMenuRepresentation,
+                dev.ccpocket.app.ui.approval.LocalApprovalArrivalGuard provides approvalGuard,
             ) {
             Column(Modifier.fillMaxSize().background(Tok.base)) {
                 dev.ccpocket.app.ui.BrandNotice(brandTransition)
