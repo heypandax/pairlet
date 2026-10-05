@@ -83,7 +83,6 @@ class DesktopScreenshotTest {
         shot("03-attention-popover.png", W, H) { WindowFrame(seed { showAttention = true }) }
         shot("04-new-session.png", W, H) { WindowFrame(seed { showNewSession = true }) }
         shot("05-tray-quick-approve.png", W, H) { WindowFrame(seed { showTray = true }) }
-        shot("06-focused-permission.png", W, H) { WindowFrame(seed { selectSession(sessions[2]); showPermissionModal = true }) }
         shot("07-command-palette.png", W, H) { WindowFrame(seed { palette = PaletteScope.ALL }) }
         shot("08-settings.png", W, H) { WindowFrame(seed { showSettings = true }) }
         shot("09-help-learning-mobile.png", 390, 844) {
@@ -106,7 +105,7 @@ class DesktopScreenshotTest {
         val shots = outDir.listFiles { f -> f.name.endsWith(".png") }?.sortedBy { it.name }.orEmpty()
         println("[screenshots] wrote ${shots.size} files to ${outDir.absolutePath}")
         shots.forEach { println("[screenshots]   ${it.name}  ${it.length() / 1024}KB") }
-        assertTrue(shots.size >= 13, "expected at least 13 screenshots")
+        assertTrue(shots.size >= 12, "expected at least 12 screenshots")
     }
 }
 

@@ -55,7 +55,6 @@ import kotlin.math.roundToInt
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.dir_picker_choose_here
 import dev.ccpocket.app.resources.dir_picker_remote_title
-import dev.ccpocket.app.resources.your_computer
 import dev.ccpocket.app.data.paneIndexForSlot
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.app.secure.SecureStore
@@ -389,19 +388,6 @@ fun DesktopApp(
             // fresh invite → the QR/short-code card; also closes the draft dialog (state flips it)
             Overlay(onDismiss = { model.dismissHandoffInvite() }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
                 HandoffInviteModal(model) { model.dismissHandoffInvite() }
-            }
-        }
-        if (model.showPermissionModal) {
-            // the focused modal is for permission gates only; an AskUserQuestion docks inline in ChatPane (#57)
-            model.ask?.takeIf { !it.isQuestion }?.let { ask ->
-                FocusedModal(
-                    computer = model.activeComputer?.name ?: stringResource(Res.string.your_computer),
-                    ask = ask, agent = model.chatAgent, workdir = model.chatWorkdir, branch = model.chatBranch,
-                    // bound to the ask this modal shows (audit M4): a stale click decides nothing
-                    onAllow = { rem -> if (model.isStillAsking(ask)) model.resolve(allow = true, remember = rem) },
-                    onDeny = { if (model.isStillAsking(ask)) model.resolve(allow = false, remember = false) },
-                    onDismiss = { if (model.isStillAsking(ask)) model.dismissAsk() },
-                )
             }
         }
     }

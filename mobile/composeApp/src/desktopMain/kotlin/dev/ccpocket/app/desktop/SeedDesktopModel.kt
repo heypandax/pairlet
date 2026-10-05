@@ -203,7 +203,6 @@ open class SeedDesktopModel : DesktopModel {
     override var palette by mutableStateOf<PaletteScope?>(null)
     override var showSettings by mutableStateOf(false)
     override var showAddComputer by mutableStateOf(false)
-    override var showPermissionModal by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
     override var showHandoff by mutableStateOf(false)
@@ -429,6 +428,6 @@ open class SeedDesktopModel : DesktopModel {
     override fun attachImages(raw: List<ByteArray>) {}
     override fun removePendingImage(id: Long) {}
     override fun hasReadyImages(): Boolean = false
-    override fun resolve(allow: Boolean, remember: Boolean) { askResolved = true; showPermissionModal = false }
-    override fun dismissAsk() { askResolved = true; showPermissionModal = false }
+    override fun resolve(allow: Boolean, remember: Boolean) { askResolved = true }
+    override fun dismissAsk() { askResolved = true }
 }

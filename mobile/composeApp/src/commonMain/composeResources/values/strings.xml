@@ -996,7 +996,6 @@
     <string name="presence_offline">offline</string>
     <string name="this_machine">this Mac</string>
     <string name="this_computer">this computer</string>
-    <string name="your_computer">your computer</string>
     <string name="menu_more">· more…</string>
 
     <!-- settings: tabs -->
@@ -1193,7 +1192,6 @@
     <string name="agent_wants_edit">%1$s wants to edit files</string>
     <string name="perm_remember_session">Remember for this session</string>
     <string name="auto_denied_no_response">Auto-denied (no response)</string>
-    <string name="perm_on_computer">on %1$s</string>
 
     <!-- sidebar -->
     <string name="sidebar_no_computer">No computer</string>

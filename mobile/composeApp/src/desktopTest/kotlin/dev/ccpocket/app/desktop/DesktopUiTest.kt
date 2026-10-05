@@ -793,27 +793,13 @@ class DesktopUiTest {
     }
 
     @Test
-    fun focusedModalNamesComputer() = runComposeUiTest {
-        val ask = PermissionAsk(convoId = "c", askId = "a", tool = "Bash", inputPreview = "rm -rf ./build", title = "Run command")
-        setContent {
-            PocketTheme {
-                FocusedModal("devbox-linux", ask, AgentKind.CLAUDE, "~/code/cc-pocket", "main", onAllow = {}, onDeny = {}, onDismiss = {})
-            }
-        }
-        assertPresent(str(Res.string.agent_needs_permission, "Claude"))
-        assertPresent("devbox-linux", substring = true)
-        assertPresent(str(Res.string.allow))
-        assertPresent(str(Res.string.deny))
-    }
-
-    @Test
     fun rememberCheckboxTogglesAndRidesAllow() = runComposeUiTest {
         // regression: the checkbox used to be a dead decoration — unclickable, remember always false
         val ask = PermissionAsk(convoId = "c", askId = "a", tool = "Bash", inputPreview = "npm test", title = "Run command", rule = "Bash(npm test:*)")
         var allowedRemember: Boolean? = null
         setContent {
             PocketTheme {
-                FocusedModal("devbox-linux", ask, AgentKind.CLAUDE, "~/code", null, onAllow = { allowedRemember = it }, onDeny = {}, onDismiss = {})
+                InlinePermCard(ask, AgentKind.CLAUDE, "~/code", null, onAllow = { allowedRemember = it }, onDeny = {})
             }
         }
         assertPresent(str(Res.string.perm_remember_session))
@@ -830,7 +816,7 @@ class DesktopUiTest {
         val ask = PermissionAsk(convoId = "c", askId = "a", tool = "ExitPlanMode", inputPreview = "plan", title = "Approve plan", rule = "Plan(x)")
         setContent {
             PocketTheme {
-                FocusedModal("devbox-linux", ask, AgentKind.CLAUDE, "~/code", null, onAllow = {}, onDeny = {}, onDismiss = {})
+                InlinePermCard(ask, AgentKind.CLAUDE, "~/code", null, onAllow = {}, onDeny = {})
             }
         }
         assertTrue(!present(str(Res.string.perm_remember_session)), "plan approvals must not offer remember")

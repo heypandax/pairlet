@@ -275,7 +275,6 @@ interface DesktopModel {
     var palette: PaletteScope? // ⌘K command palette; null = closed — the scope can't outlive the open
     var showSettings: Boolean
     var showAddComputer: Boolean // pair a new computer in a modal without dropping the live session
-    var showPermissionModal: Boolean // seed/demo only; the live model surfaces [ask] inline instead
     var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
     var showQuickActions: Boolean // chat-header ⋯ popover: effort/mode + compact/clear (mirrors mobile's sheet)
     var showModelPopover: Boolean // the composer chip's anchored model popover (issue #157) — the ⋯ Model row shortcuts here too
@@ -1087,7 +1086,7 @@ interface DesktopModel {
      *  re-fetch needed. Default no-op keeps seed/preview models inert. */
     fun openWorkspaceFile(path: String) {}
 
-    // permission (live: inline card in the stream; seed: also drives the focused modal)
+    // permission (surfaced as the inline card in the stream)
     val ask: PermissionAsk?
     /** The current [ask] is the one the daemon reported TIMED_OUT (issue #100): the inline card flips to its
      *  terminal "auto-denied" state (greyed + danger note + Dismiss) instead of staying actionable, and a late

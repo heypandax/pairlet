@@ -993,7 +993,6 @@
     <string name="presence_offline">离线</string>
     <string name="this_machine">本机</string>
     <string name="this_computer">这台电脑</string>
-    <string name="your_computer">你的电脑</string>
     <string name="menu_more">· 更多…</string>
 
     <!-- 设置：标签页 -->
@@ -1190,7 +1189,6 @@
     <string name="agent_wants_edit">%1$s 想要编辑文件</string>
     <string name="perm_remember_session">本会话内记住</string>
     <string name="auto_denied_no_response">已自动拒绝（无响应）</string>
-    <string name="perm_on_computer">在 %1$s 上</string>
 
     <!-- 侧栏 -->
     <string name="sidebar_no_computer">未连接电脑</string>

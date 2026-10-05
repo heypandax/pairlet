@@ -132,7 +132,7 @@ class SidePaneModelDelegationGuardTest {
         "renameComputer", "removeComputer", "activeIsThisMachine",
         // window-level overlay flags
         "switcherOpen", "showNewSession", "showTray", "palette", "showSettings", "showAddComputer",
-        "showPermissionModal", "showAttention", "showWorktrees", "showSkills", "showHandoff",
+        "showAttention", "showWorktrees", "showSkills", "showHandoff",
         "showReviewCenter", "showFolderPicker", "showQuotaPopover",
         "anyOverlayOpen", "dismissOverlays",
         // session handoff + collaborator links (raised from window chrome; the pane's banner is inert)
