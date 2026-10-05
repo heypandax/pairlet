@@ -27,7 +27,6 @@ import dev.ccpocket.app.resources.about_section
 import dev.ccpocket.app.resources.action_back
 import dev.ccpocket.app.resources.af_show_from
 import dev.ccpocket.app.resources.appearance_section
-import dev.ccpocket.app.resources.co_screen_title
 import dev.ccpocket.app.resources.context_window_section
 import dev.ccpocket.app.resources.default_mode_section
 import dev.ccpocket.app.resources.default_model_section
@@ -279,7 +278,6 @@ class SettingsIaTest {
             assertPresent(str(Res.string.settings_paired_computers))
             assertPresent(str(Res.string.settings_shared_folders))
             assertPresent(str(Res.string.join_title))       // the row most at risk of being dropped
-            assertPresent(str(Res.string.co_screen_title))
             assertPresent(str(Res.string.settings_bridges))
         }
         openCategory(str(Res.string.settings_cat_security)) {

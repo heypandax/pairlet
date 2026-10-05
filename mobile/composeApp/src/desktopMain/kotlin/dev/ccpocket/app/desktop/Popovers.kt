@@ -56,7 +56,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import dev.ccpocket.app.resources.Res
-import dev.ccpocket.app.resources.ho_menu_row
 import dev.ccpocket.app.resources.label_agent
 import dev.ccpocket.app.resources.label_effort
 import dev.ccpocket.app.resources.label_mode
@@ -114,7 +113,6 @@ import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentName
 import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.app.ui.agentTintFill
-import dev.ccpocket.app.ui.handoff.canInitiateSessionHandoff
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AgentPresetInfo
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
@@ -538,12 +536,6 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
                 if (canOpenTerminal) {
                     QaRow(stringResource(Res.string.qa_terminal)) { model.openTerminalPreferred(); onDismiss() }
-                }
-                // "Hand off to a colleague": an ordinary peer row (no NEW badge — available is not
-                // recommended, design chat-quick-actions-ui-2.0), only while the session is handoff-free —
-                // one non-terminal handoff per session, and the daemon refuses a second anyway
-                if (!model.observing && model.activeHandoff == null && model.chatAgent.canInitiateSessionHandoff()) {
-                    QaRow(stringResource(Res.string.ho_menu_row)) { onDismiss(); model.showHandoff = true }
                 }
                 QaRow(stringResource(Res.string.qa_compact)) { model.compactConversation(); onDismiss() }
                 QaRow(

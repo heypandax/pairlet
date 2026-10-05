@@ -272,32 +272,8 @@ interface DesktopModel {
     var showGit: Boolean // the Git panel overlay (issue #280; chat-header branch pill)
     var showWorktrees: Boolean // every checkout of the open repository (issue #281; raised from the Git overlay)
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
-    var showHandoff: Boolean // session-handoff draft modal (design session-handoff/ Frame 11)
     var showFolderPicker: Boolean // remote "Open Folder" browser (issues #218/#214): the daemon-machine dir picker
     var showQuotaPopover: Boolean // the sidebar footer allowance strip's anchored detail popover
-
-    // ── session handoff (SESSION-HANDOFF.md) — defaults are the "no handoff" seed/preview state ──
-    val activeHandoff: dev.ccpocket.protocol.SessionHandoff? get() = null
-    val handoffInvite: dev.ccpocket.protocol.SessionHandoff? get() = null
-    val handoffCreating: Boolean get() = false
-    val handoffError: String? get() = null
-    fun handoffIsRecipient(): Boolean = false
-    fun handoffIsInitiator(): Boolean = false
-    fun handoffCreate(recipient: String, expiresHours: Int, request: String, recipientDeviceId: String? = null) {}
-
-    // ── collaborator links (contacts increment): picker + management + one-time connect ticket ──
-    val collaborators: List<dev.ccpocket.protocol.Collaborator> get() = emptyList()
-    val collaboratorTicket: dev.ccpocket.protocol.CollaboratorInvite? get() = null
-    val lastCollaboratorConnected: dev.ccpocket.protocol.Collaborator? get() = null
-    val collaboratorError: String? get() = null
-    fun listCollaborators() {}
-    fun createCollaboratorTicket() {}
-    fun removeCollaborator(deviceId: String) {}
-    fun handoffCancel() {}
-    fun handoffRecall() {}
-    fun handoffComplete() {}
-    fun handoffReturn(verdict: String?) {}
-    fun dismissHandoffInvite() {}
 
     /** The live repository, handed over whole to the Token-usage dashboard ([dev.ccpocket.app.ui.UsageScreen])
      *  and the sidebar allowance strip rather than re-projected field by field like everything above. Two
@@ -312,11 +288,11 @@ interface DesktopModel {
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showGit || showWorktrees || showSkills || showHandoff || showFolderPicker || showQuotaPopover || handoffInvite != null
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showGit || showWorktrees || showSkills || showFolderPicker || showQuotaPopover
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showGit = false; showWorktrees = false; showSkills = false; showHandoff = false; showFolderPicker = false; showQuotaPopover = false; dismissHandoffInvite()
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showGit = false; showWorktrees = false; showSkills = false; showFolderPicker = false; showQuotaPopover = false
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts

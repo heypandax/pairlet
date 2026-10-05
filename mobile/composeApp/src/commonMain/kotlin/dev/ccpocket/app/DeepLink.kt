@@ -33,15 +33,17 @@ object PushRoute {
     }
 
     /**
-     * A tapped Handoff OFFER push (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.4). The alert is content-free by
-     * design, so the ONLY thing it can route by is the opaque handoff id (APNs/FCM key `hid`) — there is no
-     * workdir or session to open, and there must not be: the offer's contents are pulled end-to-end
-     * encrypted over the Collaborator Link once the app is awake. The Compose root hands this to the
-     * repository's `pendingOfferId`, which SELECTS the offer in the incoming-handoff doorway — it never
-     * accepts it. The confirm-then-accept screen is always in the path.
+     * A tapped Session Handoff OFFER push (APNs/FCM key `hid`). Session Handoff is retired (2026-10), but an
+     * older daemon of a colleague may still send that push, and the native entry points (Android
+     * `MainActivity`, iOS via `handlePushOpenHandoff`) still hand the id over — so this keeps its signature
+     * and turns the tap into the retired-feature link: it takes the same consent-gated path as any
+     * OS-delivered link and ends in `IncomingLink.Retired(HANDOFF)` — a "this feature has been retired"
+     * status, nothing opened, no pairing failure recorded. The id itself is never used.
      */
-    val pendingHandoff = MutableStateFlow<String?>(null)
     fun openHandoff(handoffId: String) {
-        if (handoffId.isNotEmpty()) pendingHandoff.value = handoffId
+        if (handoffId.isNotEmpty()) DeepLink.handle(RETIRED_HANDOFF_LINK)
     }
+
+    /** What an offer push tap is routed as — the parser recognises the host alone. */
+    internal const val RETIRED_HANDOFF_LINK = "ccpocket://handoff"
 }

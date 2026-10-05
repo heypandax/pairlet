@@ -36,7 +36,6 @@ import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.People
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SmartToy
@@ -128,7 +127,6 @@ enum class SettingsTab(internal val label: StringResource, internal val icon: Im
     COMPUTERS(Res.string.settings_tab_computers, Icons.Rounded.Devices),
     SCHEDULES(Res.string.settings_tab_schedules, Icons.Rounded.Schedule),
     SHARES(Res.string.settings_tab_shared, Icons.Rounded.Share),
-    COLLABORATORS(Res.string.co_screen_title, Icons.Rounded.People),
     BRIDGES(Res.string.settings_bridges, Icons.Rounded.SmartToy),
     SHORTCUTS(Res.string.settings_tab_shortcuts, Icons.Rounded.Keyboard),
     HELP(Res.string.settings_tab_help, Icons.AutoMirrored.Outlined.HelpOutline),
@@ -184,7 +182,6 @@ fun SettingsModal(model: DesktopModel, initialTab: SettingsTab = SettingsTab.GEN
                     SettingsTab.COMPUTERS -> ComputersPane(model)
                     SettingsTab.SCHEDULES -> SchedulesPane(model)
                     SettingsTab.SHARES -> SharesPane(model)
-                    SettingsTab.COLLABORATORS -> CollaboratorsPane(model)
                     SettingsTab.BRIDGES -> BridgesPane(model)
                     SettingsTab.SHORTCUTS -> ShortcutsPane()
                     SettingsTab.HELP -> HelpPane()

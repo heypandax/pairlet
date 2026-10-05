@@ -175,17 +175,6 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     // headless bridges (issue #91 follow-up): monitor + revoke the IM bots driving this machine
     var showBridges by remember { mutableStateOf(false) }
     if (showBridges) { dev.ccpocket.app.ui.bridge.BridgesScreen(repo, onBack = { showBridges = false }); return }
-    // collaborator links (SESSION-HANDOFF.md §4.1): contact management + the one QR connect flow
-    var showCollaborators by remember { mutableStateOf(false) }
-    var showConnectColleague by remember { mutableStateOf(false) }
-    if (showConnectColleague) {
-        dev.ccpocket.app.ui.handoff.ConnectColleagueFlow(repo, fromDraft = false, onBackToHandoff = {}, onClose = { showConnectColleague = false })
-        return
-    }
-    if (showCollaborators) {
-        dev.ccpocket.app.ui.handoff.CollaboratorsFlow(repo, onConnectNew = { showConnectColleague = true }, onBack = { showCollaborators = false })
-        return
-    }
     // back pops a category to the landing first, and only then leaves Settings — so it never falls
     // through to the app-level navigation while a drill-down is open
     dev.ccpocket.app.SystemBackHandler(enabled = true) { if (category != null) category = null else onBack() }
@@ -220,7 +209,6 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     onAdd = { onBack(); repo.beginAddDevice() },
                     onShares = { showShares = true },
                     onJoin = { showJoin = true },
-                    onCollaborators = { showCollaborators = true },
                     onBridges = { showBridges = true },
                 )
 
@@ -698,7 +686,6 @@ private fun ConnectionsPage(
     onAdd: () -> Unit,
     onShares: () -> Unit,
     onJoin: () -> Unit,
-    onCollaborators: () -> Unit,
     onBridges: () -> Unit,
 ) {
     SectionLabel(stringResource(Res.string.settings_paired_computers))
@@ -709,8 +696,6 @@ private fun ConnectionsPage(
     FirstHopRow(stringResource(Res.string.settings_shared_folders), onClick = onShares)
     Hairline()
     FirstHopRow(stringResource(Res.string.join_title), onClick = onJoin)
-    Hairline()
-    FirstHopRow(stringResource(Res.string.co_screen_title), onClick = onCollaborators)
     Hairline()
     FirstHopRow(stringResource(Res.string.settings_bridges), onClick = onBridges)
     Hairline()

@@ -1,12 +1,14 @@
 package dev.ccpocket.app.desktop
 
-import dev.ccpocket.app.pairing.encode
-import dev.ccpocket.protocol.CollaboratorInvite
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 
 internal const val PACKAGE_SMOKE_OK = "CCP_PACKAGE_SMOKE_OK"
+
+/** A fixed, feature-neutral QR payload: the smoke only proves the packaged QR generator draws a matrix. */
+private const val PACKAGE_SMOKE_QR_PAYLOAD =
+    "ccpocket-package-smoke:qr-matrix-check:wss://package-smoke.invalid/smoke-account/smoke-public-key/smoke-ticket"
 
 /**
  * Offline packaged-image contract for the two class-initializer failures reported on Windows v1.9.0.
@@ -30,17 +32,10 @@ internal fun runPackageSmoke(successMarker: String? = null) {
         Thread.currentThread().contextClassLoader,
     )
 
-    val invite = CollaboratorInvite(
-        relay = "wss://package-smoke.invalid",
-        accountId = "smoke-account",
-        daemonPub = "smoke-public-key",
-        ticket = "smoke-ticket",
-        ownerLabel = "Package smoke",
-    )
-    val matrix = qrMatrixOrFailure { invite.encode() }.getOrThrow()
+    val matrix = qrMatrixOrFailure { PACKAGE_SMOKE_QR_PAYLOAD }.getOrThrow()
     check(matrix.size > 20 && (0 until matrix.size).any { x ->
         (0 until matrix.size).any { y -> matrix[x, y] }
-    }) { "collaborator invite produced an empty QR matrix" }
+    }) { "the smoke payload produced an empty QR matrix" }
 
     // Windows jpackage uses a GUI-subsystem launcher: it may detach from the calling shell and does not
     // guarantee stdout. The marker lets CI poll for proof that the packaged JVM reached the final line.

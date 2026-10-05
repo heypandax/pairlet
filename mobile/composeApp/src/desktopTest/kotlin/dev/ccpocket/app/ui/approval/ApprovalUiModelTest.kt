@@ -73,19 +73,6 @@ class ApprovalUiModelTest {
         assertNull(ui.sessionAction)
     }
 
-    @Test
-    fun aShellCommandUnderAReviewHandoffIsOneOffEvenWhenScopesWereOffered() {
-        val ui = approvalUi(ask(grants = listOf("once", "task", "session")), handoffReview = true)
-        assertEquals(ApprovalFamily.ONE_OFF, ui.family)
-        assertEquals(listOf(ApprovalActionId.DENY, ApprovalActionId.ALLOW_ONCE), ids(ui))
-        assertTrue(ui.recordedShell, "the body has to say the command is recorded")
-
-        // only the command runner: a review handoff does not strip scopes from every tool
-        val fetch = approvalUi(ask(tool = "WebFetch", grants = listOf("once", "task")), handoffReview = true)
-        assertEquals(ApprovalFamily.V2, fetch.family)
-        assertFalse(fetch.recordedShell)
-    }
-
     // ── V2: capability, and only capability, decides availability ─────────────────────────────────
 
     @Test

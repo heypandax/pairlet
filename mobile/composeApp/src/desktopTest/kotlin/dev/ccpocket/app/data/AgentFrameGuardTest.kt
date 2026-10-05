@@ -1,13 +1,11 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.protocol.AgentKind
-import dev.ccpocket.protocol.CreateHandoff
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.FetchModels
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Frame
-import dev.ccpocket.protocol.HandoffBrief
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.ReadFile
@@ -31,12 +29,6 @@ class AgentFrameGuardTest {
         ReadFile("/tmp/project", "session", "README.md", AgentKind.ZCODE),
         ExportFile("convo", "/tmp/project", "session", "report.pdf", AgentKind.ZCODE),
         ReadFileDiff("/tmp/project", "session", "README.md", AgentKind.ZCODE),
-        CreateHandoff(
-            workdir = "/tmp/project",
-            sessionId = "session",
-            brief = HandoffBrief(request = "review"),
-            agent = AgentKind.ZCODE,
-        ),
         FetchUsage(agent = AgentKind.ZCODE),
     )
 
