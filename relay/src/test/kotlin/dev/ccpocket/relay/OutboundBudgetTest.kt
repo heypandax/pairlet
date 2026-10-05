@@ -92,7 +92,11 @@ class OutboundBudgetTest {
      *  owing more is disconnected, the other stays attached. */
     @Test fun a_relay_over_budget_disconnects_the_biggest_stalled_reader_only() = runBlocking {
         val store = InMemoryRelayStore()
-        RelayWsHarness(RelayServer("127.0.0.1", 0, store, outboundBudgetBytes = 12L shl 20)).use { h ->
+        // Sized so the outcome does not depend on how much the OS absorbs before a non-reading peer pushes back:
+        // Linux loopback takes several MiB per socket into kernel buffers (bytes the relay no longer owes), macOS
+        // far less. With 12 MiB / 11 + 6 frames this passed on macOS and never cut anyone on Linux CI.
+        val budget = 48L shl 20
+        RelayWsHarness(RelayServer("127.0.0.1", 0, store, outboundBudgetBytes = budget)).use { h ->
             val a = RelayWsHarness.seedDevice(store, "acct-a", "AAAAAAAAAAAAAAAAAAAAAA")
             val b = RelayWsHarness.seedDevice(store, "acct-b", "BBBBBBBBBBBBBBBBBBBBBB")
             h.device(reading = false).sendControl(a)
@@ -100,16 +104,21 @@ class OutboundBudgetTest {
             withTimeout(5_000) {
                 while (h.relay.broker.deviceCount("acct-a") == 0 || h.relay.broker.deviceCount("acct-b") == 0) delay(20)
             }
-            // A falls 11 MiB behind (under both its own 16 MiB cap and the 12 MiB budget)…
-            repeat(11) { h.relay.broker.toDevice("acct-a", a.deviceId, ByteArray(1 shl 20)) }
+            // A falls 40 MiB behind (under both its own per-socket cap and the 48 MiB budget)…
+            repeat(40) { h.relay.broker.toDevice("acct-a", a.deviceId, ByteArray(1 shl 20)) }
             delay(500)
             assertEquals(1, h.relay.broker.deviceCount("acct-a"), "within budget: A stays")
-            // …then B's backlog pushes the relay over: A, owing the most, is the one cut
-            repeat(6) { h.relay.broker.toDevice("acct-b", b.deviceId, ByteArray(1 shl 20)) }
+            // …then B's backlog grows until the relay is over: A, owing the most, is the one cut. B never gets
+            // close to A's backlog — it stops as soon as A is gone, and needs far less than A owes to tip the budget.
+            var sent = 0
+            while (sent < 40 && h.relay.broker.deviceCount("acct-a") != 0) {
+                h.relay.broker.toDevice("acct-b", b.deviceId, ByteArray(1 shl 20)); sent++
+                delay(20)
+            }
             val gone = withTimeoutOrNull(8_000) { while (h.relay.broker.deviceCount("acct-a") != 0) delay(50) }
             assertNotNull(gone, "the biggest stalled reader is still attached, its backlog held in relay memory")
             assertEquals(1, h.relay.broker.deviceCount("acct-b"), "the smaller backlog must survive")
-            assertTrue(h.relay.outboundBudget.totalBytes <= 12L shl 20)
+            assertTrue(h.relay.outboundBudget.totalBytes <= budget)
         }
     }
 }
