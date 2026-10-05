@@ -29,8 +29,16 @@ class SingleInstanceTest {
     @Test
     fun free_pair_port_passes_without_exit() {
         val port = ServerSocket(0, 50, loopback).use { it.localPort }
-        val tookOver = SingleInstance.ensureSolo(port, takeover = false, exit = { error("exit($it) on a free port") }) {}
-        assertEquals(false, tookOver)
+        val dir = kotlin.io.path.createTempDirectory("single-instance").toFile()
+        try {
+            val tookOver = SingleInstance.ensureSolo(
+                port, takeover = false, exit = { error("exit($it) on a free port") }, lockFile = java.io.File(dir, "daemon.lock"),
+            ) {}
+            assertEquals(false, tookOver)
+        } finally {
+            SingleInstance.releaseForTest()
+            dir.deleteRecursively()
+        }
     }
 
     /**

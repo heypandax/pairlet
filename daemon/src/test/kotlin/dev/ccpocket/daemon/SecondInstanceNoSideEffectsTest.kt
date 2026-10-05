@@ -76,6 +76,11 @@ class SecondInstanceNoSideEffectsTest {
         val pairPort = pairHolder.localPort
         val directPort = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1")).use { it.localPort }
 
+        // the running daemon's single-instance lock file (design S2b) — the file only: a lock held by THIS JVM
+        // would be refused at the first gate, and the point here is that the port gate turns the start away
+        // too (a daemon from before the lock). Its content must be untouched afterwards (snapshot below).
+        File(store, "daemon.lock").writeText("")
+
         // ① file deletion — the running daemon's in-flight voice memo job
         val memoJob = File(store, "voice-memo-tmp/job-1/recording.m4a").apply { parentFile.mkdirs(); writeText("audio") }
 
