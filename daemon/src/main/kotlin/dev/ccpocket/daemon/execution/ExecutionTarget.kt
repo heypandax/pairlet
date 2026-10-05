@@ -5,10 +5,7 @@ import dev.ccpocket.daemon.bridge.BridgeSpec
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.peer.b64
 import dev.ccpocket.daemon.util.logger
-import dev.ccpocket.protocol.AgentKind
-import dev.ccpocket.protocol.ExecutionGrantInfo
 import dev.ccpocket.protocol.PairTicket
-import dev.ccpocket.protocol.PermissionMode
 import java.security.MessageDigest
 import java.security.SecureRandom
 
@@ -363,29 +360,6 @@ class ExecutionTarget(
 interface ExecutionControl {
     suspend fun onRedeemed(deviceId: String, linkPubB64: String, grantId: String?): Boolean
 }
-
-/**
- * What a source is told about its own grant. Scope is disclosed only for an ACTIVE grant: a grant still
- * awaiting the target owner's fingerprint confirmation reports its state and nothing else.
- */
-fun executionGrantInfo(g: ExecutionGrant): ExecutionGrantInfo =
-    if (g.state != ExecutionGrantState.ACTIVE) {
-        ExecutionGrantInfo(g.grantId, g.revision, g.state.wire, g.expiresAt)
-    } else {
-        ExecutionGrantInfo(
-            grantId = g.grantId,
-            revision = g.revision,
-            state = g.state.wire,
-            expiresAt = g.expiresAt,
-            workspaceAliases = g.workspaces.map { it.alias },
-            agents = g.allowedAgents.map { AgentKind.serializer().descriptor.getElementName(it.ordinal) },
-            approvalCeiling = PermissionMode.serializer().descriptor.getElementName(g.approvalCeiling.ordinal),
-            maxConcurrentRuns = g.maxConcurrentRuns,
-            maxQueuedRuns = g.maxQueuedRuns,
-            runTimeoutMs = g.runTimeoutMs,
-            perGrantRequestBudget = g.perGrantRequestBudget,
-        )
-    }
 
 @OptIn(ExperimentalStdlibApi::class)
 internal fun hashHex(b: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(b).toHexString()

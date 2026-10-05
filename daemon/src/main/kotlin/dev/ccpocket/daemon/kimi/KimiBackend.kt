@@ -425,7 +425,6 @@ class KimiBackend(
 
     // ---- disk: ~/.kimi-code session scanning + replay (filtered by recorded workDir; no process launch) ----
 
-    override fun transcriptDir(workdir: String): Path = KimiPaths.sessionsRoot()
     override fun listSessions(workdir: String): List<SessionSummary> = KimiTranscriptScanner.scan(workdir)
 
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =

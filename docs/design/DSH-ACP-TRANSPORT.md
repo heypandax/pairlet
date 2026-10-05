@@ -48,7 +48,7 @@
 
 | 文件 | 变化 |
 |---|---|
-| `DshLauncher.kt` | argv → `dsh --profile acp`；**stdin 不再重定向到 /dev/null**（ACP 的上行就是 stdin，指向 /dev/null 等于开机即断连）；`launchHint()` 把「dsh 太老／Node 太老」翻译成人话 |
+| `DshLauncher.kt` | argv → `dsh --profile acp`；**stdin 不再重定向到 /dev/null**（ACP 的上行就是 stdin，指向 /dev/null 等于开机即断连）；握手不应答时由 `outdatedHint()` 给出「dsh 太老」的人话提示 |
 | `DshBackend.kt` | 换轨重写：initialize → session/new｜resume → `session/update` 翻译 → prompt FIFO ＋ 配置链 ＋ 审批桥 |
 | `DshConfigOptions.kt` | 新增：`configOptions` 翻译 ＋ **裸 model id ↔ dsh 不透明 value 的对接**（两侧同一份目录，永不字符串拼装） |
 | `DshCatalog.kt` | 新增：活跃会话把自己的目录发布出来，取代 `DshHosts` |

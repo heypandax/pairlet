@@ -132,9 +132,6 @@ class FeishuTrust(
     /** Any trust record for this chat, whatever project it names — for /untrust revocation and /trust-status. */
     @Synchronized fun recordFor(chatId: String): FeishuTrustRecord? = chats[chatId]
 
-    /** Any trust mark for this chat, whatever project it names — for the chat-side "already on?" answer. */
-    @Synchronized fun trustedProject(chatId: String): String? = chats[chatId]?.workdir
-
     /** Immutable policy read for a Guardian flow's before/after comparison (see [TrustSnapshot]). An
      *  absent or other-project record reads as UNTRUSTED with contractVersion 0. */
     @Synchronized fun snapshot(chatId: String, workdir: String): TrustSnapshot {

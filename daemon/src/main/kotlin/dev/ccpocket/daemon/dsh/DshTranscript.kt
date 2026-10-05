@@ -510,33 +510,6 @@ object DshTranscript {
         return sb.toString().takeIf { it.isNotBlank() }
     }
 
-    /**
-     * Concatenate the payload of one of dsh's BATCHED storage rows (`text-chunks` / `reasoning-chunks` /
-     * `tool-call-chunks`), which compress ≥3 consecutive same-kind streaming chunks onto one line as
-     * `{type, seq0, time0, data:{turn, step, index, dt[], texts[]|args[]}}` (source-verified, rc.6).
-     *
-     * Member *k* of the batch reconstructs to `seq = seq0 + k` and `time = time0 + Σdt[0..k-1]`. We only
-     * need the text here, so the timing bases are ignored.
-     *
-     * NOTE these rows are STORAGE-ONLY: they are the streaming deltas, and the same content also lands as
-     * a complete `assistant/message`. The replay therefore does NOT use this — see [DshTranscriptReplay].
-     * It exists for diagnostics and for a future live-tail reader. An unrecognized shape yields null; the
-     * line is skipped, never fatal.
-     */
-    internal fun chunkText(root: JsonObject): String? {
-        val data = root.obj("data") ?: return null
-        val arr = (data["texts"] as? JsonArray) ?: (data["args"] as? JsonArray) ?: return null
-        val sb = StringBuilder()
-        for (item in arr) {
-            when (item) {
-                is JsonPrimitive -> item.contentOrNull?.let { sb.append(it) }
-                is JsonObject -> (item.str("text") ?: item.str("delta"))?.let { sb.append(it) }
-                else -> {}
-            }
-        }
-        return sb.toString().takeIf { it.isNotEmpty() }
-    }
-
     // event `type` discriminants we act on
     const val EVENT_USER = "user/message"
     const val EVENT_ASSISTANT = "assistant/message"

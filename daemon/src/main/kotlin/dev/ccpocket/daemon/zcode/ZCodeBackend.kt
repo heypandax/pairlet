@@ -676,7 +676,6 @@ class ZCodeBackend(
     }
 
     override suspend fun onProcessEnded(sessionId: String?) {}
-    override fun transcriptDir(workdir: String): Path = ZCodePaths.database().parent
     override fun listSessions(workdir: String): List<SessionSummary> = ZCodeTranscriptScanner.scan(workdir)
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = ZCodeTranscriptReplay.read(sessionId)
     override fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long?): ReplaySlice = ZCodeTranscriptReplay.slice(sessionId)

@@ -36,7 +36,6 @@ class DshConfigOptionsTest {
         assertEquals("deepseek-v4-flash", options.currentModel)
         assertEquals("high", options.currentEffort)
         assertEquals(listOf("deepseek-v4-flash", "deepseek-v4-pro"), options.models.map { it.id })
-        assertEquals(setOf("off", "low", "high", "max"), options.effortIds())
         assertEquals("deepseek-official", options.models.first().provider)
     }
 

@@ -884,8 +884,6 @@ class CodexBackend(
 
     // ---- disk: ~/.codex/sessions rollout scanning + replay (filtered by recorded cwd) ----
 
-    override fun transcriptDir(workdir: String): Path = CodexPaths.sessionsRoot()
-
     override fun transcriptPath(workdir: String, sessionId: String): Path? {
         // findSession is a suffix match against real filenames, but keep the wire-input guard uniform
         if (sessionId.contains('/') || sessionId.contains('\\') || sessionId.contains("..")) return null
