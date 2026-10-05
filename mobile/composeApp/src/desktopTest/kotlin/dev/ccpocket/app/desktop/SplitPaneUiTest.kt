@@ -28,8 +28,8 @@ import kotlin.test.assertTrue
  * The desktop split view (issue #311), rendered for real.
  *
  * The claims that matter are the ones a screenshot cannot make: that three conversations are on screen at
- * the same time, that each column has its OWN composer (the whole point — a column you can only read is a
- * watch pane, which already existed), and that a column does not offer the header verbs that would act on
+ * the same time, that each column has its OWN composer (the whole point — a column you can only read is
+ * not a split), and that a column does not offer the header verbs that would act on
  * a different conversation.
  */
 @OptIn(ExperimentalTestApi::class)
@@ -40,9 +40,6 @@ class SplitPaneUiTest {
         var promoted: SidePane? = null
         var closed: Long? = null
         var resent: SidePane? = null
-        // the seed ships the fleet WATCH pane for screenshots; the live model's watch is always null
-        // (RepoDesktopModel), and that is the shell state a split renders under — match it here
-        override val watch: DkWatch? get() = null
         override val sidePanes: List<SidePane> get() = extra
         override val canSplit: Boolean get() = extra.size < 2
         override fun promoteSplit(pane: SidePane) { promoted = pane }
@@ -73,7 +70,7 @@ class SplitPaneUiTest {
         val model = SplitSeed(listOf(pane(1, "Tidy CI workflow", "CI is green"), pane(2, "Bump maxFrame", "patched to 4MB")))
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        // one text field per column — a column you cannot type into is the read-only watch pane, not this
+        // one text field per column — a column you cannot type into would not be a split column
         assertEquals(3, onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size)
     }
 

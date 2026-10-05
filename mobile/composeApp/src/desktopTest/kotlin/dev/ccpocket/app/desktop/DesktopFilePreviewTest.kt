@@ -49,7 +49,6 @@ class DesktopFilePreviewTest {
                 writeText("# 设计说明\n\n这里是 **Markdown 预览**。\n\n- 保留左侧会话\n- 右侧阅读文档\n\n```kotlin\nval preview = true\n```")
             }
             val model = object : SeedDesktopModel() {
-                override val watch: DkWatch? = null
                 override val chatWorkdir = base.path
                 override val messages = listOf(ChatItem.Assistant("查看 $path"))
                 override val ask = null

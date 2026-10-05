@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
@@ -157,7 +158,6 @@ private fun installLabel(kind: dev.ccpocket.daemon.update.UpdateService.InstallK
 internal class RunCmd(
     private val exit: (Int) -> Nothing = { kotlin.system.exitProcess(it) },
 ) : CliktCommand(name = "run") {
-    private val host by option().default("127.0.0.1")
     private val port by option().int().default(8765)
     private val claudeBin by option("--claude-bin", help = "claude executable (default: auto-detect the installed Claude Code)")
     private val codexBin by option("--codex-bin", help = "codex executable (default: auto-detect the installed Codex CLI)")
@@ -166,7 +166,11 @@ internal class RunCmd(
     private val zcodeBin by option("--zcode-bin", help = "zcode executable (default: auto-detect the official ZCode app/CLI)")
     private val dshBin by option("--dsh-bin", help = "dsh executable (default: auto-detect the installed DeepSeek Harness)")
     private val relay by option("--relay", help = "relay wss base").default(DEFAULT_RELAY)
-    private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
+    // Removed options, kept hidden so an old command line gets an explanation instead of clikt's
+    // "no such option": --local (the unencrypted LAN server) refuses to start; --host only ever applied
+    // to it, so a launch script still carrying it just gets a warning.
+    private val removedLocal by option("--local", hidden = true).flag()
+    private val removedHost by option("--host", hidden = true)
     private val directBind by option(
         "--direct-bind",
         help = "relay mode: also listen for E2E direct connections on this interface (paired devices skip the relay). " +
@@ -182,14 +186,22 @@ internal class RunCmd(
     ).flag()
 
     override fun run() {
+        // Before the single-instance check, so a refused `--local` never probes or takes over a running daemon.
+        if (removedLocal) throw com.github.ajalt.clikt.core.CliktError(
+            "`run --local` (unencrypted LAN mode) has been removed: it had no pairing, no authentication and no encryption.\n" +
+                "Use `pairlet run` (relay mode) and pair with `pairlet pair`. Paired devices on the same network still connect " +
+                "directly, end-to-end encrypted — open that to your LAN with `--direct-bind 0.0.0.0`.",
+        )
+        if (removedHost != null) {
+            echo("note: --host only applied to the removed --local mode and is ignored; use --direct-bind for the E2E direct listener", err = true)
+        }
         // A daemon is a singleton (owns the pair port + one relay identity). If another instance is
         // already up — the cask's KeepAlive LaunchAgent, or a stray dev run — exit cleanly (or --takeover
         // to replace it) BEFORE doing anything else (audit H1). Everything below touches state the running
         // daemon owns: it empties the voice-memo scratch, fires due schedules (whose agents a refused
         // instance would orphan), dials peer inboxes, writes identity/claude-home, binds the direct port.
-        // A refused start must leave no trace — launchd replays it every ThrottleInterval. LAN-only
-        // `--local` keeps its old behaviour: no pair port, no check.
-        val tookOver = !local && SingleInstance.ensureSolo(pairPort, takeover, exit) { echo(it) }
+        // A refused start must leave no trace — launchd replays it every ThrottleInterval.
+        val tookOver = SingleInstance.ensureSolo(pairPort, takeover, exit) { echo(it) }
         // Loaded before the agent probes because they already need it: `config --dsh-bin` is the pinned
         // path a service-managed daemon carries across restarts (issue #365), so it has to be in hand
         // before the first resolveExecutable call, not after.
@@ -244,146 +256,98 @@ internal class RunCmd(
             echo("claude credential isolation: ON — daemon login store: $claudeHome")
             echo("(the daemon signs in separately: if sessions report auth errors, sign in from the app's Settings → Account)")
         }
-        if (!local) {
-            val identity = Identity.loadOrCreate()
-            // What DaemonInfo advertises after each handshake: where paired devices can reach us without
-            // the relay. Bind-specific IP → advertise it; 0.0.0.0 → advertise the current LAN IP (recomputed
-            // per handshake, so a DHCP move heals itself); none/no usable interface → null (devices clear
-            // any stored address and stay on the relay).
-            val directUrl: () -> String? = {
-                when {
-                    directBind == "none" -> null
-                    directBind == "0.0.0.0" -> lanIp()?.let { "ws://$it:$port/v1/ws" }
-                    else -> "ws://$directBind:$port/v1/ws"
-                }
+        val identity = Identity.loadOrCreate()
+        // What DaemonInfo advertises after each handshake: where paired devices can reach us without
+        // the relay. Bind-specific IP → advertise it; 0.0.0.0 → advertise the current LAN IP (recomputed
+        // per handshake, so a DHCP move heals itself); none/no usable interface → null (devices clear
+        // any stored address and stay on the relay).
+        val directUrl: () -> String? = {
+            when {
+                directBind == "none" -> null
+                directBind == "0.0.0.0" -> lanIp()?.let { "ws://$it:$port/v1/ws" }
+                else -> "ws://$directBind:$port/v1/ws"
             }
-            // the OS computer name — advertised in DaemonInfo so a paired client shows "Pandas-MacBook-Pro"
-            // as the default binding name instead of a truncated account-id hash (issue #62). A provider
-            // like [directUrl], resolved lazily at the first handshake: getLocalHost() can stall seconds
-            // behind fake-IP/TUN DNS setups, which must not delay startup. A user-set nickname still wins
-            // client-side.
-            val hostNameLazy = lazy { daemonHostName() }
-            val hostName: () -> String? = { hostNameLazy.value }
-            // third-party gateway detection (issue #139): advertised in DaemonInfo per handshake so the
-            // client's model picker surfaces gateway model presets first. Re-evaluated each time (cheap
-            // file/env reads) — an activated preset shows up on the device's next connect.
-            val gatewayUrl: () -> String? = {
-                runCatching {
-                    dev.ccpocket.daemon.claude.GatewayDetector.resolve(
-                        presetBaseUrl = presetStore.activeEnv()?.get(dev.ccpocket.protocol.PresetEnv.BASE_URL),
-                        userConfigDir = claudeHome,
-                    )
-                }.getOrNull()
-            }
-            val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName, gatewayBaseUrl = gatewayUrl)
-            echo("Pairlet daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"} — relay=$relay")
-            echo("account id: ${identity.accountId}")
-            echo("(run `pairlet pair` in another terminal to add a phone)")
-            // E2E-gated direct listener beside the relay: paired devices on this machine/LAN connect
-            // straight to us (no proxy/relay leg — the fix for flaky-uplink send/receive). Unlike the
-            // plaintext --local path this REQUIRES the Noise handshake, so a wide bind stays safe. A bind
-            // failure (port taken) degrades to relay-only instead of killing the daemon.
-            if (directBind != "none") {
-                val gate = LanE2E(
-                    identity, directUrl, hostName, gatewayUrl,
-                    firstContactPending = relayClient::deviceFirstContactPending,
-                    restrictedCredential = relayClient::deviceIsRestrictedCredential, // #367
-                )
-                // after --takeover the old daemon frees its ports from parallel shutdown hooks, so the
-                // direct port can lag the pair port the check waited on: retry briefly instead of
-                // settling for relay-only for this instance's whole life
-                val bindDirect = { DaemonServer(core, directBind, port, gate).run(wait = false) }
-                runCatching { if (tookOver) SingleInstance.retryBind(bind = bindDirect) else bindDirect() }
-                    .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
-                    .onFailure {
-                        dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.STARTUP,
-                            dev.ccpocket.observability.Stage.CONNECT, dev.ccpocket.observability.ErrorCode.UNAVAILABLE, it,
-                            dev.ccpocket.observability.SafeMetrics(resultQuality = dev.ccpocket.observability.ResultQuality.FALLBACK))
-                        echo("direct listener failed to bind $directBind:$port (${it.message}) — relay only") }
-            }
-            // Windows: if we're not yet registered as a logon background service, self-install so closing this
-            // window no longer takes the daemon offline (issue #16). No-op on macOS/Linux and when already set up.
-            ServiceInstaller.selfInstallIfMissingWindows(
-                ProcessHandle.current().info().command().orElse(""),
-                buildList {
-                    add("run"); add("--relay"); add(relay)
-                    claudeBin?.let { add("--claude-bin"); add(it) }
-                    codexBin?.let { add("--codex-bin"); add(it) }
-                    zcodeBin?.let { add("--zcode-bin"); add(it) }
-                },
-            )?.let { echo(it) }
-            // the single-instance check ran first thing in run(); claim the pair port it probed
-            PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort, core).start()
-            // daily new-version check: log + one phone push per version, and — for installer-managed
-            // installs — a hot-swap to the new version. On by default (issue #244); --auto-update / the
-            // env toggle / `config --auto-update off` override, see UpdateChecker.resolveAutoApply.
-            val auto = dev.ccpocket.daemon.update.UpdateChecker.resolveAutoApply(
-                flag = autoUpdate,
-                env = System.getenv("CC_POCKET_AUTO_UPDATE"),
-                pref = prefs.autoUpdate,
-            )
-            dev.ccpocket.daemon.update.UpdateChecker.start(relayClient, auto) {
-                runBlocking { core.hasActiveWork() }
-            }
-            Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
-            runBlocking { relayClient.run() }
-        } else {
-            // Advertise a LAN URL + QR for phone pairing, but NEVER silently widen the bind:
-            // we listen on `host` as-is. The direct-LAN path has no handshake / auth / E2E, so a
-            // phone can only reach us once the user explicitly binds beyond loopback — show the
-            // pairing URL/QR only then, never for a loopback bind the phone can't connect to.
-            val lan = lanIp()
-            echo("Pairlet daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"}")
-            echo("")
-            if (host == "127.0.0.1") {
-                echo("  Bound to 127.0.0.1 (loopback only) — not reachable from your phone.")
-                if (lan != null) {
-                    echo("  To pair over your LAN, re-run with:  --host 0.0.0.0")
-                    echo("  It would then be reachable at ws://$lan:$port/v1/ws")
-                }
-                echo("")
-            } else {
-                val advertiseIp = if (host == "0.0.0.0") (lan ?: host) else host
-                val url = "ws://$advertiseIp:$port/v1/ws"
-                if (host == "0.0.0.0") {
-                    echo("  !! UNGUARDED — bound to 0.0.0.0 (all interfaces) !!")
-                    echo("  Anyone on your network can open sessions, browse files and approve tools.")
-                    echo("")
-                }
-                echo("  LAN server on $url")
-                echo("")
-                echo("  On your phone, open Pairlet and tap:")
-                echo("    Advanced: Direct LAN")
-                echo("  Then enter: $url")
-                echo("")
-                if (advertiseIp != "0.0.0.0") {
-                    echo(QrTerminal.render(url))
-                    echo("")
-                }
-            }
-            DaemonServer(core, host, port).run()
         }
+        // the OS computer name — advertised in DaemonInfo so a paired client shows "Pandas-MacBook-Pro"
+        // as the default binding name instead of a truncated account-id hash (issue #62). A provider
+        // like [directUrl], resolved lazily at the first handshake: getLocalHost() can stall seconds
+        // behind fake-IP/TUN DNS setups, which must not delay startup. A user-set nickname still wins
+        // client-side.
+        val hostNameLazy = lazy { daemonHostName() }
+        val hostName: () -> String? = { hostNameLazy.value }
+        // third-party gateway detection (issue #139): advertised in DaemonInfo per handshake so the
+        // client's model picker surfaces gateway model presets first. Re-evaluated each time (cheap
+        // file/env reads) — an activated preset shows up on the device's next connect.
+        val gatewayUrl: () -> String? = {
+            runCatching {
+                dev.ccpocket.daemon.claude.GatewayDetector.resolve(
+                    presetBaseUrl = presetStore.activeEnv()?.get(dev.ccpocket.protocol.PresetEnv.BASE_URL),
+                    userConfigDir = claudeHome,
+                )
+            }.getOrNull()
+        }
+        val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName, gatewayBaseUrl = gatewayUrl)
+        echo("Pairlet daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — opencode=${opencodeExe ?: "(not found)"} — zcode=${zcodeExe ?: "(not found)"} — relay=$relay")
+        echo("account id: ${identity.accountId}")
+        echo("(run `pairlet pair` in another terminal to add a phone)")
+        // E2E-gated direct listener beside the relay: paired devices on this machine/LAN connect
+        // straight to us (no proxy/relay leg — the fix for flaky-uplink send/receive). It REQUIRES the
+        // Noise handshake, so a wide bind stays safe. A bind failure (port taken) degrades to relay-only
+        // instead of killing the daemon.
+        if (directBind != "none") {
+            val gate = LanE2E(
+                identity, directUrl, hostName, gatewayUrl,
+                firstContactPending = relayClient::deviceFirstContactPending,
+                restrictedCredential = relayClient::deviceIsRestrictedCredential, // #367
+            )
+            // after --takeover the old daemon frees its ports from parallel shutdown hooks, so the
+            // direct port can lag the pair port the check waited on: retry briefly instead of
+            // settling for relay-only for this instance's whole life
+            val bindDirect = { DaemonServer(core, directBind, port, gate).start() }
+            runCatching { if (tookOver) SingleInstance.retryBind(bind = bindDirect) else bindDirect() }
+                .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
+                .onFailure {
+                    dev.ccpocket.observability.Diagnostics.report(dev.ccpocket.observability.ErrorPath.STARTUP,
+                        dev.ccpocket.observability.Stage.CONNECT, dev.ccpocket.observability.ErrorCode.UNAVAILABLE, it,
+                        dev.ccpocket.observability.SafeMetrics(resultQuality = dev.ccpocket.observability.ResultQuality.FALLBACK))
+                    echo("direct listener failed to bind $directBind:$port (${it.message}) — relay only") }
+        }
+        // Windows: if we're not yet registered as a logon background service, self-install so closing this
+        // window no longer takes the daemon offline (issue #16). No-op on macOS/Linux and when already set up.
+        ServiceInstaller.selfInstallIfMissingWindows(
+            ProcessHandle.current().info().command().orElse(""),
+            buildList {
+                add("run"); add("--relay"); add(relay)
+                claudeBin?.let { add("--claude-bin"); add(it) }
+                codexBin?.let { add("--codex-bin"); add(it) }
+                zcodeBin?.let { add("--zcode-bin"); add(it) }
+            },
+        )?.let { echo(it) }
+        // the single-instance check ran first thing in run(); claim the pair port it probed
+        PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort, core).start()
+        // daily new-version check: log + one phone push per version, and — for installer-managed
+        // installs — a hot-swap to the new version. On by default (issue #244); --auto-update / the
+        // env toggle / `config --auto-update off` override, see UpdateChecker.resolveAutoApply.
+        val auto = dev.ccpocket.daemon.update.UpdateChecker.resolveAutoApply(
+            flag = autoUpdate,
+            env = System.getenv("CC_POCKET_AUTO_UPDATE"),
+            pref = prefs.autoUpdate,
+        )
+        dev.ccpocket.daemon.update.UpdateChecker.start(relayClient, auto) {
+            runBlocking { core.hasActiveWork() }
+        }
+        Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
+        runBlocking { relayClient.run() }
     }
 }
 
 private class TestClientCmd : CliktCommand(name = "test-client") {
-    private val host by option().default("127.0.0.1")
-    private val port by option().int().default(8765)
-    private val relay by option("--relay", help = "relay ws base for device mode, e.g. ws://host:9000")
-    private val daemonPub by option("--daemon-pub", help = "daemon E2E public key from `pair` (relay mode)")
-    private val ticket by option("--ticket", help = "pairing ticket from `pair` (relay mode)")
+    private val relay by option("--relay", help = "relay ws base, e.g. ws://host:9000").required()
+    private val daemonPub by option("--daemon-pub", help = "daemon E2E public key from `pair`").required()
+    private val ticket by option("--ticket", help = "pairing ticket from `pair`").required()
 
     override fun run() {
-        val r = relay
-        if (r != null) {
-            TestClient.relay(
-                r,
-                daemonPub ?: error("--daemon-pub is required with --relay"),
-                ticket ?: error("--ticket is required with --relay"),
-            ).run()
-        } else {
-            TestClient.direct("ws://$host:$port/v1/ws").run()
-        }
+        TestClient.relay(relay, daemonPub, ticket).run()
     }
 }
 

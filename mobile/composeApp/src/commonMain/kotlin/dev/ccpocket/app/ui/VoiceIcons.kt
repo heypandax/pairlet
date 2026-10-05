@@ -103,23 +103,3 @@ val ShieldMicIcon: ImageVector by lazy {
         }
     }.build()
 }
-
-/** Warning triangle for the S5 error chip (stroke 1.4 + filled dot, 18-viewport). */
-val WarnTriIcon: ImageVector by lazy {
-    builder("WarnTri", 18f).apply {
-        stroked(1.4f) {
-            moveTo(9f, 2.6f)
-            lineToRelative(6.6f, 12f)
-            horizontalLineTo(2.4f)
-            lineTo(9f, 2.6f)
-            close()
-        }
-        stroked(1.4f) { moveTo(9f, 7.2f); verticalLineToRelative(3.2f) }
-        filled {
-            moveTo(8.1f, 12.6f)
-            arcTo(0.9f, 0.9f, 0f, isMoreThanHalf = false, isPositiveArc = true, 9.9f, 12.6f)
-            arcTo(0.9f, 0.9f, 0f, isMoreThanHalf = false, isPositiveArc = true, 8.1f, 12.6f)
-            close()
-        }
-    }.build()
-}

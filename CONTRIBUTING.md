@@ -39,7 +39,7 @@ bash scripts/relay-smoke.sh    # optional: in-memory relay E2E smoke (fake claud
 
 CI (`.github/workflows/ci.yml`) runs the protocol/daemon/relay suites and compiles the desktop target and assembles the Android debug APK on every PR. The mobile UI/screenshot tests only run locally — they need a real Skia renderer.
 
-Manual smoke of the daemon against a real `claude`: `./gradlew :daemon:run --args="test-client"` (see `docs/RUN.md`).
+Manual smoke of the daemon against a real `claude`: run a local relay and drive the daemon with `test-client --relay …` (see `docs/RUN.md` §3); `scripts/relay-smoke.sh` automates the same path with a fake `claude`.
 
 ## Things that bite
 

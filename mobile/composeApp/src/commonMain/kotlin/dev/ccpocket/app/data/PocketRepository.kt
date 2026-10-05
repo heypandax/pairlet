@@ -23,13 +23,11 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
-import dev.ccpocket.app.ensureLocalNetworkAccess
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.update.VersionStatus
 import dev.ccpocket.app.net.DirectE2EConnection
 import dev.ccpocket.app.net.DirectUnreachableException
 import dev.ccpocket.app.net.RelayAuthException
-import dev.ccpocket.app.net.RelayConnection
 import dev.ccpocket.app.net.DeadLinkException
 import dev.ccpocket.app.net.DepositOutcome
 import dev.ccpocket.app.net.RelayControlDial
@@ -286,7 +284,6 @@ import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.JobStatus
-import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.SwitchServiceTier
 import dev.ccpocket.protocol.ToolEvent
@@ -324,14 +321,12 @@ import dev.ccpocket.app.resources.ho_accept_withdrawn
 import dev.ccpocket.app.resources.ho_daemon_too_old
 import dev.ccpocket.app.resources.preview_cmd_title
 import dev.ccpocket.app.resources.preview_cmd_note
-import dev.ccpocket.app.resources.status_checking_network
 import dev.ccpocket.app.resources.status_conn_lost
 import dev.ccpocket.app.resources.status_connecting
 import dev.ccpocket.app.resources.status_disconnected
 import dev.ccpocket.app.resources.status_failed
 import dev.ccpocket.app.resources.status_invalid_link
 import dev.ccpocket.app.resources.status_review_invite_wrong_door
-import dev.ccpocket.app.resources.status_local_denied
 import dev.ccpocket.app.resources.status_pair_failed
 import dev.ccpocket.app.resources.status_pairing
 import dev.ccpocket.app.resources.status_reconnecting
@@ -624,7 +619,6 @@ class PocketRepository(
     /** Where project pins live (issue #362). Tests hand in a registry over a temp directory. */
     internal val projectPinRegistry: dev.ccpocket.app.pins.ProjectPinRegistry = dev.ccpocket.app.pins.ProjectPinRegistry.shared,
 ) {
-    private val direct = RelayConnection()
     private val relay = RelayE2EConnection()
     private val directE2E = DirectE2EConnection()
     internal var useRelay = false // internal for tests (mirrors promptReceiptTimeoutMs)
@@ -638,7 +632,6 @@ class PocketRepository(
     private val badDirectUrl = HashMap<String, String>()
     private var directAttemptInFlight = false
     private var firstTicket: String? = null // pairing ticket, used as PSK on the first relay connect only
-    private var lastDirectUrl: String? = null
     private var inboundJob: Job? = null     // persistent collector over the transport's inbound flow
     private var connectJob: Job? = null     // the socket loop; returns/throws when the link dies
     private var retryJob: Job? = null       // scheduled auto-reconnect
@@ -2089,23 +2082,6 @@ class PocketRepository(
         launchTransport(reconnect = false)
     }
 
-    /** Advanced: connect directly to a daemon on the LAN (no relay), still over WebSocket. */
-    fun startDirect(url: String) {
-        bindProjectPins() // #362: the plaintext dev connection keeps local-only pins
-        useRelay = false
-        lastDirectUrl = url
-        status.value = StatusMsg(Res.string.status_checking_network)
-        scope.launch {
-            if (!ensureLocalNetworkAccess(url)) {
-                status.value = StatusMsg(Res.string.status_local_denied)
-                return@launch
-            }
-            sessionActive.value = true
-            retryAttempts = 0
-            launchTransport(reconnect = false)
-        }
-    }
-
     /** Recompute the observable [phase] from the per-session flags. Call after every relevant event. */
     private fun recomputePhase() {
         // inbox mode has its own readiness proof: a collaborator credential is REFUSED directory discovery,
@@ -2457,11 +2433,6 @@ class PocketRepository(
         SecureStore.putString(K_DEFAULT_SERVICE_TIER, v ?: "")
     }
 
-    /** Mobile Settings' legacy Claude-only entry point. */
-    fun setDefaultModel(id: String?) {
-        setDefaultModelFor(AgentKind.CLAUDE, id)
-    }
-
     /** Settings: persist a backend-scoped default model (null = that CLI's own default). */
     fun setDefaultModelFor(agent: AgentKind, id: String?) {
         val v = id?.trim()?.takeIf { it.isNotEmpty() }
@@ -2635,12 +2606,12 @@ class PocketRepository(
         if (inboundJob == null) {
             inboundJob = scope.launch {
                 // only the transport that's actually connected emits — merging idle flows is free
-                collectInbound(merge(relay.inbound, direct.inbound, directE2E.inbound), ::handle)
+                collectInbound(merge(relay.inbound, directE2E.inbound), ::handle)
             }
         }
         if (controlJob == null) {
             controlJob = scope.launch {
-                collectInbound(merge(relay.control, direct.control, directE2E.control), ::handleControl)
+                collectInbound(merge(relay.control, directE2E.control), ::handleControl)
             }
         }
         if (deafJob == null) {
@@ -2697,7 +2668,8 @@ class PocketRepository(
                     firstTicket = null
                     relay.connect(p, Pairing.deviceKeys(), t)
                 } else {
-                    direct.connect(lastDirectUrl ?: error("no direct url"))
+                    // only startRelay starts a transport; without it there is nothing to dial
+                    error("no transport started")
                 }
             }
             val err = result.exceptionOrNull()
@@ -3467,7 +3439,9 @@ class PocketRepository(
                 useRelay && (directAttemptInFlight || (directE2E.connected && directE2E.account == paired.value?.accountId)) ->
                     directE2E.send(frame)
                 useRelay -> relay.send(frame)
-                else -> direct.send(frame)
+                // no transport started (demo is answered above, or nothing connected yet): there is no
+                // link to queue for, so the frame is dropped
+                else -> Unit
             }
         } catch (e: CancellationException) {
             throw e
@@ -5145,11 +5119,6 @@ class PocketRepository(
      * second copy, so the two can never disagree.
      */
     val claudeQuota: MutableState<ClaudeQuota?> = agentSlot(quotaByAgent, AgentKind.CLAUDE)
-    val claudeQuotaLoading: MutableState<Boolean> = agentFlag(quotaLoadingByAgent, AgentKind.CLAUDE, false)
-
-    /** The status of the LAST reply, including the transient failures [quotaByAgent] deliberately does not
-     *  absorb. Null = never answered. Diagnostics only — no UI should turn a blip into an alarm. */
-    val claudeQuotaStatus: MutableState<String?> = agentSlot(quotaStatusByAgent, AgentKind.CLAUDE)
 
     /** The backends whose allowance THIS daemon says it can read ([DaemonInfo.quotaAgents], wire names).
      *  Empty = an older daemon that never advertised: Claude only, exactly the pre-#348 behaviour. */
@@ -5195,9 +5164,6 @@ class PocketRepository(
             if (quotaLoadingByAgent.none { it.value }) onClaudeQuotaReply?.invoke()
         }
     }
-
-    /** The Claude-only entry point, kept for every pre-#348 caller. */
-    fun fetchClaudeQuota(forceRefresh: Boolean = false) = fetchQuota(AgentKind.CLAUDE, forceRefresh)
 
     /** One refresh trigger, every backend this daemon can answer for. */
     fun fetchAllQuotas(forceRefresh: Boolean = false) {
@@ -6219,7 +6185,6 @@ class PocketRepository(
 
     /** A managed member whose native record is gone: opening it would resume nothing. */
     fun isManagedMissing(s: SessionSummary): Boolean = s.managedRowKey() in managedMissing.value
-    fun isManagedAmbiguous(s: SessionSummary): Boolean = s.managedRowKey() in managedAmbiguous.value
 
     /** The listed project's daemon rows as they arrived — a RECENT snapshot taken while managed agents are held back. */
     internal fun listedDaemonRows(): List<SessionSummary> = legacySessions
@@ -8422,11 +8387,6 @@ class PocketRepository(
         sendGrantMutation(requestId, pending, ClearAllowRule(c, null, requestId))
     }
 
-    fun switchDir(wd: String) {
-        val c = convoId.value ?: return
-        scope.launch { send(SwitchDirectory(c, wd)) }
-    }
-
     /** Interrupt the current turn (composer ■): the session stays alive, generation stops. */
     fun cancelTurn() {
         val c = convoId.value ?: return
@@ -8798,17 +8758,4 @@ private fun <V : Any> agentSlot(
         set(v) { if (v == null) map.remove(agent) else map[agent] = v }
     override fun component1(): V? = value
     override fun component2(): (V?) -> Unit = { value = it }
-}
-
-/** The non-null slot: an absent key reads as [absent] (a missing loading flag is "not loading"). */
-private fun <V : Any> agentFlag(
-    map: androidx.compose.runtime.snapshots.SnapshotStateMap<AgentKind, V>,
-    agent: AgentKind,
-    absent: V,
-): MutableState<V> = object : MutableState<V> {
-    override var value: V
-        get() = map[agent] ?: absent
-        set(v) { map[agent] = v }
-    override fun component1(): V = value
-    override fun component2(): (V) -> Unit = { value = it }
 }

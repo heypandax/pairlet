@@ -76,7 +76,7 @@ class SplitDragState {
     }
 
     /** Forget every column at index ≥ [count] — the shell calls this with the number of droppable
-     *  columns it actually rendered, so a closed column's rect (or all of them, on the watch branch)
+     *  columns it actually rendered, so a closed column's rect
      *  cannot keep catching drops over whatever occupies that area now. */
     fun trimColumnBounds(count: Int) {
         val cur = columnBounds

@@ -21,8 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,22 +50,6 @@ object ImportSessionsTags {
 
 /** Width at which a row puts its time in a trailing column instead of under the prompt. */
 private val WIDE_ROW_MIN = 560.dp
-
-/**
- * Controller-backed mount: phone full-screen route and desktop overlay both use this. The host owns the controller
- * (created with an explicit scope + gateway) and decides what "located in the managed list" means in [onImported].
- */
-@Composable
-fun ImportSessionsScreen(
-    controller: ImportSessionsController,
-    modifier: Modifier = Modifier,
-    onClose: (() -> Unit)? = null,
-    enable: ManagedEnableUi? = null,
-    onEnable: (dev.ccpocket.protocol.AgentKind) -> Unit = {},
-) {
-    val state by controller.state.collectAsState()
-    ImportSessionsView(state, controller::dispatch, modifier, onClose, enable, onEnable)
-}
 
 /**
  * Issue #360 stage 2: "Import from local history…". Stateless — every interaction is an [ImportSessionsEvent].

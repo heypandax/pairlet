@@ -4,7 +4,7 @@ package dev.ccpocket.daemon.pins
  * What the transport a project-pin request arrived on knows about that CONNECTION (issue #362). Handed to the
  * router beside the frame by the relay and LAN transports; never serialized, never read from a frame, and it
  * names no device — the router's transport-authenticated deviceId stays the only identity. A caller without
- * one (the plaintext `--local` socket, an in-process caller) can neither subscribe nor mutate.
+ * one (an in-process caller) can neither subscribe nor mutate.
  */
 interface ProjectPinConnection {
     /** Still an allow-listed owner connection that declared pin support and was not retired or closed. */

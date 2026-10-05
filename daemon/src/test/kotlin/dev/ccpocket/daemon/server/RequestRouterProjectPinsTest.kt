@@ -312,7 +312,7 @@ class RequestRouterProjectPinsTest {
         val r = router(service())
         val sink = Collect()
         val conn = Conn(subscription = sub)
-        r.handle(pinX(), sink, caps = declared(), deviceId = null, pinConnection = conn) // the plaintext --local socket
+        r.handle(pinX(), sink, caps = declared(), deviceId = null, pinConnection = conn) // an in-process caller with no device identity
         r.handle(pinX(), sink, caps = declared(), deviceId = "devA") // an in-process caller: no connection context
         r.handle(fetch(sub2), sink, caps = declared(), deviceId = "devA")
         assertEquals(List(3) { ProjectPinErrors.UNAVAILABLE }, sink.pinStates().map { it.error })

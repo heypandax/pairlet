@@ -5,11 +5,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -23,7 +21,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.rounded.LaptopMac
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -833,29 +830,5 @@ internal fun AgentCard(agent: AgentKind, selected: Boolean, modifier: Modifier, 
             color = if (selected) Tok.tx else Tok.tx2, fontWeight = FontWeight.SemiBold,
             style = TextStyle(fontFamily = Dk.ui),
         )
-    }
-}
-
-/** The sidebar collapsed to a 56px icon strip for narrow windows. */
-@Composable
-fun CollapsedSidebar(modifier: Modifier = Modifier) {
-    Column(
-        modifier.width(56.dp).fillMaxHeight().background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(0.dp)).padding(vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Box(Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(9.dp)), contentAlignment = Alignment.Center) {
-            Icon(Icons.Rounded.LaptopMac, null, tint = Tok.tx2, modifier = Modifier.size(16.dp))
-            Box(Modifier.align(Alignment.BottomEnd).offset(x = 1.dp, y = 1.dp).size(8.dp).clip(RoundedCornerShape(999.dp)).background(Tok.ok).border(2.dp, Tok.surface, RoundedCornerShape(999.dp)))
-        }
-        Box(Modifier.padding(vertical = 6.dp).width(24.dp).height(1.dp).background(Tok.hair))
-        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(17.dp)) }
-        Box(Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(Tok.raised), contentAlignment = Alignment.Center) {
-            AgentGlyph(AgentKind.CLAUDE, size = 17)
-            Box(Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp).size(15.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent), contentAlignment = Alignment.Center) {
-                Text("1", color = Tok.base, fontFamily = Dk.mono, fontSize = 9.sp, fontWeight = FontWeight.Bold, style = tightCenter(9.sp))
-            }
-        }
-        Spacer(Modifier.weight(1f))
-        Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Settings, null, tint = Tok.tx2, modifier = Modifier.size(17.dp)) }
     }
 }

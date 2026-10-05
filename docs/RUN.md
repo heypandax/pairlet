@@ -15,28 +15,9 @@
 
 ---
 
-## 2. M0 —— 本机驱动真实 claude（两个终端，最能看清核心）
+## 2. M0 —— 本机驱动真实 claude（最能看清核心）
 
-先构建启动器：
-
-```bash
-./gradlew :daemon:installDist
-D=daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon
-```
-
-**终端 1 —— 起 daemon**（本机 WS 在 `127.0.0.1:8765`）：
-
-```bash
-$D run --claude-bin ~/.local/bin/claude
-```
-
-**终端 2 —— 交互式 test-client**：
-
-```bash
-$D test-client
-```
-
-然后逐条输入（每条等上一条的回应再发下一条）：
+daemon 只接受经 relay 端到端加密的设备，或已配对设备的 E2E 直连；没有免配对的本机明文入口。先按 §3 的「手动三步」起本地 relay 和 daemon、完成配对，用终端 3 的设备 test-client 连上，然后逐条输入（每条等上一条的回应再发下一条）：
 
 ```
 dirs                                  # 列出有历史会话的目录
@@ -100,20 +81,20 @@ $D pair        # 另开一个终端；输出 ccpocket://pair?relay=...&acct=...&
 $D test-client --relay ws://127.0.0.1:9000 --daemon-pub "<dpk>" --ticket "<ticket>"
 ```
 
-之后 `dirs / open / say …` 一样用，流量走 device ↔ relay ↔ daemon、全程加密（relay 看不到内容）。
+之后 `dirs / open / say …` 按 §2 的用法输入，流量走 device ↔ relay ↔ daemon、全程加密（relay 看不到内容）。
 手机端：把 `ccpocket://pair?...` 链接粘进 App 的「Pair」框即可（见 `docs/ios-device.md`）。
 
 ---
 
 ## 4. M2 —— 桌面客户端（Compose）
 
-需要图形界面（在你的 Mac 上直接跑）。先按 §2 起一个本机 daemon，再：
+需要图形界面（在你的 Mac 上直接跑）。先在电脑上起 daemon（不传 `--relay` 即连线上 relay）并用 `pairlet pair` 打印 6 位配对码，再：
 
 ```bash
 ./gradlew :mobile:composeApp:run
 ```
 
-窗口里把地址填 `ws://127.0.0.1:8765/v1/ws` → Connect → 点目录 → 点会话/新建 → 在 Chat 里发消息。
+窗口里输入配对码 → 点目录 → 点会话/新建 → 在 Chat 里发消息。
 （这是 Desktop 目标；Android/iOS 目标需要先装 Android SDK / Xcode。）
 
 **桌面客户端（给用户的另一种选择）**：除了手机 App，cc-pocket 也能作为桌面 App 运行——从 GitHub Release 下载 DMG（macOS）/ MSI（Windows）/ deb、rpm（Linux）：
@@ -155,18 +136,19 @@ export PATH="$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator"
 # 1) 起一个带界面的模拟器（想看就别加 -no-window）
 emulator -avd ccpocket &
 
-# 2) 起本机 daemon（App 默认连 ws://10.0.2.2:8765 —— 模拟器访问宿主机的别名）
+# 2) 起本机 daemon（默认连线上 relay），另开终端打印 6 位配对码
 daemon/build/install/cc-pocket-daemon/bin/pairlet run --claude-bin ~/.local/bin/claude
+daemon/build/install/cc-pocket-daemon/bin/pairlet pair
 
 # 3) 构建并安装 APK 到运行中的模拟器/真机
 ./gradlew :mobile:androidApp:installDebug
 #   或手动：./gradlew :mobile:androidApp:assembleDebug
 #           adb install -r mobile/androidApp/build/outputs/apk/debug/androidApp-debug.apk
 
-# 4) App 里点 Connect → 看到目录列表 → 点目录 → 选/建会话 → Chat 发消息
+# 4) App 里输入配对码 → 看到目录列表 → 点目录 → 选/建会话 → Chat 发消息
 ```
 
-真机：用数据线连上、开 USB 调试，`adb devices` 能看到后同样 `installDebug`；真机连本机 daemon 要把 App 里的 URL 改成你电脑的局域网 IP（如 `ws://192.168.1.100:8765`），并让 daemon 监听 `0.0.0.0`（`run --host 0.0.0.0`）。
+真机：用数据线连上、开 USB 调试，`adb devices` 能看到后同样 `installDebug`，配对方式相同。同一网络下已配对的设备会自动尝试 E2E 直连，daemon 加 `--direct-bind 0.0.0.0` 才对局域网开放这个入口。
 运行截图见 `docs/design/android/`。
 
 ---

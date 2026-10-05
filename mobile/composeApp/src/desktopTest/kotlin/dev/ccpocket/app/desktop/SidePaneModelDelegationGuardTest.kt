@@ -132,7 +132,7 @@ class SidePaneModelDelegationGuardTest {
         "renameComputer", "removeComputer", "activeIsThisMachine",
         // window-level overlay flags
         "switcherOpen", "showNewSession", "showTray", "palette", "showSettings", "showAddComputer",
-        "showPermissionModal", "showAttention", "showWorktrees", "showSkills", "showHandoff",
+        "showAttention", "showWorktrees", "showSkills", "showHandoff",
         "showReviewCenter", "showFolderPicker", "showQuotaPopover",
         "anyOverlayOpen", "dismissOverlays",
         // session handoff + collaborator links (raised from window chrome; the pane's banner is inert)
@@ -167,7 +167,7 @@ class SidePaneModelDelegationGuardTest {
         // remote directory browser (issues #218/#214)
         "browseListing", "browseRoots", "browseDirectories", "requestBrowse",
         // fleet
-        "machines", "attention", "watch", "resolveAttention", "openAttention", "jumpMachine",
+        "machines", "attention", "resolveAttention", "openAttention", "jumpMachine",
         "running", "runningVisible", "runningSessionsIn", "runningRows", "openRunning", "browseRunning",
         // split-pane plumbing itself: these take the pane as an argument, so they are already explicit
         // (splitFocusedSlot is window layout — WHERE the focused chat renders — not conversation state)

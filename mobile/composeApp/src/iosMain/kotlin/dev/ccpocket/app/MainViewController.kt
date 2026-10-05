@@ -77,7 +77,6 @@ fun setTelemetrySink(
 }
 
 /** Public Swift seams keep observability model classes out of the Compose framework export. */
-fun diagnosticSharingEnabled(): Boolean = dev.ccpocket.app.telemetry.Telemetry.isEnabled()
 fun admitDiagnosticRecord(json: String): Boolean = dev.ccpocket.app.telemetry.DiagnosticBridge.admit(json)
 fun setDiagnosticSink(environment: String, onRecord: (String) -> Boolean, onEnabled: (Boolean) -> Unit) =
     dev.ccpocket.app.telemetry.DiagnosticBridge.register(environment, onRecord, onEnabled)
@@ -87,6 +86,5 @@ fun setTelemetryCollectionSink(onEnabled: (Boolean) -> Unit) {
 }
 /** Native callbacks pass fixed counter categories only, never HTTP data or diagnostic contents. */
 fun incrementDiagnosticCounter(name: String) = dev.ccpocket.app.telemetry.DiagnosticBridge.incrementCounter(name)
-fun flushDiagnosticCounters() = dev.ccpocket.app.telemetry.DiagnosticBridge.flushCounters()
 
 fun admitDiagnosticSpans(): Boolean = dev.ccpocket.app.telemetry.DiagnosticBridge.admitSpans()

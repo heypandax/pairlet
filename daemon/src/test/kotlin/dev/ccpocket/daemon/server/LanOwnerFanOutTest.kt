@@ -12,20 +12,26 @@ import dev.ccpocket.daemon.disk.FileInboxService
 import dev.ccpocket.daemon.handoff.HandoffRegistry
 import dev.ccpocket.daemon.handoff.HandoffService
 import dev.ccpocket.daemon.handoff.HandoffStore
+import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.HandoffStatus
 import dev.ccpocket.protocol.HandoffUpdated
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
+import dev.ccpocket.protocol.LanHello
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.SessionHandoff
+import dev.ccpocket.protocol.e2e.E2ECrypto
+import dev.ccpocket.protocol.e2e.E2ESession
+import dev.ccpocket.protocol.e2e.Wire
 import io.ktor.websocket.WebSocketExtension
 import io.ktor.websocket.WebSocketSession
 import kotlinx.coroutines.CoroutineScope
@@ -37,9 +43,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.CoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -100,8 +108,14 @@ class LanOwnerFanOutTest {
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
     }
 
+    /** One gated direct socket and the E2E session its paired device completed. */
+    private class Conn(val ws: FakeWsSession, val job: Job, val session: E2ESession)
+
     private class Fixture(val scope: CoroutineScope) {
         private val tmp = Files.createTempDirectory("ccp-lan-fanout").toFile()
+        val identity: Identity = Identity.loadOrCreate(tmp.resolve("identity.json"))
+        /** The allow-list the gate consults per lookup — a fixture, never the developer's devices.json. */
+        val allowed = ConcurrentHashMap<String, ByteArray>()
         val registry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { StubBackend() }))
         val handoffs = HandoffService(HandoffRegistry(HandoffStore.load(tmp.resolve("handoffs.json"))))
         val router = RequestRouter(
@@ -122,31 +136,42 @@ class LanOwnerFanOutTest {
         )
 
         init { registry.handoffs = handoffs }
-
-        /** One direct socket, served exactly as [DaemonServer] serves it (plaintext = the `--local`
-         *  flavour, so the test needs no Noise handshake to reach the same pump). */
-        fun connect(): Pair<FakeWsSession, Job> {
-            val ws = FakeWsSession(scope.coroutineContext)
-            val job = scope.launch {
-                WsConnection(ws, router, registry, e2e = null, ownerControls = null).serve()
-            }
-            return ws to job
-        }
     }
 
-    private fun bodyOf(frame: WsFrame): dev.ccpocket.protocol.Frame? =
-        (frame as? WsFrame.Text)?.let {
-            runCatching { PocketJson.decodeFromString<Envelope>(it.data.decodeToString()).body }.getOrNull()
+    /** One direct socket, served exactly as [DaemonServer] serves it: a freshly paired device opens it
+     *  with LanHello + the Noise handshake, and the DaemonInfo the gate queues is consumed here, so the
+     *  test starts from the same pump with nothing pending. */
+    private suspend fun Fixture.connect(id: String): Conn {
+        val keys = E2ECrypto.generateKeyPair().also { allowed[id] = it.publicRaw }
+        val ws = FakeWsSession(scope.coroutineContext)
+        val gate = LanE2E(identity = identity, lanUrl = { null }, pairedDevices = { HashMap(allowed) })
+        val job = scope.launch {
+            WsConnection(ws, router, registry, e2e = gate, ownerControls = null).serve()
+        }
+        val initiator = E2ESession.initiator(keys.privateRaw, keys.publicRaw, identity.e2ePubRaw, ByteArray(0))
+        ws.inbound.send(WsFrame.Text(PocketJson.encodeToString(Envelope("c", 0, body = LanHello(id)))))
+        ws.inbound.send(WsFrame.Binary(true, Wire.payload(Wire.HANDSHAKE, initiator.ephPublic)))
+        val reply = assertNotNull(withTimeout(5_000) { ws.sent.receive() } as? WsFrame.Binary)
+        assertEquals(Wire.HANDSHAKE, Wire.payloadType(reply.data))
+        val conn = Conn(ws, job, initiator.finish(Wire.payloadBody(reply.data)))
+        assertTrue(bodyOf(conn, withTimeout(5_000) { ws.sent.receive() }) is DaemonInfo, "the gate's DaemonInfo comes first")
+        return conn
+    }
+
+    private fun bodyOf(conn: Conn, frame: WsFrame): dev.ccpocket.protocol.Frame? =
+        (frame as? WsFrame.Binary)?.takeIf { it.data.isNotEmpty() && Wire.payloadType(it.data) == Wire.TRANSPORT }?.let {
+            val plain = conn.session.open(Wire.payloadBody(it.data)) ?: return null
+            runCatching { PocketJson.decodeFromString<Envelope>(plain.decodeToString()).body }.getOrNull()
         }
 
     /** Broadcast until it lands, so the assertion does not race the connection's attach. Each retry is
      *  the same row, and fan-out is idempotent — what is being waited for is the sink, not the state. */
-    private suspend fun awaitPush(ws: FakeWsSession, push: suspend () -> Unit): dev.ccpocket.protocol.Frame =
+    private suspend fun awaitPush(conn: Conn, push: suspend () -> Unit): dev.ccpocket.protocol.Frame =
         withTimeout(10_000) {
             while (true) {
                 push()
-                val f = withTimeoutOrNull(50) { ws.sent.receive() }
-                val body = f?.let(::bodyOf)
+                val f = withTimeoutOrNull(50) { conn.ws.sent.receive() }
+                val body = f?.let { bodyOf(conn, it) }
                 if (body != null) return@withTimeout body
             }
             @Suppress("UNREACHABLE_CODE") error("unreachable")
@@ -160,15 +185,16 @@ class LanOwnerFanOutTest {
     @Test
     fun a_lan_owner_receives_live_owner_pushes_and_stops_the_moment_its_socket_dies() = runBlocking {
         val f = Fixture(this)
-        val (ws, job) = f.connect()
+        val conn = f.connect("devA")
+        val ws = conn.ws
 
         // 1. live: the push arrives on this socket without the client asking for anything
-        val handoffPush = awaitPush(ws) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
+        val handoffPush = awaitPush(conn) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
         assertEquals("h-1", assertNotNull(handoffPush as? HandoffUpdated).handoff.id)
 
         // 2. the socket dies -> the sink goes with it
         ws.hangUp()
-        job.join()
+        conn.job.join()
         while (withTimeoutOrNull(20) { ws.sent.receive() } != null) Unit // drain anything already queued
 
         f.handoffs.broadcast(listOf(handoff("h-2")))
@@ -186,20 +212,22 @@ class LanOwnerFanOutTest {
     @Test
     fun one_connections_disconnect_does_not_detach_another() = runBlocking {
         val f = Fixture(this)
-        val (first, firstJob) = f.connect()
-        val (second, _) = f.connect()
+        val firstConn = f.connect("devA")
+        val secondConn = f.connect("devB")
+        val first = firstConn.ws
+        val second = secondConn.ws
 
         // both live
-        awaitPush(first) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
-        awaitPush(second) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
+        awaitPush(firstConn) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
+        awaitPush(secondConn) { f.handoffs.broadcast(listOf(handoff("h-1"))) }
 
         first.hangUp()
-        firstJob.join()
+        firstConn.job.join()
         // both sockets saw the warm-up broadcasts above — drain them, so what follows is only new traffic
         while (withTimeoutOrNull(20) { second.sent.receive() } != null) Unit
         while (withTimeoutOrNull(20) { first.sent.receive() } != null) Unit
 
-        val stillLive = awaitPush(second) { f.handoffs.broadcast(listOf(handoff("h-3"))) }
+        val stillLive = awaitPush(secondConn) { f.handoffs.broadcast(listOf(handoff("h-3"))) }
         assertEquals("h-3", assertNotNull(stillLive as? HandoffUpdated).handoff.id)
 
         assertNull(

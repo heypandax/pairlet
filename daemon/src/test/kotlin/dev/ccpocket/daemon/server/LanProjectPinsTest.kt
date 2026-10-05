@@ -59,8 +59,7 @@ import io.ktor.websocket.Frame as WsFrame
  * get pushes with their own subscription while a legacy sibling gets none; a socket's subscription moves only with
  * its own accepted fetches, never with a stale batch; a refusal reaches the socket that asked without registering
  * it; a device revoked while its socket is idle is cut at the next pin frame — including one already queued behind
- * a stalled write — without having to send anything; the plaintext `--local` socket can never subscribe; and a
- * hung-up socket leaves no slot behind.
+ * a stalled write — without having to send anything; and a hung-up socket leaves no slot behind.
  */
 class LanProjectPinsTest {
 
@@ -116,9 +115,9 @@ class LanProjectPinsTest {
 
         fun device(id: String): E2ECrypto.KeyPair = E2ECrypto.generateKeyPair().also { allowed[id] = it.publicRaw }
 
-        fun connect(gated: Boolean, sentCapacity: Int = Channel.UNLIMITED): Conn {
+        fun connect(sentCapacity: Int = Channel.UNLIMITED): Conn {
             val ws = FakeWsSession(scope.coroutineContext, sentCapacity)
-            val gate = if (gated) LanE2E(identity = identity, lanUrl = { null }, pairedDevices = { HashMap(allowed) }) else null
+            val gate = LanE2E(identity = identity, lanUrl = { null }, pairedDevices = { HashMap(allowed) })
             val caught = AtomicReference<Throwable?>(null)
             val job = scope.launch {
                 try {
@@ -189,11 +188,11 @@ class LanProjectPinsTest {
         val f = Fixture(this)
         try {
             val keysA = f.device("devA"); val keysB = f.device("devB"); val keysC = f.device("devC")
-            val a = f.connect(gated = true); val sa = f.handshake(a, "devA", keysA)
+            val a = f.connect(); val sa = f.handshake(a, "devA", keysA)
             subscribe(a, sa, "devA", sub("a"))
-            val b = f.connect(gated = true); val sb = f.handshake(b, "devB", keysB)
+            val b = f.connect(); val sb = f.handshake(b, "devB", keysB)
             send(b, sb, ClientCaps(supportsAgents = listOf("opencode"))) // an already-shipped App on the same LAN
-            val c = f.connect(gated = true); val sc = f.handshake(c, "devC", keysC)
+            val c = f.connect(); val sc = f.handshake(c, "devC", keysC)
             subscribe(c, sc, "devC", sub("c"))
 
             commit(a, sa, "devA", sub("a"), 1, "/nonexistent-ccp/x")
@@ -215,7 +214,7 @@ class LanProjectPinsTest {
         val f = Fixture(this)
         try {
             val keysA = f.device("devA"); val keysC = f.device("devC")
-            val a = f.connect(gated = true); val sa = f.handshake(a, "devA", keysA)
+            val a = f.connect(); val sa = f.handshake(a, "devA", keysA)
             subscribe(a, sa, "devA", sub("a1"))
             send(a, sa, SyncProjectPins("fetch-2", sub("a2"), stream("devA")))
             assertEquals(sub("a2"), (receive(a, sa) as ProjectPinsState).subscriptionId)
@@ -226,7 +225,7 @@ class LanProjectPinsTest {
             assertEquals("late-op", refused.requestId)
             assertNull(refused.snapshot)
 
-            val c = f.connect(gated = true); val sc = f.handshake(c, "devC", keysC)
+            val c = f.connect(); val sc = f.handshake(c, "devC", keysC)
             subscribe(c, sc, "devC", sub("c"))
             commit(c, sc, "devC", sub("c"), 1, "/nonexistent-ccp/x")
             val push = receive(a, sa) as ProjectPinsState
@@ -243,14 +242,14 @@ class LanProjectPinsTest {
         val f = Fixture(this)
         try {
             val keysA = f.device("devA"); val keysC = f.device("devC")
-            val a = f.connect(gated = true); val sa = f.handshake(a, "devA", keysA)
+            val a = f.connect(); val sa = f.handshake(a, "devA", keysA)
             send(a, sa, ClientCaps(supportsProjectPins = true))
             send(a, sa, op(1, sub("a"), "devA", "/nonexistent-ccp/early"))
             val refused = receive(a, sa) as ProjectPinsState
             assertEquals(ProjectPinErrors.SUBSCRIPTION_STALE, refused.error)
             assertEquals("op-1", refused.requestId)
 
-            val c = f.connect(gated = true); val sc = f.handshake(c, "devC", keysC)
+            val c = f.connect(); val sc = f.handshake(c, "devC", keysC)
             subscribe(c, sc, "devC", sub("c"))
             commit(c, sc, "devC", sub("c"), 1, "/nonexistent-ccp/x")
             assertNull(withTimeoutOrNull(300) { a.ws.sent.receive() }, "a refusal registers nothing, so no push follows")
@@ -265,9 +264,9 @@ class LanProjectPinsTest {
         val f = Fixture(this)
         try {
             val keysA = f.device("devA"); val keysC = f.device("devC")
-            val a = f.connect(gated = true); val sa = f.handshake(a, "devA", keysA)
+            val a = f.connect(); val sa = f.handshake(a, "devA", keysA)
             subscribe(a, sa, "devA", sub("a"))
-            val c = f.connect(gated = true); val sc = f.handshake(c, "devC", keysC)
+            val c = f.connect(); val sc = f.handshake(c, "devC", keysC)
             subscribe(c, sc, "devC", sub("c"))
 
             f.allowed.remove("devC") // revoked on another path; this socket stays silent
@@ -284,10 +283,10 @@ class LanProjectPinsTest {
         val f = Fixture(this)
         try {
             val keysA = f.device("devA"); val keysC = f.device("devC")
-            val a = f.connect(gated = true); val sa = f.handshake(a, "devA", keysA)
+            val a = f.connect(); val sa = f.handshake(a, "devA", keysA)
             subscribe(a, sa, "devA", sub("a"))
             // a rendezvous socket: every write blocks until the test reads it, so later frames queue in the outbox
-            val c = f.connect(gated = true, sentCapacity = Channel.RENDEZVOUS); val sc = f.handshake(c, "devC", keysC)
+            val c = f.connect(sentCapacity = Channel.RENDEZVOUS); val sc = f.handshake(c, "devC", keysC)
             subscribe(c, sc, "devC", sub("c"))
 
             commit(a, sa, "devA", sub("a"), 1, "/nonexistent-ccp/one") // push #1: sealed, its write now blocks
@@ -306,35 +305,11 @@ class LanProjectPinsTest {
     }
 
     @Test
-    fun a_plaintext_local_socket_can_neither_subscribe_nor_receive_pins() = runBlocking {
-        val f = Fixture(this)
-        try {
-            val local = f.connect(gated = false)
-            local.ws.inbound.send(WsFrame.Text(envelopeText(ClientCaps(supportsProjectPins = true))))
-            local.ws.inbound.send(WsFrame.Text(envelopeText(SyncProjectPins("fetch", sub("local"), stream("local")))))
-            val reply = assertNotNull(withTimeout(5_000) { local.ws.sent.receive() } as? WsFrame.Text)
-            val state = PocketJson.decodeFromString<Envelope>(reply.data.decodeToString()).body as ProjectPinsState
-            assertEquals(ProjectPinErrors.UNAVAILABLE, state.error)
-            assertNull(state.snapshot)
-
-            val keysA = f.device("devA")
-            val a = f.connect(gated = true); val sa = f.handshake(a, "devA", keysA)
-            subscribe(a, sa, "devA", sub("a"))
-            assertEquals(1, f.pins.subscriberCount(), "only the gated socket holds a pin slot")
-            commit(a, sa, "devA", sub("a"), 1, "/nonexistent-ccp/x")
-            assertNull(withTimeoutOrNull(300) { local.ws.sent.receive() })
-            listOf(local, a).forEach { it.ws.hangUp() }
-        } finally {
-            f.close()
-        }
-    }
-
-    @Test
     fun a_hung_up_socket_leaves_no_pin_slot_behind() = runBlocking {
         val f = Fixture(this)
         try {
             val keysA = f.device("devA")
-            val a = f.connect(gated = true); val sa = f.handshake(a, "devA", keysA)
+            val a = f.connect(); val sa = f.handshake(a, "devA", keysA)
             subscribe(a, sa, "devA", sub("a"))
             assertEquals(1, f.pins.subscriberCount())
             a.ws.hangUp()

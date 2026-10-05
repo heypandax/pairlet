@@ -19,7 +19,6 @@ class ZCodeUiLogicTest {
     fun identityIsDedicatedAndNamesTheVendor() {
         assertEquals("ZCode", agentName(AgentKind.ZCODE))
         assertEquals("ZC", agentAbbrev(AgentKind.ZCODE))
-        assertEquals("ZCode · Z.ai", agentTagline(AgentKind.ZCODE))
         assertNotEquals(agentColor(AgentKind.KIMI), agentColor(AgentKind.ZCODE))
     }
 

@@ -46,13 +46,4 @@ class PermissionKeyHintTest {
         assertPresent(str(Res.string.allow_for_task))
         assertFalse(present("⌘⏎"), "⌘⏎ is not bound to Allow for task")
     }
-
-    @Test
-    fun theFocusedModalShowsNoUnwiredShortcut() = runComposeUiTest {
-        setContent {
-            PocketTheme { FocusedModal("devbox", ask, AgentKind.CLAUDE, "~/w", null, onAllow = {}, onDeny = {}, onDismiss = {}) }
-        }
-        assertPresent(str(Res.string.allow))
-        assertFalse(present("⌘⏎"), "⌘⏎ is not bound to the modal's Allow")
-    }
 }

@@ -72,8 +72,6 @@ data class SessionWorkingSet(
     val attention: Boolean,
 )
 
-val EMPTY_WORKING_SET = SessionWorkingSet(emptyList(), emptyList(), null, 0, false)
-
 /** Last path segment of a project dir, separator-agnostic (a Windows daemon's paths use '\'). */
 fun projectLabelOf(dirKey: String): String {
     val trimmed = dirKey.trimEnd('/', '\\')

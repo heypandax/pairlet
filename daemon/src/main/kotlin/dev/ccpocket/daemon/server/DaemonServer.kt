@@ -9,23 +9,21 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
-import kotlinx.coroutines.runBlocking
 
 /**
- * Local WebSocket server on `/v1/ws`. Two roles, same code:
- *  - `--local` mode: the only transport (plaintext, loopback dev use) — [e2e] null, [run] blocks.
- *  - relay mode's direct listener: runs ALONGSIDE the relay client so paired devices on this
- *    machine/LAN skip the relay — [e2e] gates every socket, [run]`(wait=false)` keeps main free.
+ * The E2E direct listener on `/v1/ws`: runs ALONGSIDE the relay client so paired devices on this
+ * machine/LAN skip the relay. [gate] is required and authenticates every socket — there is no way to
+ * build an unauthenticated listener. [start] returns immediately; the relay client owns the main thread.
  */
 class DaemonServer(
     private val core: DaemonCore,
     private val host: String,
     private val port: Int,
-    private val e2e: LanE2E? = null,
+    private val gate: LanE2E,
 ) {
     private val log = logger("DaemonServer")
 
-    fun run(wait: Boolean = true) {
+    fun start() {
         val server = embeddedServer(CIO, host = host, port = port) {
             install(WebSockets) {
                 // detect zombie phone sockets (screen-locked / walked-out-of-range): without a transport
@@ -39,7 +37,7 @@ class DaemonServer(
                     val peer = runCatching { call.request.origin.remoteHost }.getOrDefault("?")
                     log.info("WS connect from $peer")
                     try {
-                        WsConnection(this, core.router, core.registry, e2e,
+                        WsConnection(this, core.router, core.registry, gate,
                             ownerControls = { Triple(core.shareControl, core.bridgeControl, core.collaboratorControl) }).serve()
                     } finally {
                         log.info("WS disconnect from $peer")
@@ -47,9 +45,7 @@ class DaemonServer(
                 }
             }
         }
-        log.info("listening on ws://$host:$port/v1/ws${if (e2e != null) " (E2E-gated, paired devices only)" else ""}")
-        // owns process shutdown only when it IS the process (--local); in relay mode RelayClient's loop does
-        if (wait) Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
-        server.start(wait = wait)
+        log.info("listening on ws://$host:$port/v1/ws (E2E-gated, paired devices only)")
+        server.start(wait = false)
     }
 }
