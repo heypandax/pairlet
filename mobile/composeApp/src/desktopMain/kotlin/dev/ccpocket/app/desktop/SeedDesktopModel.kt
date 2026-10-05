@@ -30,7 +30,7 @@ open class SeedDesktopModel : DesktopModel {
         private set
 
     override val projects = listOf(
-        DkProject("~/code/cc-pocket", "cc-pocket", running = true),
+        DkProject("~/code/pairlet", "pairlet", running = true),
         DkProject("~/code/relay", "relay"),
         DkProject("~/dotfiles", "dotfiles"),
     )
@@ -38,13 +38,13 @@ open class SeedDesktopModel : DesktopModel {
     // ungrouped, so the grouped sidebar zone renders every kind of section. Group membership is overlaid
     // by [groupOverride] so the seed's assignGroup() moves are observable.
     private val baseSessions = listOf(
-        DkSession("s1", "~/code/cc-pocket", "Refactor auth module", running = true, model = "claude-sonnet-5-20250929", group = "g-auth"),
-        DkSession("s2", "~/code/cc-pocket", "Fix stream parser test", running = true, model = "claude-opus-4-8", group = null),
-        DkSession("s3", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX, pending = 1, group = "g-ci"), // keeps the Codex diff-approval surface exercised
+        DkSession("s1", "~/code/pairlet", "Refactor auth module", running = true, model = "claude-sonnet-5-20250929", group = "g-auth"),
+        DkSession("s2", "~/code/pairlet", "Fix stream parser test", running = true, model = "claude-opus-4-8", group = null),
+        DkSession("s3", "~/code/pairlet", "Tidy CI workflow", AgentKind.CODEX, pending = 1, group = "g-ci"), // keeps the Codex diff-approval surface exercised
         // ungrouped on purpose: parked in a group it would push the shared "acme-api" section below
         // the test viewport (sharedGroupShowsProvenancePillAndExpiry) — here it exercises the
         // OpenCode badge/row surfaces without reshaping the grouped sections above it
-        DkSession("s4", "~/code/cc-pocket", "Update docs", AgentKind.OPENCODE),
+        DkSession("s4", "~/code/pairlet", "Update docs", AgentKind.OPENCODE),
     )
     private val groupOverride = mutableStateMapOf<String, String?>()
     private val titleOverride = mutableStateMapOf<String, String>() // session rename (issue #158)
@@ -57,7 +57,7 @@ open class SeedDesktopModel : DesktopModel {
     // custom groups of the current project (issue #119) — mutable so create/rename/delete are observable
     private val groupList = mutableStateListOf(DkGroup("g-auth", "Auth work", 0), DkGroup("g-ci", "CI & release", 1))
     override val customGroups: List<DkGroup> get() = groupList.sortedBy { it.order }
-    override val canEditGroups = true // the seed's current project (cc-pocket) is owner-editable
+    override val canEditGroups = true // the seed's current project (pairlet) is owner-editable
     override fun createGroup(name: String) { groupList.add(DkGroup("g-${groupList.size + 1}", name.trim(), groupList.size)) }
     override fun renameGroup(groupId: String, name: String) {
         val i = groupList.indexOfFirst { it.id == groupId }
@@ -92,7 +92,7 @@ open class SeedDesktopModel : DesktopModel {
     // RECENT: the live project plus previously visited ones — exercises the grouped sidebar zone
     override val sessionGroups: List<DkSessionGroup>
         get() = listOf(
-            DkSessionGroup("~/code/cc-pocket", "cc-pocket", current = true, sessions = sessions),
+            DkSessionGroup("~/code/pairlet", "pairlet", current = true, sessions = sessions),
             DkSessionGroup(
                 "~/code/relay", "relay", current = false,
                 sessions = listOf(
@@ -108,7 +108,7 @@ open class SeedDesktopModel : DesktopModel {
 
     // the design's three pins: one local + running, one on devbox-linux, one Codex on mac-studio
     private val pinList = mutableStateListOf(
-        DkPin("acct-mbp", "s1", "~/code/cc-pocket", "Refactor auth module"),
+        DkPin("acct-mbp", "s1", "~/code/pairlet", "Refactor auth module"),
         DkPin("acct-linux", "m3s1", "~/src/relay", "Run integration tests"),
         DkPin("acct-studio", "m2s2", "~/work/api-server", "Port parser to Rust", AgentKind.CODEX),
     )
@@ -193,7 +193,7 @@ open class SeedDesktopModel : DesktopModel {
     // worktree card all render in a screenshot without a daemon. Mutations are inert by design: the
     // seed model fakes state, never verbs.
     override val gitStatus = dev.ccpocket.protocol.GitStatus(
-        convoId = "seed", workdir = "~/code/cc-pocket",
+        convoId = "seed", workdir = "~/code/pairlet",
         branch = "feat/auth-refactor", upstream = "origin/feat/auth-refactor", ahead = 2, behind = 1,
         staged = listOf(dev.ccpocket.protocol.GitFileEntry("src/relay/FrameParser.kt", "M", 12, 3)),
         unstaged = listOf(
@@ -204,16 +204,16 @@ open class SeedDesktopModel : DesktopModel {
         branches = listOf(
             dev.ccpocket.protocol.GitBranchInfo("feat/auth-refactor", current = true, lastCommitAt = 1_755_000_000),
             dev.ccpocket.protocol.GitBranchInfo("main", lastCommitAt = 1_754_800_000),
-            dev.ccpocket.protocol.GitBranchInfo("fix/pair-timeout", lastCommitAt = 1_754_600_000, checkedOutAt = "~/code/cc-pocket-worktrees/pair-timeout"),
+            dev.ccpocket.protocol.GitBranchInfo("fix/pair-timeout", lastCommitAt = 1_754_600_000, checkedOutAt = "~/code/pairlet-worktrees/pair-timeout"),
         ),
         worktreeCount = 2,
     )
     override val worktrees = dev.ccpocket.protocol.WorktreeList(
-        convoId = "seed", workdir = "~/code/cc-pocket", repoRoot = "~/code/cc-pocket",
+        convoId = "seed", workdir = "~/code/pairlet", repoRoot = "~/code/pairlet",
         worktrees = listOf(
-            dev.ccpocket.protocol.WorktreeEntry("~/code/cc-pocket", branch = "feat/auth-refactor", isMain = true, dirty = true, dirtyCount = 3),
+            dev.ccpocket.protocol.WorktreeEntry("~/code/pairlet", branch = "feat/auth-refactor", isMain = true, dirty = true, dirtyCount = 3),
             dev.ccpocket.protocol.WorktreeEntry(
-                "~/code/cc-pocket-worktrees/pair-timeout", branch = "fix/pair-timeout",
+                "~/code/pairlet-worktrees/pair-timeout", branch = "fix/pair-timeout",
                 dirty = false, activeSessionId = "s2", activeSessionTitle = "Fix stream parser test",
             ),
         ),
@@ -318,7 +318,7 @@ open class SeedDesktopModel : DesktopModel {
     override val hasChat = true
     override val chatTitle: String get() = selected.title
     override val chatAgent: AgentKind get() = selected.agent
-    override val chatWorkdir = "~/code/cc-pocket"
+    override val chatWorkdir = "~/code/pairlet"
     override val chatBranch = "main"
     override val chatModel: String get() = when (selected.agent) {
         AgentKind.CODEX -> "gpt-5.1-codex"
@@ -363,7 +363,7 @@ open class SeedDesktopModel : DesktopModel {
     override fun selectSession(s: DkSession) { sessions.indexOfFirst { it.sessionId == s.sessionId }.takeIf { it >= 0 }?.let { selectedIndex = it; askResolved = false } }
     // nullable like the interface (not narrowed to String): "no project in context" is a state the empty-state
     // starter (#256) has to be able to preview and test, and a narrowed override can't express it
-    override val newSessionDir: String? = "~/code/cc-pocket"
+    override val newSessionDir: String? = "~/code/pairlet"
     override var newSessionSeed: String? by mutableStateOf(null)
     /** #333: a canned dsh catalogue so the new-session popover's preset row renders without a daemon —
      *  the same three shipped rows plus one user-authored one the real `agentPreset.list` returns. */

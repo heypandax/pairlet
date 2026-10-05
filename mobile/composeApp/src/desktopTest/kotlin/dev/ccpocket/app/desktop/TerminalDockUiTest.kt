@@ -42,7 +42,7 @@ class TerminalDockUiTest {
         waitForIdle()
 
         // open: header cwd + the engineless fallback body + the header controls
-        assertPresent("~/code/cc-pocket")
+        assertPresent("~/code/pairlet")
         assertPresent(str(Res.string.term_engine_unavailable))
         assertTrue(present("main"), "the branch chip labels the shell") // chip Text is an exact "main" node
 
@@ -50,10 +50,10 @@ class TerminalDockUiTest {
         waitForIdle()
         assertEquals(TermPanelMode.COLLAPSED, model.terminalPanel.mode)
         assertTrue(!present(str(Res.string.term_engine_unavailable)), "the collapsed strip hides the body")
-        assertPresent("~/code/cc-pocket") // the strip still labels the session
+        assertPresent("~/code/pairlet") // the strip still labels the session
 
         // clicking the strip (its cwd label sits inside the clickable row) restores the panel
-        onNode(hasText("~/code/cc-pocket")).performClick()
+        onNode(hasText("~/code/pairlet")).performClick()
         waitForIdle()
         assertEquals(TermPanelMode.OPEN, model.terminalPanel.mode)
 

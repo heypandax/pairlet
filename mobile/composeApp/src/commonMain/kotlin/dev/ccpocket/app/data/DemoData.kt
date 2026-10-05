@@ -22,19 +22,19 @@ object DemoData {
     private fun ago(ms: Long) = epochMillis() - ms
 
     const val LIVE_SESSION_ID = "demo-live-0001"
-    const val LIVE_DIR = "/Users/alex/code/cc-pocket"
+    const val LIVE_DIR = "/Users/alex/code/pairlet"
 
     /** The project list shown on the directory browser — one live row + several with history. */
     fun dirs(): List<DirectoryEntry> = listOf(
         DirectoryEntry(
-            path = LIVE_DIR, name = "cc-pocket", isDir = true,
+            path = LIVE_DIR, name = "pairlet", isDir = true,
             hasSessions = true, recent = true, lastModified = ago(2 * MIN),
             open = true, executing = true,
             activeSessionId = LIVE_SESSION_ID, activeSessionTitle = "Add demo mode for App Review",
             gitBranch = "main",
         ),
         DirectoryEntry(
-            path = "/Users/alex/code/cc-pocket-site", name = "cc-pocket-site", isDir = true,
+            path = "/Users/alex/code/pairlet-site", name = "pairlet-site", isDir = true,
             hasSessions = true, recent = true, lastModified = ago(3 * HOUR), gitBranch = "main",
         ),
         DirectoryEntry(
