@@ -80,7 +80,6 @@ import dev.ccpocket.app.data.managedRowKey
 import kotlinx.coroutines.flow.filterNotNull
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.material.icons.outlined.PushPin
-import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Visibility
@@ -300,9 +299,6 @@ fun App(scope: CoroutineScope) {
     // name → Fleet home; attention banner / cross-machine banner → inbox. UI-local like the sheets.
     var fleetOpen by remember { mutableStateOf(false) }
     var inboxOpen by remember { mutableStateOf(false) }
-    // the ReviewRequest centre (REVIEW-REQUEST.md §12) — a full-screen route on the same overlay footing
-    // as the fleet surfaces, because it is about the ACTIVE machine's ledger and follows the same switch
-    var reviewsOpen by remember { mutableStateOf(false) }
     var appForeground by remember { mutableStateOf(true) }
     // Collaborator Links are contacts, not computers (SESSION-HANDOFF.md §4.1): their links live in their
     // own always-on inbox rather than the fleet, and they carry exactly one thing — Handoff offers.
@@ -313,10 +309,6 @@ fun App(scope: CoroutineScope) {
     // app_launch, the paired computer's reconnect, an OS-delivered link and a tapped push — all held until the
     // 5.1.2(i) data disclosure below is accepted (a route arriving earlier waits, it is not dropped)
     ConsentGatedLaunchEffects(repo)
-    // …and a review-contact link is addressed to the Review Center rather than the pairing door
-    // (REVIEW-REQUEST.md §13.3): open it so the Center's join page can show the fingerprint. The ticket
-    // is still redeemed by the DAEMON, and only after the human accepts these words.
-    LaunchedEffect(repo.pendingReviewInvite.value) { if (repo.pendingReviewInvite.value != null) reviewsOpen = true }
     // issue #382: publish the open chat's session so a foreground turn push about it can skip the banner
     LaunchedEffect(repo) { androidx.compose.runtime.snapshotFlow { dev.ccpocket.app.push.foregroundSessionOf(repo.sessionKey.value, repo.convoId.value, repo.connected.value) }.collect { dev.ccpocket.app.push.ForegroundSession.update(it) } }
     // a tapped OFFER push (§3.4) names only the handoff — it selects that offer in the doorway below, which
@@ -500,10 +492,6 @@ fun App(scope: CoroutineScope) {
                             }
                             if (fleetOpen) NavBarPadded { dev.ccpocket.app.ui.fleet.FleetHomeScreen(repo, onBack = { fleetOpen = false }, onOpenInbox = { inboxOpen = true }) }
                             if (inboxOpen) NavBarPadded { dev.ccpocket.app.ui.fleet.AttentionInboxScreen(repo) { inboxOpen = false } }
-                            // registered after the fleet surfaces, so its back handler wins while it is up.
-                            // Demoted (08-16): no header entry sets this any more — the only openers left
-                            // are the review-contact deep link above and the Settings row's own mount.
-                            if (reviewsOpen) NavBarPadded { dev.ccpocket.app.ui.review.ReviewCenterRoute(repo) { reviewsOpen = false } }
                         }
                     }
                 }

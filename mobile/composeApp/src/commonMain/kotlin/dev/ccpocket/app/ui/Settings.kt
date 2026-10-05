@@ -186,11 +186,6 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
         dev.ccpocket.app.ui.handoff.CollaboratorsFlow(repo, onConnectNew = { showConnectColleague = true }, onBack = { showCollaborators = false })
         return
     }
-    // ReviewRequest (REVIEW-REQUEST.md §12): the discoverable fallback. The routine path is the header
-    // action on the projects screen — a feature reachable only through Settings is a feature people
-    // forget they have, and this one's whole value is that a colleague's ask does not go unseen.
-    var showReviews by remember { mutableStateOf(false) }
-    if (showReviews) { dev.ccpocket.app.ui.review.ReviewCenterRoute(repo) { showReviews = false }; return }
     // back pops a category to the landing first, and only then leaves Settings — so it never falls
     // through to the app-level navigation while a drill-down is open
     dev.ccpocket.app.SystemBackHandler(enabled = true) { if (category != null) category = null else onBack() }
@@ -226,7 +221,6 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     onShares = { showShares = true },
                     onJoin = { showJoin = true },
                     onCollaborators = { showCollaborators = true },
-                    onReviews = { showReviews = true },
                     onBridges = { showBridges = true },
                 )
 
@@ -275,26 +269,9 @@ private fun SettingsLanding(
                 minHeight = 64.dp,
                 horizontalPadding = 14.dp,
                 onClick = { onCategory(c) },
-            ) {
-                // "a colleague is waiting on you" must not be two taps deep
-                if (c == SettingsCategory.CONNECTIONS && repo.reviewPendingCount > 0) PendingCountMark(repo.reviewPendingCount)
-            }
+            )
         }
     }
-}
-
-/** A count that says what it counts: a bare accent "2" is not something a screen reader can convey. */
-@Composable
-private fun PendingCountMark(count: Int) {
-    val label = stringResource(
-        if (count == 1) Res.string.rv_summary_waiting_one else Res.string.rv_summary_waiting_many, count,
-    )
-    Text(
-        "$count", color = Tok.base, fontSize = 11.sp, fontWeight = FontWeight.Bold, style = tightCenter(11.sp),
-        modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.accent)
-            .semantics { contentDescription = label }
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    )
 }
 
 // ══ General ════════════════════════════════════════════════════════════════════════════════════════
@@ -722,7 +699,6 @@ private fun ConnectionsPage(
     onShares: () -> Unit,
     onJoin: () -> Unit,
     onCollaborators: () -> Unit,
-    onReviews: () -> Unit,
     onBridges: () -> Unit,
 ) {
     SectionLabel(stringResource(Res.string.settings_paired_computers))
@@ -735,10 +711,6 @@ private fun ConnectionsPage(
     FirstHopRow(stringResource(Res.string.join_title), onClick = onJoin)
     Hairline()
     FirstHopRow(stringResource(Res.string.co_screen_title), onClick = onCollaborators)
-    Hairline()
-    FirstHopRow(stringResource(Res.string.rv_settings_row), onClick = onReviews) {
-        if (repo.reviewPendingCount > 0) PendingCountMark(repo.reviewPendingCount)
-    }
     Hairline()
     FirstHopRow(stringResource(Res.string.settings_bridges), onClick = onBridges)
     Hairline()
