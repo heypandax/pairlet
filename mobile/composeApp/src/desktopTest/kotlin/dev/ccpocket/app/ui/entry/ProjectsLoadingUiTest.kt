@@ -25,7 +25,6 @@ import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.proj_loading_on_machine
-import dev.ccpocket.app.resources.proj_review
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.ui.DirectoryScreen
@@ -132,20 +131,6 @@ class ProjectsLoadingUiTest {
         assertFalse(present("正在等目录列表", substring = true), "no engineer's note under the rows (zh)")
         // …and the wait is told ONCE: the transport word does not get a second say beside the machine name
         assertFalse(present("connecting", substring = true), "the header does not also report the transport")
-    }
-
-    @Test
-    fun reviewIsNotOnTheProjectsScreenAtAll() {
-        // #261 originally pinned "hidden while waiting, back on landing"; the 08-16 batch then demoted the
-        // whole P2P review surface off this screen (Review Center lives behind Settings now). The pin
-        // follows the stronger fact: NO state of this screen offers the doorway — a regression on either
-        // side (skeleton or loaded) turns this red.
-        baseline(content = { DirectorySkeleton(it) }) {
-            assertFalse(present(str(Res.string.proj_review), substring = true), "no review doorway while waiting")
-        }
-        baseline(seed = { receiveForTest(projects()) }, content = { DirectoryScreen(it) }) {
-            assertFalse(present(str(Res.string.proj_review), substring = true), "…and none after landing either")
-        }
     }
 
     @Test

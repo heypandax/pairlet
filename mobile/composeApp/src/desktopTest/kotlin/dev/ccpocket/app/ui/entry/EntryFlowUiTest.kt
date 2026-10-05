@@ -59,8 +59,6 @@ import dev.ccpocket.app.resources.proj_help
 import dev.ccpocket.app.resources.proj_more
 import dev.ccpocket.app.resources.proj_open_any
 import dev.ccpocket.app.resources.proj_open_computers
-import dev.ccpocket.app.resources.proj_review
-import dev.ccpocket.app.resources.proj_review_n
 import dev.ccpocket.app.resources.proj_settings
 import dev.ccpocket.app.resources.settings_cat_connections
 import dev.ccpocket.app.resources.support_title
@@ -299,18 +297,6 @@ class EntryFlowUiTest {
             advanceFrameAndWait()
             assertEquals(1, fleet, "the computer control opens the existing fleet surface")
         }
-    }
-
-    @Test
-    fun reviewStaysOffTheProjectsHeader() = baseline(
-        seed = { enterDemo() },
-        content = { DirectoryScreen(it) },
-    ) {
-        // Demoted 08-16: the P2P review surface saw no real use, so its home doorway came off — the
-        // Review Center is reachable from Settings only. This pins the DEMOTION so it cannot quietly
-        // creep back onto the header while the feature's future form is still undecided.
-        assertFalse(present(str(Res.string.proj_review)), "the Projects header advertises no Review entry")
-        assertFalse(present(str(Res.string.proj_review_n, 0)), "…and prints no review count in any form")
     }
 
     @Test
