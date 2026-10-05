@@ -220,6 +220,8 @@ open class SeedDesktopModel : DesktopModel {
     )
     override val appVersion = "2.3.0"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
+    // demo/screenshot data: never show the developer-machine "Launch Dia" pill, whatever the host has installed
+    override val diaCdpAvailable = false
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
     private val defaultEfforts = mutableStateMapOf<AgentKind, String>()
