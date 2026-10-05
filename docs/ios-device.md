@@ -70,7 +70,7 @@ cp iosApp/iosApp/GoogleService-Info.plist.template iosApp/iosApp/GoogleService-I
 
 ### 同一网络下的直连
 
-配对后无需手动设置：daemon 在握手时下发自己的直连地址，App 会先尝试 E2E 直连，失败就回退 relay。daemon 默认只在本机开放这个入口（`--direct-bind 127.0.0.1`）；要让同一 Wi-Fi 的手机直连，`run` 时加 `--direct-bind 0.0.0.0`，仍须通过已配对设备的 Noise 握手。
+配对后无需手动设置：daemon 在握手时下发自己的直连地址，App 会先尝试 E2E 直连，失败就回退 relay。daemon 默认只在本机开放这个入口（`--direct-bind 127.0.0.1`）；要让同一 Wi-Fi 的手机直连，执行 `pairlet config --direct-connect lan` 后重启 daemon（`run` 显式传 `--direct-bind` 时以命令行为准），仍须通过已配对设备的 Noise 握手。
 
 ---
 

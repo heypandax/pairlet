@@ -55,7 +55,7 @@ Six backends, four promoted capability columns. They are **not** equivalent.
 
 - The **daemon** runs on the user's computer, drives the agent CLI as a subprocess, and dials out to the relay — no inbound ports to open.
 - The **relay** pairs devices and routes opaque encrypted frames. It holds no message content and no private keys.
-- The **client** and the daemon run an end-to-end encrypted session, so plaintext never leaves the two trusted endpoints. A desktop client on the same computer connects to the daemon directly by default; a phone on the same network can too once the daemon runs with `--direct-bind 0.0.0.0`. The relay is the from-anywhere fallback.
+- The **client** and the daemon run an end-to-end encrypted session, so plaintext never leaves the two trusted endpoints. A desktop client on the same computer connects to the daemon directly by default; a phone on the same network can too once you run `pairlet config --direct-connect lan` and restart the daemon. The relay is the from-anywhere fallback.
 
 ## Security model and honest limits
 

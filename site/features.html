@@ -611,7 +611,7 @@
       <div class="sec-card reveal">
         <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a7 7 0 0114 0M8 15.5a3.8 3.8 0 017 0"/><circle cx="11.5" cy="18.5" r="1.2"/></svg></div>
         <h4><span class="i18n-en">LAN direct connect</span><span class="i18n-zh">局域网直连</span></h4>
-        <p><span class="i18n-en">The desktop app on the same computer talks to the daemon directly by default; a phone on the same network can too once the daemon runs with <span class="mono">--direct-bind 0.0.0.0</span>, for lower latency — the relay stays as the fallback.</span><span class="i18n-zh">同一台电脑上的桌面 App 默认直连 daemon；手机要在同一网络下直连电脑、降低延迟，需在启动 daemon 时加 <span class="mono">--direct-bind 0.0.0.0</span>——中继仍是兜底路径。</span></p>
+        <p><span class="i18n-en">The desktop app on the same computer talks to the daemon directly by default; a phone on the same network can too once you run <span class="mono">pairlet config --direct-connect lan</span> and restart the daemon, for lower latency — the relay stays as the fallback.</span><span class="i18n-zh">同一台电脑上的桌面 App 默认直连 daemon；手机要在同一网络下直连电脑、降低延迟，运行 <span class="mono">pairlet config --direct-connect lan</span> 后重启 daemon 即可——中继仍是兜底路径。</span></p>
       </div>
     </div>
   </div>

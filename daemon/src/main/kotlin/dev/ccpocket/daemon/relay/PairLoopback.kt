@@ -46,6 +46,20 @@ data class LoopbackStatus(
     val relay: String,
     val attached: Boolean,
     val lastPongAgeMs: Long?,
+    /** The E2E direct listener as this daemon actually runs it; absent from an older daemon. */
+    val direct: LoopbackDirect? = null,
+)
+
+/** The direct listener's state for `pairlet status`. [mode] is local / lan / off / custom (DirectConnect.modeOf);
+ *  [fromFlag] = chosen by `run --direct-bind` rather than `config --direct-connect`. */
+@Serializable
+data class LoopbackDirect(
+    val mode: String,
+    val bind: String,
+    val port: Int,
+    val listening: Boolean,
+    val url: String? = null,
+    val fromFlag: Boolean = false,
 )
 
 /** CLI -> daemon (loopback): mint a HEADLESS bridge credential (issue #91). */
@@ -109,6 +123,8 @@ class PairLoopback(
     /** The daemon's services, for the #367 execution half of the local control API. Null leaves those
      *  routes out (the legacy routes and the owner-device routes need only [relay]). */
     private val core: dev.ccpocket.daemon.DaemonCore? = null,
+    /** The direct listener's live state for GET /status (null = not reported). */
+    private val directStatus: () -> LoopbackDirect? = { null },
 ) {
     private val log = logger("PairLoopback")
 
@@ -255,7 +271,10 @@ class PairLoopback(
 
                 legacy.get("/status") {
                     call.respondText(
-                        PocketJson.encodeToString(LoopbackStatus(relay.accountId, relayWsBase, relay.attached, relay.lastPongAgeMs())),
+                        PocketJson.encodeToString(LoopbackStatus(
+                            relay.accountId, relayWsBase, relay.attached, relay.lastPongAgeMs(),
+                            direct = runCatching { directStatus() }.getOrNull(),
+                        )),
                         ContentType.Application.Json,
                     )
                 }
