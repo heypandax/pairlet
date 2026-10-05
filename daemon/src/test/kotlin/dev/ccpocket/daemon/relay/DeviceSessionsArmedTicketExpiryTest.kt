@@ -75,7 +75,7 @@ class DeviceSessionsArmedTicketExpiryTest {
     }
 
     @Test
-    fun an_announce_inside_the_window_pairs_exactly_as_before() = runBlocking {
+    fun an_announce_inside_the_window_pairs_exactly_as_before() = runBlocking<Unit> {
         val h = Harness(dir)
         h.sessions.onMintedTicket("ticket-in", ttlSec = 120)
         h.now += 129_000 // the relay's 120s plus most of the delivery slack
@@ -90,7 +90,7 @@ class DeviceSessionsArmedTicketExpiryTest {
     }
 
     @Test
-    fun a_late_announce_after_expiry_is_never_allow_listed_and_cannot_handshake_with_the_ticket() = runBlocking {
+    fun a_late_announce_after_expiry_is_never_allow_listed_and_cannot_handshake_with_the_ticket() = runBlocking<Unit> {
         val h = Harness(dir)
         h.sessions.onMintedTicket("ticket-late", ttlSec = 120)
         h.now += 130_001
@@ -107,7 +107,7 @@ class DeviceSessionsArmedTicketExpiryTest {
     }
 
     @Test
-    fun a_relay_announced_ttl_cannot_stretch_the_local_window() = runBlocking {
+    fun a_relay_announced_ttl_cannot_stretch_the_local_window() = runBlocking<Unit> {
         val h = Harness(dir)
         h.sessions.onMintedTicket("ticket-long", ttlSec = 86_400) // a relay claiming a one-day ticket
         h.now += 130_001
@@ -116,7 +116,7 @@ class DeviceSessionsArmedTicketExpiryTest {
     }
 
     @Test
-    fun an_expired_ticket_is_skipped_but_a_fresh_one_behind_it_still_anchors() = runBlocking {
+    fun an_expired_ticket_is_skipped_but_a_fresh_one_behind_it_still_anchors() = runBlocking<Unit> {
         val h = Harness(dir)
         h.sessions.onMintedTicket("ticket-old")
         h.now += 200_000
@@ -133,7 +133,7 @@ class DeviceSessionsArmedTicketExpiryTest {
     }
 
     @Test
-    fun expiry_never_touches_a_device_that_already_paired() = runBlocking {
+    fun expiry_never_touches_a_device_that_already_paired() = runBlocking<Unit> {
         val h = Harness(dir)
         h.sessions.onMintedTicket("ticket-a")
         val keys = E2ECrypto.generateKeyPair()
@@ -154,7 +154,7 @@ class DeviceSessionsArmedTicketExpiryTest {
     }
 
     @Test
-    fun restricted_mints_keep_their_existing_lifetime() = runBlocking {
+    fun restricted_mints_keep_their_existing_lifetime() = runBlocking<Unit> {
         // bridge / execution tickets are armed headless; their own intent TTLs govern them, unchanged here
         val h = Harness(dir)
         h.sessions.onMintedTicket("ticket-headless", headless = true)

@@ -5,6 +5,8 @@ import dev.ccpocket.daemon.control.LOCAL_CONTROL_PREFIX
 import dev.ccpocket.daemon.control.LocalControlToken
 import dev.ccpocket.daemon.control.executionControlDepsOf
 import dev.ccpocket.daemon.control.installExecutionControl
+import dev.ccpocket.daemon.control.installOwnerDevicesControl
+import dev.ccpocket.daemon.control.ownerDevicesPlaneOf
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.CreateBridge
@@ -32,6 +34,9 @@ data class LoopbackPair(
     val code: String,
     val ttlSec: Int,
     val relay: String,
+    /** Pairing security phase 0: the id `pairlet pair` waits on (`GET /v1/local/pairing/{id}`) to learn which
+     *  device joined. Absent from an older daemon — the CLI then says it cannot confirm the device. */
+    val pairingId: String? = null,
 )
 
 /** The daemon's loopback /status response — consumed by the `status` CLI (and shown when `pair` fails). */
@@ -150,8 +155,8 @@ class PairLoopback(
                         return@post
                     }
                     try {
-                        val ticket = relay.mintTicket()
-                        if (ticket == null) {
+                        val minted = relay.mintOwnerPairing()
+                        if (minted == null) {
                             // carry the link state so the CLI can say WHY instead of a bare relay_offline:
                             // attached=false → still (re)connecting (backoff reaches 30s, the mint window is 10s);
                             // attached=true with a stale pong → a wedged link the watchdog is about to recycle
@@ -161,7 +166,8 @@ class PairLoopback(
                                 ContentType.Application.Json, HttpStatusCode.ServiceUnavailable,
                             )
                         } else {
-                            val info = LoopbackPair(relay.accountId, daemonPubB64, ticket.ticket, ticket.code, ticket.expiresInSec, relayWsBase)
+                            val (ticket, pairingId) = minted
+                            val info = LoopbackPair(relay.accountId, daemonPubB64, ticket.ticket, ticket.code, ticket.expiresInSec, relayWsBase, pairingId)
                             call.respondText(PocketJson.encodeToString(info), ContentType.Application.Json)
                         }
                     } finally {
@@ -258,6 +264,9 @@ class PairLoopback(
                 // Own prefix, own rules (token + JSON Content-Type + no browser Origin + body cap — the shared
                 // gate in LocalControlGate.kt). The legacy routes above keep their request shape (no JSON
                 // Content-Type demand) and share only the token.
+                // pairing security phase 0: the owner's full-power devices (`pairlet devices`) and the outcome of
+                // an interactive `pairlet pair` — the relay link holds both, so no DaemonCore is needed
+                localControlToken?.let { token -> installOwnerDevicesControl(ownerDevicesPlaneOf(relay), token) }
                 core?.let { c -> localControlToken?.let { token ->
                     // #367: the remote-execution surface, behind the shared gate (installExecutionControl
                     // calls `authorize` in LocalControlGate.kt) — creating an execution grant is a new

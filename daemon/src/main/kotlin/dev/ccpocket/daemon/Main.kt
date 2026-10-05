@@ -360,7 +360,7 @@ private fun daemonStartHint(): String {
     }
 }
 
-private class PairCmd : CliktCommand(name = "pair") {
+internal class PairCmd : CliktCommand(name = "pair") {
     private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
 
     // ---- headless bridge issuance (issue #91) ----
@@ -407,6 +407,7 @@ private class PairCmd : CliktCommand(name = "pair") {
                     echo(QrTerminal.render("ccpocket://pair?code=${info.code}"))
                     echo("        code:  ${info.code.chunked(3).joinToString(" ")}")
                     echo("")
+                    awaitPairing(info)
                     return@runBlocking
                 }
                 lastBody = body
@@ -424,6 +425,51 @@ private class PairCmd : CliktCommand(name = "pair") {
         } finally {
             client.close()
         }
+    }
+
+    /**
+     * Pairing security phase 0: stay until THIS pairing has an outcome and show who joined. Success prints
+     * the new device's fingerprint for the owner to compare with the phone; an expired code or a refused
+     * device exits non-zero. Ctrl-C only stops this wait — the daemon is untouched and the code stays valid
+     * until it expires. An older daemon hands out no pairing id: say so instead of guessing.
+     */
+    private suspend fun awaitPairing(info: LoopbackPair) {
+        val pairingId = info.pairingId
+        if (pairingId == null) {
+            echo("  (the running daemon is older than this CLI, so it can't report which device pairs —")
+            echo("   restart the daemon, then check what paired with: pairlet devices)")
+            return
+        }
+        echo("  Waiting for a device to pair… (Ctrl-C stops waiting; the code stays valid until it expires)")
+        val control = dev.ccpocket.daemon.control.LocalControlClient(
+            pairPort, daemonStartHintText(),
+            routeMissingHint = "the running daemon is older than this CLI and can't report pairing results — restart it",
+        )
+        // the daemon bounds the pairing itself; this only guards against a reply that never says so
+        val deadline = System.currentTimeMillis() + info.ttlSec * 1000L + 60_000L
+        while (System.currentTimeMillis() < deadline) {
+            val res = control.get(
+                "/pairing/$pairingId", dev.ccpocket.daemon.control.LocalPairingRes.serializer(),
+                mapOf("waitMs" to dev.ccpocket.daemon.control.MAX_PAIRING_WAIT_MS.toString()),
+            )
+            when (res.state) {
+                "pending" -> continue
+                "paired" -> {
+                    val id = res.deviceId.orEmpty()
+                    echo("")
+                    echo("  ✓ Paired: device ${id.take(8)}…")
+                    echo("      fingerprint:  ${res.fingerprint}")
+                    echo("    Check that the app shows the SAME value under \"This device's fingerprint\"")
+                    echo("    (Settings → Support & about → About; desktop App: Settings → About) — all five groups.")
+                    echo("    If it differs, that is not your device: pairlet devices revoke ${id.take(8)}")
+                    return
+                }
+                "expired" -> fail("no device paired before the code expired — run `pairlet pair` again")
+                "refused" -> fail("a device redeemed this code but was refused (another pairing or bridge was in progress) — run `pairlet pair` again")
+                else -> fail("the daemon no longer knows this pairing (was it restarted?) — run `pairlet pair` again; `pairlet devices` shows what is paired")
+            }
+        }
+        fail("no answer from the daemon about this pairing — check with: pairlet devices")
     }
 
     /** Print a `✗` line and exit non-zero — the interactive pair's failures (headless keeps its own style). */
@@ -773,5 +819,7 @@ fun main(args: Array<String>) {
         // #367: drive an already-authorised OTHER computer's agent, and manage those authorisations here.
         // It only ever talks to the running daemon's token-authenticated loopback control API.
         agentCommand(),
+        // pairing security phase 0: list / fingerprint / revoke the full-access devices, over the same API
+        devicesCommand(),
     ).main(args)
 }
