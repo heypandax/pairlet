@@ -1874,7 +1874,7 @@
     <string name="cfg_mode_accept_body">Edits files without asking. Still asks before running commands.</string>
     <string name="cfg_mode_plan">Plan</string>
     <string name="cfg_mode_plan_body">Reads and proposes. Changes nothing until you leave Plan.</string>
-    <string name="cfg_mode_plan_body_kimi">Plans first. Still asks before every action.</string>
+    <string name="cfg_mode_plan_body_kimi">Plans first. Won't edit files; asks before running commands.</string>
     <string name="cfg_mode_full">Full access</string>
     <string name="cfg_mode_full_body">Never asks. Confirmation required the first time.</string>
     <string name="cfg_mode_auto">Auto</string>

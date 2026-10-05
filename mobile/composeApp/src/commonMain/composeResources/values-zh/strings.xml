@@ -1869,7 +1869,7 @@
     <string name="cfg_mode_accept_body">改文件不再问；跑命令之前仍然会问。</string>
     <string name="cfg_mode_plan">计划</string>
     <string name="cfg_mode_plan_body">只读、只提方案。在你退出计划模式之前什么都不改。</string>
-    <string name="cfg_mode_plan_body_kimi">先出方案。每一步执行前都会先问你。</string>
+    <string name="cfg_mode_plan_body_kimi">先出方案。不改文件；执行命令前会先问你。</string>
     <string name="cfg_mode_full">完全放权</string>
     <string name="cfg_mode_full_body">从不询问。第一次使用前需要你确认一次。</string>
     <string name="cfg_mode_auto">自动判断</string>

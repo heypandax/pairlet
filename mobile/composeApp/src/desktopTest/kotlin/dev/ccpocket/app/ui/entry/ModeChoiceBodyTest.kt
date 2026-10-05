@@ -12,6 +12,7 @@ import org.jetbrains.compose.resources.getString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 /**
  * 新建会话面板里每个模式下面那句说明（[modeChoiceBodyRes]）。
@@ -25,8 +26,14 @@ class ModeChoiceBodyTest {
     private val plan = ModeChoice(PermissionMode.PLAN)
 
     @Test
-    fun `kimi plan says it still asks before acting`() {
+    fun `kimi plan says it edits nothing but asks before running commands`() {
         assertEquals(Res.string.cfg_mode_plan_body_kimi, modeChoiceBodyRes(AgentKind.KIMI, plan))
+        // the JVM locale decides which one resolves; either must be the measured behaviour, word for word
+        val text = runBlocking { getString(Res.string.cfg_mode_plan_body_kimi) }
+        assertTrue(
+            text in setOf("Plans first. Won't edit files; asks before running commands.", "先出方案。不改文件；执行命令前会先问你。"),
+            text,
+        )
     }
 
     @Test
