@@ -152,11 +152,12 @@ internal class LifecycleBackend(
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
 
     companion object {
-        /** Echo every stdin line as consumed and finish its turn; stay alive (a long-running CLI between turns). */
-        const val ECHO_TURNS = "while IFS= read -r line; do printf 'user:%s\\nresult\\n' \"\$line\"; done; sleep 30"
+        /** Echo every stdin line as consumed and finish its turn; stay alive until stdin EOF (a long-running
+         *  CLI between turns — EOF is the daemon's graceful stop, so a test close never waits for SIGTERM). */
+        const val ECHO_TURNS = "while IFS= read -r line; do printf 'user:%s\\nresult\\n' \"\$line\"; done"
 
-        /** Swallow stdin and stay alive with no output (a CLI mid-turn / starting up). */
-        const val SILENT = "exec sleep 30"
+        /** Swallow stdin with no output until EOF (a CLI mid-turn / starting up). */
+        const val SILENT = "while IFS= read -r x; do :; done"
     }
 }
 
