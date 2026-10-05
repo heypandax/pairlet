@@ -176,6 +176,8 @@ class DshBackend(
                 catalog.publish(this@DshBackend, options)
                 return listOfNotNull(runtimeMeta(model = options.currentModel, effort = options.currentEffort))
             }
+
+            override suspend fun onChainSettled(timedOut: Boolean) = announce(timedOut)
         },
     )
 
@@ -218,6 +220,7 @@ class DshBackend(
         options = DshConfigOptions.EMPTY
         catalog.unpublish(this)
         config.reset(); toolCalls.clear()
+        announced = false; groupingNotice = null
         scope?.let { runCatching { it.cancel() } }
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         client.attach(io, spec.workdir.toString(), spec.resumeId)
@@ -257,25 +260,44 @@ class DshBackend(
      * `session/new` answers `{sessionId, configOptions}`; `session/resume` answers `{configOptions}` for
      * the id we sent. The catalogue read-back is what seeds the header — the model chip used to stay
      * blank until the session happened to answer once.
+     *
+     * The session is ANNOUNCED only once the launch writes settled ([announce]): the conversation adopts the
+     * model of the session's init and no later [AgentEvent.RuntimeMeta] moves it, so an init sent at open named
+     * dsh's default for the session's whole life — and the next relaunch baked that default in place of the
+     * user's pick (real dsh 0.2.0-rc.2, 2026-10-04).
      */
     private suspend fun sessionOpened(sid: String, result: JsonObject?): List<AgentEvent> {
         // Only a successful fresh creation needs this notice. Keeping the pre-assignment state also
         // avoids repeating it if the same session/new response is delivered twice.
-        val showGroupingNotice = client.resumeId == null && client.sessionId == null
+        if (client.resumeId == null && client.sessionId == null) groupingNotice = UNGROUPED_NOTICE
         options = DshConfigOptions.parse(result?.arr("configOptions"))
         catalog.publish(this, options)
         client.bindSession(sid)
-        val events = listOfNotNull(
-            AgentEvent.SessionInit(sessionId = sid, cwd = client.workdir, model = options.currentModel,
-                notice = if (showGroupingNotice) UNGROUPED_NOTICE else null),
-            runtimeMeta(model = options.currentModel, effort = options.currentEffort),
-        )
         // Model/effort BEFORE the prompt gate opens: running the opening turn on the previous model and
         // correcting it afterwards would bill the user for a model they did not pick. Each write is a
         // request, so the gate opens on its RESPONSE (see [AcpConfigChain]) rather than on hope.
-        if (startConfigChain(launchModel, launchEffort, announce = false)) return events
-        return events + client.openPromptGate()
+        if (startConfigChain(launchModel, launchEffort, announce = false)) return emptyList()
+        return announce(timedOut = false) + client.openPromptGate()
     }
+
+    /** The session's init (once per process) with what dsh reports it is on now. After a launch write TIMED OUT
+     *  nothing is known about the model, so none is named and the conversation keeps the user's pick. */
+    private fun announce(timedOut: Boolean): List<AgentEvent> {
+        val sid = client.sessionId ?: return emptyList()
+        if (announced) return emptyList()
+        announced = true
+        val model = if (timedOut) null else options.currentModel
+        return listOfNotNull(
+            AgentEvent.SessionInit(sessionId = sid, cwd = client.workdir, model = model, notice = groupingNotice),
+            if (timedOut) null else runtimeMeta(model = options.currentModel, effort = options.currentEffort),
+        )
+    }
+
+    /** This process's session has been announced — once, after the launch writes ([announce]). */
+    @Volatile private var announced = false
+
+    /** The Web-grouping notice the announcement carries, for a fresh creation only. */
+    @Volatile private var groupingNotice: String? = null
 
     // ---- inbound: session/update (no `user_message_chunk` live — fact 2; usage rides `usage_update`) ----
 

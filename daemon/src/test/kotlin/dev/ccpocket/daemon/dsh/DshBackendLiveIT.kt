@@ -145,6 +145,19 @@ class DshBackendLiveIT {
             "session/resume→first line ${msToFirstLineAfter("session/resume")} ms, config writes $config")
     }
 
+    /** A NEW session with a non-default model announces the model dsh reports AFTER the launch write — the
+     *  conversation keeps the init's model, so announcing dsh's default at `session/new` pinned it (2026-10-04). */
+    @Test
+    fun a_new_session_announces_the_model_it_was_switched_to() = runBlocking {
+        val backend = DshBackend(null)
+        val h = launch(backend, AgentSpec(workdir = scratch(), mode = PermissionMode.DEFAULT, model = "deepseek-v4-pro"), "announce")
+        val init = awaitEvent<AgentEvent.SessionInit>(h.events, 60_000)
+        val open = h.lines.firstOrNull { !it.outbound && it.id == h.outbound("session/new").single().id }?.text
+        println("[dsh-live] announce: SessionInit.model=${init?.model} live=${backend.liveModelForTest()} " +
+            "session/new currentValue=${open?.substringAfter("\"currentValue\":")?.take(50)}")
+        assertEquals("deepseek-v4-pro", init?.model, "the header was told another model than the session runs")
+    }
+
     /**
      * What PLAN means on dsh (`DSH_PERMISSION_MODE=read-only`, fixed at launch): the model asks for one read, one
      * file write and one plain command, every ask is approved, and the disk says what really happened. Account-free

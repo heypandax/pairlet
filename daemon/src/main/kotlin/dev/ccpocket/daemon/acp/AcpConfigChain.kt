@@ -69,8 +69,8 @@ class AcpConfigChain(
 
         /**
          * The chain is over: about to open the prompt gate ([timedOut] false), or about to fail the startup
-         * because a launch write never answered ([timedOut] true). The returned events precede the gate's /
-         * the failure's own.
+         * because a launch write never answered ([timedOut] true). The returned events precede the gate's own
+         * and follow the failure's (the stranded prompts settle first).
          */
         suspend fun onChainSettled(timedOut: Boolean): List<AgentEvent> = emptyList()
     }
@@ -166,7 +166,8 @@ class AcpConfigChain(
         log.warn("$tag set_config_option(${write.configId}=${write.value}) unanswered after ${timeoutMs}ms")
         if (write.announce) return failed(write, why)
         pending.clear()
-        return host.onChainSettled(timedOut = true) + client.failHostStartup(stageConfig, why)
+        // the stranded prompts settle first; the host's announcement follows the failure
+        return client.failHostStartup(stageConfig, why) + host.onChainSettled(timedOut = true)
     }
 
     private suspend fun failed(write: Write, why: String): List<AgentEvent> {
