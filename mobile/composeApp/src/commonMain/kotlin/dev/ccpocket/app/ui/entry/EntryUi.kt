@@ -44,20 +44,13 @@ enum class EntryLanding {
  * daemon at least once, so walking them back through the install guide is a step backwards. It therefore
  * wins over [hasBindings] in both directions — including the (rare) case of an add-device request raised
  * while no binding is left, which must still land on pairing rather than on the guide.
- *
- * [hasCollaboratorLinks] is a PURE RECIPIENT (SESSION-HANDOFF.md §10: "接收方要求 cc-pocket App；不要求
- * daemon"). They own no binding, so they look exactly like a first run — but they are the one audience for
- * whom "install the daemon on your computer" is the wrong instruction entirely. The pairing screen states
- * their real situation; this guide would not.
  */
 fun entryLanding(
     hasBindings: Boolean,
     addingDevice: Boolean,
-    hasCollaboratorLinks: Boolean = false,
 ): EntryLanding = when {
     addingDevice -> EntryLanding.PAIR
     hasBindings -> EntryLanding.COMPUTERS
-    hasCollaboratorLinks -> EntryLanding.PAIR
     else -> EntryLanding.FIRST_RUN_CONNECT
 }
 

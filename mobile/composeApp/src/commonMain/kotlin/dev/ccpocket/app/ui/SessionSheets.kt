@@ -64,7 +64,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.epochMillis
-import dev.ccpocket.app.ui.handoff.toHistoryItem
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
@@ -222,7 +221,7 @@ fun contextColor(frac: Float, base: Color = Tok.accent): Color = when {
 //  Session info (read-only): model · effort · mode · dir · context bar
 // ════════════════════════════════════════════════════════════════════
 @Composable
-fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (() -> Unit)? = null) {
+fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit) {
     val modeLabel =
         if (repo.permissionMode.value == CLAUDE_PERMISSION_MODE_AUTO) stringResource(AUTO_MODE.short)
         else MODE_BY[repo.mode.value]?.tech ?: repo.mode.value.name
@@ -294,13 +293,6 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (
                 Text(stringResource(Res.string.label_workdir), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
                 TailPathText(repo.workdir.value ?: "", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
-            // Handoff history (design Frame 10/10b): status-chipped rows, or the one-line empty hint
-            val historyItems = repo.handoffs.mapNotNull { it.toHistoryItem() }
-            dev.ccpocket.app.ui.handoff.HandoffHistorySection(
-                historyItems,
-                onOpen = { /* v1: rows are a record; the RETURNED result docks in the chat itself */ },
-                onHandoff = onHandoff?.let { action -> { onDismiss(); action() } },
-            )
         }
     }
 }
@@ -408,7 +400,6 @@ fun QuickActionsSheet(
     onFiles: () -> Unit,
     onGit: () -> Unit,
     onHelp: () -> Unit,
-    onHandoff: (() -> Unit)? = null, // session handoff entry (design Frame 1); null hides the row
     onDismiss: () -> Unit,
 ) {
     var sub by remember { mutableStateOf(QaSub.MAIN) }
@@ -489,10 +480,6 @@ fun QuickActionsSheet(
                                         ?.let { stringResource(Res.string.files_changes_note, it) },
                                 ) { onFiles(); onDismiss() }
                                 ActionRow(stringResource(Res.string.git_tab)) { onGit(); onDismiss() }
-                                // "Hand off to a colleague" is an ordinary peer of Terminal / Changed files:
-                                // available is not recommended, and conditional is not new (no badge, no accent,
-                                // no glyph). Only the capability gate is its own — null means no row at all.
-                                if (onHandoff != null) ActionRow(stringResource(Res.string.ho_menu_row)) { onHandoff(); onDismiss() }
                                 ActionRow(stringResource(Res.string.support_title)) { onHelp(); onDismiss() }
                             }
                             QaGroup(stringResource(Res.string.qa_group_context)) {
