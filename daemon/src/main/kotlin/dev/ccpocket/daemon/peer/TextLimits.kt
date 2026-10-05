@@ -1,9 +1,8 @@
 package dev.ccpocket.daemon.peer
 
 /**
- * The text-field bounds shared beyond ReviewRequest: a label or one-line field is REJECTED when it is
- * too long or carries control characters, never truncated. Split verbatim out of `ReviewLimits` so
- * #367 remote execution can keep using them once the review code is gone.
+ * Text-field bounds (used by #367 remote execution): a label or one-line field is REJECTED when it is
+ * too long or carries control characters, never truncated.
  */
 object TextLimits {
     const val MAX_LABEL = 120

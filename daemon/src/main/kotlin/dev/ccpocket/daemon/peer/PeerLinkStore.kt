@@ -5,8 +5,8 @@ import kotlinx.serialization.Serializable
 import java.io.File
 
 /**
- * One INBOUND collaborator link, from the RECIPIENT's point of view (REVIEW-REQUEST.md §9): "I hold a
- * restricted credential in <peer>'s account, and my daemon keeps an inbox connection to their daemon."
+ * One link to a peer daemon, from the side that DIALS it: "I hold a restricted credential in <peer>'s
+ * account, and my daemon connects to their daemon with it."
  *
  * Public metadata only. Everything that could impersonate this link lives in [PeerLinkSecret], in a
  * different file, and never leaves the daemon: no list/show/prepare response may contain it.
@@ -32,7 +32,7 @@ data class PeerLink(
 )
 
 /**
- * The secret half of a [PeerLink], in `~/.cc-pocket/peer-link-secrets.json` (0600, atomic).
+ * The secret half of a [PeerLink], in its own secrets file (0600, atomic).
  *
  * [ticket] is the ONE-TIME connect ticket, kept only until the first successful authenticated E2E
  * exchange proves the credential works — after that every reconnect keys off the persisted static
@@ -57,9 +57,9 @@ data class PeerLinkSecret(
 )
 
 /**
- * Persistence for inbound peer links. Two files on purpose: `peer-links.json` is the address book the
- * local API may render, `peer-link-secrets.json` is key material with a separate lifetime and a
- * separate blast radius. A serializer bug or an over-eager DTO can then leak at most the address book.
+ * Persistence for peer links. Two files on purpose: the public file is the address book the local API
+ * may render, the secrets file is key material with a separate lifetime and a separate blast radius. A
+ * serializer bug or an over-eager DTO can then leak at most the address book.
  */
 class PeerLinkStore private constructor(
     private val publicPath: File?,
@@ -181,12 +181,12 @@ class PeerLinkStore private constructor(
         secretPath?.let { AtomicStoreFiles.write(it, PocketJson.encodeToString(StoredSecrets.serializer(), next)) } ?: true
 
     companion object {
-        fun defaultPublicPath(): File = AtomicStoreFiles.path("peer-links.json")
-        fun defaultSecretPath(): File = AtomicStoreFiles.path("peer-link-secrets.json")
-
+        /** Both paths are REQUIRED: each user of peer links keeps its own pair of files (the #367 execution
+         *  source: `execution-links.json` / `execution-link-secrets.json`), and a default would let a caller
+         *  open some other feature's links by omission. */
         fun load(
-            publicPath: File = defaultPublicPath(),
-            secretPath: File = defaultSecretPath(),
+            publicPath: File,
+            secretPath: File,
         ): PeerLinkStore = PeerLinkStore(publicPath, secretPath).apply {
             AtomicStoreFiles.read(publicPath) { PocketJson.decodeFromString(StoredLinks.serializer(), it) }?.let { links = it }
             AtomicStoreFiles.read(secretPath) { PocketJson.decodeFromString(StoredSecrets.serializer(), it) }?.let { secrets = it }

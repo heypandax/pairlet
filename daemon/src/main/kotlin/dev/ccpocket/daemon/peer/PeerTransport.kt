@@ -68,8 +68,8 @@ data class PeerKeys(val privateKeyB64: String, val publicKeyB64: String)
  * key as a FULL-POWER device and arming an EMPTY psk. Today that is harmless precisely BECAUSE we keep
  * offering the ticket: nothing ever decrypts, the link is visibly dead, and a human re-invites. An
  * empty-PSK attempt would decrypt instead — and with an empty `confirmedPsk` the sender never runs
- * `BridgeRegistry.finalize`, so no collaborator classification happens, and the connection routes
- * through the OWNER branch: sessions, shell, every other colleague's brief.
+ * `BridgeRegistry.finalize`, so no restricted-credential classification happens, and the connection
+ * routes through the OWNER branch: sessions, shell, everything an owner device can reach.
  *
  * A recipient cannot tell that case apart from the lost-response case (both look like "my ticket
  * attempt produced no frames"), so the fix does not belong on this side. It belongs on the sender:
@@ -82,9 +82,9 @@ object PeerHandshake {
 }
 
 /**
- * The RECIPIENT-side transport seam (REVIEW-REQUEST.md §9): everything about "how do I reach the peer's
- * daemon" behind one interface, so [PeerInboxClient]'s persistence/retry/ACK logic can be tested against
- * an in-process fake with no relay, no sockets and no crypto.
+ * The DIALLING-side transport seam: everything about "how do I reach the peer's daemon" behind one
+ * interface, so a link client's persistence/retry logic (the #367 execution source and client) can be
+ * tested against an in-process fake with no relay, no sockets and no crypto.
  */
 interface PeerTransport {
     fun generateKeys(): PeerKeys
@@ -100,7 +100,7 @@ interface PeerTransport {
 /**
  * The peer's relay answered our `DeviceHello` with an [AuthError] — the credential was refused BEFORE any
  * E2E exchange, so this is not the peer being offline. Told apart from a generic failure so the caller
- * can react to a [terminal] refusal: the peer's owner removing the contact revokes our credential at
+ * can react to a [terminal] refusal: the peer's owner revoking the link revokes our credential at
  * THEIR relay, and nothing ever tells this side. Re-dialling it on the ordinary reconnect ladder is a
  * busy loop against a dead credential (observed in the field: one warning every ~25 s, ~3,500 a day,
  * for weeks).
@@ -125,9 +125,9 @@ class PeerCredentialRejected(val code: String) : IllegalStateException("peer rel
  *  - the PSK is the one-time ticket on the FIRST connect only; every later connect uses an EMPTY psk
  *    with the persisted static key, which is what makes reconnects survive a burned ticket (#161's
  *    lesson, applied from the start rather than retrofitted);
- *  - there is no control-plane traffic at all — no push registration, no presence. A review inbox is a
- *    listener, and anything it does not need to send is something the peer's daemon cannot be asked to
- *    handle on its behalf.
+ *  - there is no control-plane traffic at all — no push registration, no presence. A peer link carries
+ *    only its own requests and replies, and anything it does not need to send is something the peer's
+ *    daemon cannot be asked to handle on its behalf.
  */
 class RelayPeerTransport : PeerTransport {
     private val log = logger("RelayPeerTransport")

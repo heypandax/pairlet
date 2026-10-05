@@ -251,8 +251,6 @@ internal class RunCmd(
             kimiModels = dev.ccpocket.daemon.kimi.KimiModelService(kimiBin),
             zcodeModels = dev.ccpocket.daemon.zcode.ZCodeModelService(),
             dshModels = dev.ccpocket.daemon.dsh.DshModelService(dshBinEffective),
-            reviews = dev.ccpocket.daemon.review.ReviewService(),
-            peerInboxFactory = { dev.ccpocket.daemon.review.PeerInboxService(it) },
         )
         if (claudeHome != null) {
             echo("claude credential isolation: ON — daemon login store: $claudeHome")
@@ -875,12 +873,10 @@ fun main(args: Array<String>) {
     Root().subcommands(
         RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), ShareCmd(), StatusCmd(), VersionCmd(),
         UpdateCmd(), ConfigCmd(), ServiceInstallCmd(), dev.ccpocket.daemon.diagnostics.DiagnosticsCommand(),
-        // ReviewRequest M1 (REVIEW-REQUEST.md §4): the daemon-only collaboration loop — establish a
-        // contact, send a task, answer one. Both talk to the ALREADY-RUNNING daemon over its
-        // token-authenticated local control API; neither can start a second daemon.
-        collaboratorCommand(), reviewCommand(),
+        // retired names, hidden: they only say so and exit non-zero (see RetiredCli)
+        retiredCollaboratorCommand(), retiredReviewCommand(),
         // #367: drive an already-authorised OTHER computer's agent, and manage those authorisations here.
-        // Same rule as the two above — it only ever talks to the running daemon's loopback control API.
+        // It only ever talks to the running daemon's token-authenticated loopback control API.
         agentCommand(),
     ).main(args)
 }

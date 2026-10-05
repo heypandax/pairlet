@@ -59,17 +59,6 @@ class DaemonCore(
      *  checks, the graceful-recall turn control and the idle-reaper protection all read one truth.
      *  Injectable so a test can hand in a temp-store instance instead of the real ~/.cc-pocket one. */
     val handoffs: dev.ccpocket.daemon.handoff.HandoffService = dev.ccpocket.daemon.handoff.HandoffService(),
-    /** ReviewRequest (REVIEW-REQUEST.md) — the TASK-context sibling of [handoffs], deliberately BESIDE it
-     *  rather than inside it: it has its own store, its own state machine and its own capability set, and
-     *  Session Handoff's runtime semantics must not leak into it (§13.2). Sender-authoritative side.
-     *  Injectable so a test can hand in a temp-store instance instead of the real ~/.cc-pocket one. */
-    val reviews: dev.ccpocket.daemon.review.ReviewService = dev.ccpocket.daemon.review.ReviewService(
-        dev.ccpocket.daemon.review.ReviewRegistry(dev.ccpocket.daemon.review.ReviewStore.inMemory()),
-    ),
-    /** Production supplies the durable implementation explicitly in Main. The in-memory default keeps
-     * unit tests and embedded cores from reading ~/.cc-pocket or opening peer relay connections. */
-    peerInboxFactory: (CoroutineScope) -> dev.ccpocket.daemon.review.PeerInboxService =
-        dev.ccpocket.daemon.review.PeerInboxService::inMemory,
     /** Project-pin sync (issue #362). The file store reads lazily — an embedded core that never receives a pin
      *  request never touches ~/.cc-pocket — and tests hand in a temp-file or in-memory store instead. */
     projectPinStore: dev.ccpocket.daemon.pins.ProjectPinStore =
@@ -132,21 +121,6 @@ class DaemonCore(
         // periodic handoff expiry sweep + HandoffUpdated fan-out — on the core scope like the schedule
         // pump below, so BOTH transports (relay client + local server) get it for free
         scope.launch { handoffs.sweepLoop() }
-        // the ReviewRequest expiry sweep, on the same footing and for the same reason
-        scope.launch { reviews.sweepLoop() }
-    }
-
-    /**
-     * The RECIPIENT half of ReviewRequest (REVIEW-REQUEST.md §9): inbound peer links and their inbox
-     * connections. Lives here — not on the relay client — because it is not this account's relay leg at
-     * all: each link dials the PEER's relay with a credential minted in the PEER's account, so it works
-     * (and must keep retrying) whether or not this machine's own relay link is up.
-     */
-    val peerInbox = peerInboxFactory(scope)
-
-    init {
-        // one supervised inbox per stored link; a peer that is unreachable simply keeps backing off
-        runCatching { peerInbox.start() }
     }
 
     val dirs = DirectoryService()
@@ -224,15 +198,6 @@ class DaemonCore(
     }
 
     /**
-     * The OWNER-LOCAL review plane (REVIEW-REQUEST.md §6 + §12). ONE instance for the whole daemon: the
-     * wire router (App/desktop Review Center) and the local control API (CLI/Skill) both drive it, which
-     * is what keeps "contacts, prepare and queued actions mean the same thing on every surface" true in
-     * code rather than in a comment. [collaboratorControl] is read lazily — it only exists once the relay
-     * link is up, and a review contact list must not capture the null it saw at construction.
-     */
-    val reviewOwner = dev.ccpocket.daemon.review.ReviewOwnerService({ collaboratorControl }, reviews, peerInbox)
-
-    /**
      * This computer's project-pin list (issue #362), shared by both transports: the router commits requests,
      * the relay and LAN connections attach their owner push targets. A cursor is only ever reclaimed for a
      * device that is no longer paired (it can never authenticate a frame again); the allow-list is read only
@@ -285,8 +250,6 @@ class DaemonCore(
         approvals = approvals,
         grants = grants,
         approvalHistory = approvalHistory,
-        reviews = reviews,
-        reviewOwner = reviewOwner,
         projectPins = projectPins,
         managedSessions = managedSessions, // issue #360: without this the router advertises and serves nothing
         voiceMemo = voiceMemo,

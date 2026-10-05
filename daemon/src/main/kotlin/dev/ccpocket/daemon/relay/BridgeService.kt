@@ -59,23 +59,6 @@ fun isOwnerControlFrame(frame: dev.ccpocket.protocol.Frame): Boolean = when (fra
     else -> false
 }
 
-/**
- * Owner frames that the ROUTER handles but which still must not run on the relay reader loop.
- *
- * [isOwnerControlFrame] covers the frames intercepted before the router; this covers the ones that go
- * through it and nevertheless end up inside the same mint. `pocket/review.contact_invite` is one:
- * ReviewOwnerService.invite → CollaboratorControl.createTicket → mintTicket, which suspends until the
- * relay answers with a `PairTicket` — a frame only THIS reader can deliver. Dispatched inline it waits
- * for a reply it is itself blocking, times out, and starves every other device for the duration.
- *
- * NOT a serialization point — that lives in the mint itself (issue #207): every ticket-backed mint
- * claims the one [BridgeRegistry.reserveMint] slot BEFORE its suspending relay round-trip and releases
- * it in a `finally` once the intent is recorded (or the mint failed), so two owner mints dispatched
- * concurrently can no longer both pass the pre-mint check and both burn a ticket.
- */
-fun isOffReaderRouterFrame(frame: dev.ccpocket.protocol.Frame): Boolean =
-    frame is dev.ccpocket.protocol.CreateReviewInvite
-
 suspend fun dispatchOwnerControl(
     frame: dev.ccpocket.protocol.Frame,
     share: ShareControl?,
@@ -95,7 +78,7 @@ suspend fun dispatchOwnerControl(
         is dev.ccpocket.protocol.DetachBridgeRunner -> emit((bridge ?: return false).detachRunner(frame.name))
         // Collaborator Link contact management (SESSION-HANDOFF.md §4.1) — same owner-only footing
         // no purpose argument: this frame is the App's SESSION HANDOFF invite and always has been, so it
-        // takes the mint's historical default. The Review Center mints through pocket/review.contact_invite.
+        // takes the mint's historical default.
         is dev.ccpocket.protocol.CreateCollaboratorTicket -> emit((collaborator ?: return false).createTicket(frame.label))
         is dev.ccpocket.protocol.ListCollaborators -> emit((collaborator ?: return false).list())
         is dev.ccpocket.protocol.RemoveCollaborator -> emit((collaborator ?: return false).remove(frame.deviceId))

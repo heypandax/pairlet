@@ -1,4 +1,4 @@
-package dev.ccpocket.daemon.review
+package dev.ccpocket.daemon.handoff
 
 import dev.ccpocket.daemon.peer.TextLimits
 import dev.ccpocket.daemon.peer.b64

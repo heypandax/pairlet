@@ -11,22 +11,22 @@ import java.nio.file.attribute.PosixFileAttributeView
 import java.nio.file.attribute.PosixFilePermissions
 
 /**
- * The persistence primitive the ReviewRequest stores share (REVIEW-REQUEST.md §5.1: the daemon owns
- * the durable state, and a crash mid-write must never be the reason a colleague's request disappears).
+ * The persistence primitive the peer-link and #367 execution stores share: the daemon owns the durable
+ * state, and a crash mid-write must never be the reason a link, grant or run record disappears.
  *
  * Three properties the existing single-`writeText` stores don't have, because this data is different:
  *  - ATOMIC: write a sibling temp file, fsync-free `ATOMIC_MOVE` over the target. A torn write can
  *    therefore never be observed — a reader sees either the old file or the new one;
  *  - 0600 BEFORE the bytes land: the temp file is created and chmod-ed empty, so a brief window where
- *    a colleague's brief/result sits at the umask default cannot exist;
+ *    credentials or task content sit at the umask default cannot exist;
  *  - CORRUPTION FAILS CLOSED WITHOUT DESTROYING EVIDENCE: an undecodable file is moved aside to
  *    `<name>.corrupt` and the store starts EMPTY. Starting empty over a file we could not read would
  *    silently overwrite whatever was actually in there on the next persist; keeping the bytes means a
- *    human can still recover the requests, and the loud log says to.
+ *    human can still recover the contents, and the loud log says to.
  */
 internal object AtomicStoreFiles {
 
-    private val log = logger("ReviewFiles")
+    private val log = logger("AtomicStoreFiles")
 
     /** `~/.cc-pocket/<name>` — beside identity.json, like every other daemon store. */
     fun path(name: String): File = File(Identity.defaultPath().parentFile, name)
@@ -59,7 +59,7 @@ internal object AtomicStoreFiles {
         val tmp = Files.createTempFile(parent.toPath(), ".${file.name}.", ".tmp").toFile()
         // Enforce 0600 when the filesystem exposes POSIX permissions (Windows ACLs inherit the profile
         // directory) — set on the EMPTY file so
-        // the secret/brief never exists at the umask default, not even for a moment
+        // the content never exists at the umask default, not even for a moment
         ownerOnly(tmp)
         try {
             tmp.writeText(text)
