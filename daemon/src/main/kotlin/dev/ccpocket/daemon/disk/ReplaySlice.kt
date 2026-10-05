@@ -34,11 +34,16 @@ data class ReplaySlice(
     val readError: String? = null,
     /** Rows of the count-capped window that a byte budget left out (daemon-internal, for the open log). */
     val budgetDropped: Int = 0,
+    /** Size of the transcript file read, in bytes — for the open log only; null when unknown. */
+    val sourceBytes: Long? = null,
 ) {
     companion object {
         val EMPTY = ReplaySlice(emptyList())
     }
 }
+
+/** The transcript's size for [ReplaySlice.sourceBytes]; null rather than a throw for a file that went away. */
+internal fun java.nio.file.Path.sizeOrNull(): Long? = runCatching { java.nio.file.Files.size(this) }.getOrNull()
 
 /**
  * The shared windowing/cursor logic behind both agents' transcript replays ([TranscriptReplay] /

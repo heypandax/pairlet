@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.conversation
 
+import dev.ccpocket.daemon.diagnostics.HistoryFrameMeter
 import dev.ccpocket.daemon.diagnostics.completeInitialHistory
 
 import dev.ccpocket.observability.*
@@ -1265,9 +1266,11 @@ class Conversation(
                 // inside replaySlice. An EMPTY delta is never emitted — the client is already caught up,
                 // and an empty non-delta ConvoHistory means /clear to it. A DELTA goes to the OPENER's
                 // sink only (it continues that client's cursor); the full window keeps the fan-out.
+                val readStart = System.nanoTime()
                 val slice = clipToRewind(backend.replaySlice(workdir.toString(), resumeId, sinceSeq))
-                val emitted = emitHistory(slice, if (slice.delta) openerSink else sink, errorTo = openerSink)
-                openerSink.completeInitialHistory(convoId, if (emitted) slice.messages.size else 0, emitted, slice.quality, slice.sourceRows, slice.failedRows)
+                val meter = HistoryFrameMeter(System.nanoTime() - readStart)
+                val emitted = emitMeteredHistory(meter, slice, if (slice.delta) openerSink else sink, errorTo = openerSink)
+                openerSink.completeInitialHistory(convoId, if (emitted) slice.messages.size else 0, emitted, slice.quality, slice.sourceRows, slice.failedRows, meter.frameBytes)
                 replayWorkflowRuns(resumeId, sink)
             } else openerSink.completeInitialHistory(convoId, quality = "not_required")
             emitCommands()
@@ -1313,6 +1316,19 @@ class Conversation(
         if (slice.messages.isEmpty()) return false
         to.emit(historyFrame(slice))
         return true
+    }
+
+    /** [emitHistory] for an open/reattach: the relay sealer reports the encoded frame into [meter] on the way
+     *  out, and the open gets its one history log line (read time, transcript and window size, frame bytes). */
+    private suspend fun emitMeteredHistory(
+        meter: HistoryFrameMeter,
+        slice: dev.ccpocket.daemon.disk.ReplaySlice,
+        to: OutboundSink,
+        errorTo: OutboundSink = to,
+    ): Boolean {
+        val emitted = withContext(meter) { emitHistory(slice, to, errorTo) }
+        log.info(meter.line(convoId, slice, emitted))
+        return emitted
     }
 
     /** The phone scrolled to the top of its first-screen window — serve one page of OLDER history
@@ -3017,9 +3033,11 @@ class Conversation(
         // executing rights the phone's stale ■: a turn that finished (or started) while it was away
         newSink.emit(live(sid))
         if (sid != null) {
+            val readStart = System.nanoTime()
             val slice = backend.replaySlice(workdir.toString(), sid, sinceSeq)
-            val emitted = emitHistory(slice, newSink)
-            newSink.completeInitialHistory(convoId, if (emitted) slice.messages.size else 0, emitted, slice.quality, slice.sourceRows, slice.failedRows)
+            val meter = HistoryFrameMeter(System.nanoTime() - readStart)
+            val emitted = emitMeteredHistory(meter, slice, newSink)
+            newSink.completeInitialHistory(convoId, if (emitted) slice.messages.size else 0, emitted, slice.quality, slice.sourceRows, slice.failedRows, meter.frameBytes)
         } else newSink.completeInitialHistory(convoId, quality = "not_required")
         emitCommands()
         newSink.emit(BackgroundJobs(convoId, jobs.snapshot())) // a re-opened live session re-shows its running jobs

@@ -6,6 +6,7 @@ import dev.ccpocket.observability.*
 import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.daemon.disk.ReplaySlice
 import dev.ccpocket.daemon.disk.ReplaySlicer
+import dev.ccpocket.daemon.disk.sizeOrNull
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
 import kotlinx.serialization.json.Json
@@ -56,7 +57,7 @@ object KimiTranscriptReplay {
     ): ReplaySlice {
         val parsed = parse(file)
         return ReplaySlicer.slice(parsed.first, parsed.second, sinceSeq, maxMessages, maxFrameTextBytes)
-            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
+            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows, sourceBytes = file.sizeOrNull())
     }
 
     fun page(

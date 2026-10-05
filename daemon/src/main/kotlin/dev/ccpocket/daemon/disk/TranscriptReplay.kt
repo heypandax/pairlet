@@ -45,7 +45,7 @@ object TranscriptReplay {
     ): ReplaySlice {
         val parsed = parse(file)
         return ReplaySlicer.slice(parsed.first, parsed.second, sinceSeq, maxMessages, maxFrameTextBytes, firstWindowBytes)
-            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows)
+            .copy(quality = parsed.quality, sourceRows = parsed.second, failedRows = parsed.failedRows, sourceBytes = file.sizeOrNull())
     }
 
     /** One page of history OLDER than [beforeSeq] — the scroll-to-top lazy load (issue #147). */
