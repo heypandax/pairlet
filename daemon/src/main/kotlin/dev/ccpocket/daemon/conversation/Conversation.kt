@@ -657,6 +657,19 @@ class Conversation(
     @Volatile
     private var pendingRelaunch = false
 
+    // DEFERRED-SWITCH NOTICE (lifecycle design S7 follow-up): when background work or an unanswered question
+    // holds the relaunch back, the message rides the OLD process while the badge already shows the new value.
+    // [bakedSettings] is what the running process was launched with (its model refreshed to the reported one
+    // at the first pick); [announcedDeferral] is what the chat has already been told is pending (setting →
+    // new value), so a burst of messages under the same held batch says it once. Same protection as
+    // [pendingRelaunch]: written only under [lifecycle]. Reset by every stop (relaunch, /clear, close);
+    // re-snapshotted by every launch.
+    @Volatile
+    private var bakedSettings: LaunchSettings? = null
+
+    @Volatile
+    private var announcedDeferral: Map<String, String> = emptyMap()
+
     // context tokens the resumed transcript's last turn left in the window — seeds the phone's usage
     // statusline before the first new turn lands. Null for a brand-new session (nothing used yet).
     @Volatile
@@ -1659,6 +1672,9 @@ class Conversation(
         // S4 / D12: commit + arm in one lifecycle step — a lazy launch either bakes the new model or is already
         // published when the arming looks, never neither (the switch used to be lost inside the launch window)
         val announce = lifecycleLocked {
+            // the deferral notice's "sent with" names the model the process actually runs: an init may have
+            // resolved it since launch, and that report lives in [model] only until the first pick overwrites it
+            if (!modelPickPending) bakedSettings = bakedSettings?.copy(model = displayModel())
             model = newModel
             modelPickPending = true
             backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
@@ -1911,6 +1927,8 @@ class Conversation(
             ?: cleanSpec
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         modelPickPending = false // …including a model pick: this process's own init may now report the resolved id
+        bakedSettings = LaunchSettings.of(rawSpec) // …and nothing announced as deferred is pending against it
+        announcedDeferral = emptyMap()
         resetTurnScratch()
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val launchGeneration = processGeneration
@@ -3251,6 +3269,7 @@ class Conversation(
         val initialSend = InitialSend(promptId, outgoing, images, bridgeGrantToken)
         if (relaunching) {
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
+            announceDeferredSettingsAppliedLocked() // before the launch: its pump must not out-race the line
             val relaunched = runCatching { relaunch(sessionId ?: openedResumeId, armExecuting = true, initialSend = initialSend) }
             if (relaunched.isFailure) {
                 clearTurnWork() // the relaunch never started a turn
@@ -3273,6 +3292,8 @@ class Conversation(
             // A truly stale id is recovered at process death (SESSION_NOT_FOUND clears the lineage).
             val lazySpec = launchSpec(initialPrompt = outgoing) // anchor + fork decision: launchSpec's defaults
             lifecycleProbe?.invoke(LifecyclePoint.AFTER_SPAWN_DECISION)
+            // a process that died while an announced deferral was pending: this respawn is where it applies
+            announceDeferredSettingsAppliedLocked()
             val launched = runCatching {
                 launchProcess(
                     lazySpec,
@@ -3301,6 +3322,10 @@ class Conversation(
             // no new pump is starting, so there is no death-branch to race. Ledger FIRST, then arm the turn:
             // if the old turn's result races this enqueue, either executing or pendingPromptWork remains true.
             // The write comes only after both, and only the CLI's consumption replay settles the ledger.
+            // A held settings relaunch means THIS message rides the old process: say so before its write, so
+            // the line leads the turn it explains instead of trailing that turn's TurnDone.
+            // (no background work at send → the hold WAS the question, even if it got answered since)
+            if (heldByWork) announceDeferredSettingsLocked(workAtSend.backgroundWork, !workAtSend.backgroundWork || hasPendingAsk())
             recordPromptWritten(promptId, outgoing, images, bridgeGrantToken, inferQueuedWork = true)
             markExecuting() // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         }
@@ -3308,6 +3333,50 @@ class Conversation(
         lockForkRetried = false // each user prompt re-arms one heal
         backend.sendPrompt(outgoing, images)
         return Delivered(firstSpawn, relaunching)
+    }
+
+    /** The launch flags a settings relaunch re-bakes — what the deferred-switch notice compares. */
+    private data class LaunchSettings(
+        val model: String?,
+        val mode: PermissionMode,
+        val permissionMode: String?,
+        val effort: String?,
+        val thinking: Boolean?,
+        val serviceTier: String?,
+    ) {
+        companion object {
+            fun of(spec: AgentSpec) =
+                LaunchSettings(spec.model, spec.mode, spec.permissionMode, spec.effort, spec.thinking, spec.serviceTier)
+        }
+    }
+
+    /** What the next launch would bake that the running one did not. Caller holds [lifecycle]. The model only
+     *  counts while a pick is pending: without one, [model] may just hold the running process's own resolved id. */
+    private fun pendingSettingChangesLocked(): List<SettingChange> {
+        val from = bakedSettings ?: return emptyList()
+        return settingChanges(from, LaunchSettings.of(launchSpec()), modelPicked = modelPickPending)
+    }
+
+    /** A held relaunch: tell the chat which settings this message did NOT get, why, and when they apply —
+     *  once per (setting, value) until they do. Caller holds [lifecycle], before the prompt's write. */
+    private suspend fun announceDeferredSettingsLocked(backgroundWork: Boolean, pendingAsk: Boolean) {
+        if (remoteExecution) return // a remote run reads its output from the run journal; nothing to explain there
+        val fresh = pendingSettingChangesLocked().filter { announcedDeferral[it.key] != it.to }
+        if (fresh.isEmpty()) return
+        announcedDeferral = announcedDeferral + fresh.associate { it.key to it.to }
+        val text = deferredSettingsNotice(fresh, backgroundWork, pendingAsk)
+        sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(text)))
+    }
+
+    /** The launch about to run bakes what an earlier notice called deferred: confirm it in the chat. Silent when
+     *  nothing was announced (an ordinary switch stays frame-for-frame unchanged) or the user switched back.
+     *  Caller holds [lifecycle], BEFORE the launch (its pump must not emit ahead of this line). */
+    private suspend fun announceDeferredSettingsAppliedLocked() {
+        if (announcedDeferral.isEmpty()) return
+        val applied = pendingSettingChangesLocked()
+        announcedDeferral = emptyMap()
+        if (applied.isEmpty()) return
+        sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(deferredSettingsAppliedNotice(applied))))
     }
 
     /**
@@ -3640,6 +3709,8 @@ class Conversation(
         proc = null
         bridge = null
         slot = null
+        bakedSettings = null // no process, nothing riding stale settings (a relaunch announced its apply already)
+        announcedDeferral = emptyMap()
         // second pass: an event the old pump was already handling when the slot retired may have re-armed it
         clearTurnWork()
         settleSubagents(includeBackground = true) // sub-agents died with the tree — stop their cards spinning
@@ -3861,6 +3932,54 @@ class Conversation(
         // id appears in their list instead of suspecting the "duplicate sessions" bug class
         const val FORK_NOTICE = "⑂ This session is held by another running claude (`claude agents`), " +
             "so your message continues in a forked copy.\n\n"
+
+        /** One launch setting a held relaunch has not applied yet: [key] is its chat label, [from] / [to] the
+         *  running and the requested value as the notice words them. */
+        private data class SettingChange(val key: String, val from: String, val to: String)
+
+        private const val MODEL_KEY = "model"
+
+        private fun settingChanges(from: LaunchSettings, to: LaunchSettings, modelPicked: Boolean): List<SettingChange> =
+            buildList {
+                fun add(key: String, a: String, b: String) { if (a != b) add(SettingChange(key, a, b)) }
+                if (modelPicked) add(MODEL_KEY, from.model ?: "the default model", to.model ?: "the default model")
+                add("reasoning effort", from.effort ?: "default", to.effort ?: "default")
+                add("permission mode", modeLabel(from.mode, from.permissionMode), modeLabel(to.mode, to.permissionMode))
+                add("thinking", thinkingLabel(from.thinking), thinkingLabel(to.thinking))
+                add("service tier", from.serviceTier ?: "default", to.serviceTier ?: "default")
+            }
+
+        // the App's own names for the modes (cfg_mode_*), lower-cased to sit mid-sentence
+        private fun modeLabel(mode: PermissionMode, native: String?): String = native ?: when (mode) {
+            PermissionMode.DEFAULT -> "default"
+            PermissionMode.ACCEPT_EDITS -> "accept edits"
+            PermissionMode.PLAN -> "plan"
+            PermissionMode.BYPASS_PERMISSIONS -> "full access"
+        }
+
+        private fun thinkingLabel(thinking: Boolean?): String = when (thinking) {
+            true -> "on"
+            false -> "off"
+            null -> "default"
+        }
+
+        /** "model" reads as its bare value ("sent with opus"), every other setting with its label. */
+        private fun SettingChange.valueOf(value: String): String = if (key == MODEL_KEY) value else "$key $value"
+
+        /** Leads the turn it explains, so — like [FORK_NOTICE] — it ends in a blank line before the reply. */
+        private fun deferredSettingsNotice(changes: List<SettingChange>, backgroundWork: Boolean, pendingAsk: Boolean): String {
+            val what = changes.joinToString(", ") { "${it.key} change to ${it.to}" }.replaceFirstChar { it.uppercase() }
+            val verb = if (changes.size == 1) "applies" else "apply"
+            val until = listOfNotNull(
+                "the running background task finishes".takeIf { backgroundWork },
+                "the pending question is answered".takeIf { pendingAsk },
+            ).joinToString(" and ")
+            val sentWith = changes.joinToString(", ") { it.valueOf(it.from) }
+            return "⏳ $what $verb to your first message after $until — this one was sent with $sentWith.\n\n"
+        }
+
+        private fun deferredSettingsAppliedNotice(changes: List<SettingChange>): String =
+            "✓ Now using ${changes.joinToString(", ") { it.valueOf(it.to) }}.\n\n"
 
         // consecutive placeholder-only turns before the session is announced degraded (issue #65)
         const val DEGRADED_STREAK = 2
