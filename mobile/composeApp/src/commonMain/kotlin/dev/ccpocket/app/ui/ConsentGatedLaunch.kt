@@ -35,8 +35,8 @@ internal fun ConsentGatedLaunchEffects(
         Telemetry.track(TelEvent.AppLaunch)
         if (repo.paired.value != null) repo.startRelay() // already paired -> straight to the list
     }
-    // §7: ONE parse for every entry point. A collaborator link parks in pendingCollabInvite for the
-    // fingerprint confirm screen — a deep link must never redeem on sight.
+    // §7: ONE parse for every entry point. A share invite parks in pendingShareInvite for the guest
+    // accept-preview — a deep link must never redeem on sight.
     val link by links.collectAsState()
     LaunchedEffect(link, consented) {
         if (consented) link?.let { repo.handleIncomingLink(it); links.value = null }

@@ -38,8 +38,7 @@ fun foregroundSessionOf(sessionKey: String?, convoId: String?, connected: Boolea
  * clients are online, so a phone already showing that session would double-alert. Hide ONLY when the push is
  * about the very session on screen and isn't an approval (`kind == "approval"` always presents: the card may
  * belong to a conversation this phone isn't driving). Turn-end flavors share `kind == null` on the wire, so an
- * error/limit push for the viewed session is hidden too — the chat shows it inline. No session routing
- * (Handoff offers carry only `hid`) → present.
+ * error/limit push for the viewed session is hidden too — the chat shows it inline. No session routing → present.
  */
 fun shouldPresentForegroundPush(viewingSessionId: String?, pushSessionId: String?, pushKind: String?): Boolean {
     if (pushKind == "approval") return true
