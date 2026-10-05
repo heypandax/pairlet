@@ -31,6 +31,11 @@ internal fun runPackageSmoke(successMarker: String? = null) {
         true,
         Thread.currentThread().contextClassLoader,
     )
+    // Signed self-update (ReleaseSignature) needs the JDK's Ed25519 — on JDK 17 it lives in jdk.crypto.ec,
+    // which a narrower jlink module list would drop. Without it an ENFORCED build could never update.
+    check(runCatching { java.security.Signature.getInstance("Ed25519") }.isSuccess) {
+        "packaged runtime has no Ed25519 (jdk.crypto.ec) — signed self-update could never verify"
+    }
 
     val matrix = qrMatrixOrFailure { PACKAGE_SMOKE_QR_PAYLOAD }.getOrThrow()
     check(matrix.size > 20 && (0 until matrix.size).any { x ->

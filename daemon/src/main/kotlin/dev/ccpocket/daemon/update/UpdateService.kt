@@ -8,6 +8,7 @@ import dev.ccpocket.daemon.service.ServiceInstaller
 import dev.ccpocket.daemon.util.DaemonVersion
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.update.ReleaseClient
+import dev.ccpocket.protocol.update.ReleaseTrustedKeys
 import dev.ccpocket.protocol.update.ReleaseVersions
 import java.nio.file.Files
 import java.nio.file.Path
@@ -170,8 +171,19 @@ object UpdateService {
      * [progress] observes the phases and download progress (issue #381): the CLI renders it, the background
      * auto-updater passes [UpdateProgressListener.QUIET]. Listener exceptions are swallowed here — display
      * must never change whether an update succeeds.
+     *
+     * Verification goes through [ReleaseClient.verifyDownload]: with no trusted release key built in
+     * ([ReleaseTrustedKeys.KEYS] empty — today) that is the SHA256SUMS check exactly as before; with keys it
+     * requires the release's signed manifest and fails with a [dev.ccpocket.protocol.update.ReleaseSignature.RejectedException]
+     * in the VERIFY stage otherwise. [trustedKeys] / [current] are injectable for tests.
      */
-    fun apply(release: Release, install: ManagedInstall, progress: UpdateProgressListener = UpdateProgressListener.QUIET): Path {
+    fun apply(
+        release: Release,
+        install: ManagedInstall,
+        progress: UpdateProgressListener = UpdateProgressListener.QUIET,
+        trustedKeys: List<String> = ReleaseTrustedKeys.KEYS,
+        current: String = currentVersion(),
+    ): Path {
         val trace = Diagnostics.begin(ErrorPath.UPDATE)
         var stage = Stage.CONFIGURE
         var phase: UpdatePhase? = null
@@ -190,8 +202,8 @@ object UpdateService {
             ReleaseClient.download(url, file) { p -> notify { onDownload(p) } }
             stage = Stage.VERIFY; trace?.stage(stage)
             enter(UpdatePhase.VERIFY)
-            val verified = ReleaseClient.verifyAgainstSums(release, asset, file, onSkip = { log.warn(it) })
-            if (verified) log.info("checksum OK ($asset)")
+            val verified = ReleaseClient.verifyDownload(release, asset, file, current, onSkip = { log.warn(it) }, trustedKeys = trustedKeys)
+            if (verified) log.info(if (trustedKeys.isEmpty()) "checksum OK ($asset)" else "signed release manifest + checksum OK ($asset)")
             else {
                 trace?.stage(Stage.VERIFY, ErrorCode.FALLBACK_USED)
                 Diagnostics.report(ErrorPath.UPDATE, Stage.VERIFY, ErrorCode.FALLBACK_USED,

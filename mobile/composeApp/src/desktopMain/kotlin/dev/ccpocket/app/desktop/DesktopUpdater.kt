@@ -1,9 +1,13 @@
 package dev.ccpocket.app.desktop
 
+import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.protocol.update.ReleaseClient
+import dev.ccpocket.protocol.update.ReleaseSignature
+import dev.ccpocket.protocol.update.ReleaseTrustedKeys
 import dev.ccpocket.protocol.update.ReleaseVersions
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.system.exitProcess
 
 /**
@@ -29,6 +33,11 @@ object DesktopUpdater {
     private val osName = System.getProperty("os.name").lowercase()
     private val isMac = osName.contains("mac")
     private val isWin = osName.contains("win")
+
+    init {
+        // once per process (first use of the updater): is self-update signature-enforced in this build?
+        runCatching { System.err.println(ReleaseSignature.modeLine()) }
+    }
 
     // ── pure decision logic (unit-tested) ─────────────────────────────────────────────────────────
 
@@ -105,25 +114,42 @@ object DesktopUpdater {
     fun latest(): ReleaseClient.Release? = ReleaseClient.latest(REPO)
 
     /**
-     * Full standalone self-update: download this platform's dmg/msi, verify its SHA256 against the release's
-     * SHA256SUMS, then swap the running app for the new one and relaunch. Does not return on success (the
+     * Full standalone self-update: download this platform's dmg/msi, verify it ([downloadVerified]: SHA256SUMS
+     * while unconfigured, the signed release manifest once a release key is built in), then swap the running
+     * app for the new one and relaunch. Does not return on success (the
      * process exits so the swap helper / installer can replace the files). Throws with a human-readable
      * message when there's no artifact for this platform, the download/verify fails, or the app can't be
      * located — the caller surfaces that and stays on the current version.
      */
     fun applyStandalone(release: ReleaseClient.Release) {
         val asset = desktopAssetFor() ?: error("no desktop build is published for this platform")
-        val url = release.assetUrls[asset] ?: error("release v${release.version} has no asset $asset")
-        val tmp = Files.createTempDirectory("cc-pocket-desktop-update")
-        val file = tmp.resolve(asset)
-        ReleaseClient.download(url, file)
-        // present-mismatch throws (corrupt/tampered); a missing SHA256SUMS entry passes, as on the daemon
-        ReleaseClient.verifyAgainstSums(release, asset, file.toAbsolutePath())
+        val file = downloadVerified(release, asset)
         when {
             isMac -> swapMacApp(file.toFile())
             isWin -> launchWindowsInstaller(file.toFile())
             else -> error("self-update isn't supported on this platform")
         }
+    }
+
+    /**
+     * Download [asset] of [release] into a fresh temp dir and verify it; returns the file only if it passed.
+     * Verification is [ReleaseClient.verifyDownload]: with no trusted release key built in (today) a present
+     * SHA256SUMS mismatch throws and a missing entry passes, exactly as before; with keys, only an artifact
+     * matching a correctly signed manifest newer than [current] gets through — anything else throws and the
+     * caller shows "Update failed" with the reason. [current] / [trustedKeys] are injectable for tests.
+     */
+    internal fun downloadVerified(
+        release: ReleaseClient.Release,
+        asset: String,
+        current: String = APP_VERSION,
+        trustedKeys: List<String> = ReleaseTrustedKeys.KEYS,
+    ): Path {
+        val url = release.assetUrls[asset] ?: error("release v${release.version} has no asset $asset")
+        val tmp = Files.createTempDirectory("cc-pocket-desktop-update")
+        val file = tmp.resolve(asset)
+        ReleaseClient.download(url, file)
+        ReleaseClient.verifyDownload(release, asset, file.toAbsolutePath(), current, trustedKeys = trustedKeys)
+        return file
     }
 
     // macOS: mount the dmg, copy the new .app OUT of the read-only image, detach, then hand a detached

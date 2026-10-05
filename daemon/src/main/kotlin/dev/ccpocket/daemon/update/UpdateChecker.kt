@@ -49,6 +49,8 @@ object UpdateChecker {
 
     /** [isBusy]: is any session doing or awaiting work a daemon exit would destroy? (auto-apply's gate) */
     fun start(relay: RelayClient, autoApply: Boolean, isBusy: () -> Boolean) {
+        // once per process, never per check: is self-update signature-enforced in this build, or not configured?
+        log.info(dev.ccpocket.protocol.update.ReleaseSignature.modeLine())
         thread(isDaemon = true, name = "update-checker") {
             Thread.sleep(FIRST_CHECK_DELAY_MS) // let boot + relay attach settle first
             while (true) {

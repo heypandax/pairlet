@@ -20,8 +20,8 @@
     },
     {
       "path": "daemon/src/main/kotlin/dev/ccpocket/daemon/update/UpdateService.kt",
-      "sha256": "e8de8d9f8c6bde47576a3dcb74b8cc742100acf43dd96949b3a800a4c265459f",
-      "note": "2026-09-11 observability: add bounded upgrade diagnostics and a post-switch receipt; preserve CLI symlink resolution, asset names, checksums, install paths, version switching and service identity. 2026-09-14 #364: recognize Homebrew/Scoop layouts and emit their upgrade commands only on the matching host OS; a managed layout still takes priority and unrecognized layouts get the host installer one-liner. Stable asset names, checksum validation, install paths, service identity, executable names, package-manager package ids and legacy CLI commands remain unchanged. UpdateServiceTest covers host-scoped classification and cross-platform command rejection; reviewed third-batch change. 2026-09-14 #381-A: apply accepts an optional phase/download-progress listener (default quiet; listener exceptions are swallowed) rendered by the update CLI on stderr and kept silent for background auto-update. Asset names, checksum validation, temp-dir cleanup, install paths, version switching, service identity, executable names and legacy CLI commands remain unchanged. UpdateProgressTest covers terminal and redirected output plus checksum/HTTP failure without switching the launcher."
+      "sha256": "3b3c13201cb3d1fd0d24bbf96d042ed715b9312fcb1ee09fb8ff8ca9c1fc7e7b",
+      "note": "2026-09-11 observability: add bounded upgrade diagnostics and a post-switch receipt; preserve CLI symlink resolution, asset names, checksums, install paths, version switching and service identity. 2026-09-14 #364: recognize Homebrew/Scoop layouts and emit their upgrade commands only on the matching host OS; a managed layout still takes priority and unrecognized layouts get the host installer one-liner. Stable asset names, checksum validation, install paths, service identity, executable names, package-manager package ids and legacy CLI commands remain unchanged. UpdateServiceTest covers host-scoped classification and cross-platform command rejection; reviewed third-batch change. 2026-09-14 #381-A: apply accepts an optional phase/download-progress listener (default quiet; listener exceptions are swallowed) rendered by the update CLI on stderr and kept silent for background auto-update. Asset names, checksum validation, temp-dir cleanup, install paths, version switching, service identity, executable names and legacy CLI commands remain unchanged. UpdateProgressTest covers terminal and redirected output plus checksum/HTTP failure without switching the launcher. 2026-10-05 update signing: the VERIFY stage calls ReleaseClient.verifyDownload; apply gains optional trustedKeys (default ReleaseTrustedKeys.KEYS, shipped empty) and current (default the running version) for tests. With the shipped empty list the check is the previous SHA256SUMS verification with the same log line; with keys an unsigned, untrusted, non-newer or mismatching release fails in VERIFY and nothing is switched. Asset names, install paths, version switching, service identity and CLI commands are unchanged. UpdateSignatureTest covers both modes."
     },
     {
       "path": "mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/pairing/Pairing.kt",
@@ -35,7 +35,8 @@
     },
     {
       "path": "mobile/composeApp/src/desktopMain/kotlin/dev/ccpocket/app/desktop/DesktopUpdater.kt",
-      "sha256": "01d20cd3091b0a88bdc95d0352eaf7e0fd3d8eb59554e9c6a9d00e7907f31d64"
+      "sha256": "168dbd2fb035f6b6f7ad3d516abef24653b83d5019204eec5a794e9bee65d72f",
+      "note": "2026-10-05 update signing: download + verify moved into downloadVerified, which calls ReleaseClient.verifyDownload (SHA256SUMS exactly as before while ReleaseTrustedKeys is empty; the signed release manifest once keys are built in), and the updater logs the signature mode once per process. Asset names, install-source classification, the macOS swap and the Windows installer hand-off are unchanged. DesktopUpdaterSignatureTest covers both modes."
     },
     {
       "path": "harmony/entry/src/main/ets/pocket/crypto/E2ESession.ets",
