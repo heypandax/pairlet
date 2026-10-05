@@ -299,6 +299,10 @@
     <string name="about_version">版本</string>
     <string name="about_license">许可证</string>
     <string name="about_connection">连接</string>
+    <string name="about_device_fingerprint">本机指纹</string>
+    <string name="about_computer_fingerprint">电脑指纹</string>
+    <string name="about_fingerprint_hint">与电脑上 `pairlet devices` 显示的指纹核对，五组都要一致。轻点指纹可复制。</string>
+    <string name="about_fingerprint_copy">复制指纹</string>
     <string name="settings_open">设置</string>
     <string name="settings_help_section">帮助与客服</string>
     <string name="support_title">帮助与客服</string>

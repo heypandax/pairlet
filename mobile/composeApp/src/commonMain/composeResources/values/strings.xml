@@ -299,6 +299,10 @@
     <string name="about_version">Version</string>
     <string name="about_license">License</string>
     <string name="about_connection">Connection</string>
+    <string name="about_device_fingerprint">This device\'s fingerprint</string>
+    <string name="about_computer_fingerprint">Computer fingerprint</string>
+    <string name="about_fingerprint_hint">Compare with `pairlet devices` on the computer — all five groups must match. Tap a fingerprint to copy it.</string>
+    <string name="about_fingerprint_copy">Copy fingerprint</string>
     <string name="settings_open">Settings</string>
     <string name="settings_help_section">HELP &amp; SUPPORT</string>
     <string name="support_title">Help &amp; support</string>
