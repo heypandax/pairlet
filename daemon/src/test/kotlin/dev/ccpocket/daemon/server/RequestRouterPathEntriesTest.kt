@@ -1,7 +1,6 @@
 package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.DaemonPrefs
-import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
@@ -11,7 +10,6 @@ import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
-import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.ListPathEntries
 import dev.ccpocket.protocol.PathEntries
 import kotlinx.coroutines.CompletableDeferred
@@ -25,9 +23,7 @@ import kotlin.test.assertTrue
 
 /**
  * The #176 gate on [PathEntries.roots]: filesystem roots ride ONLY an OWNER's reply to the "~"
- * home-anchor listing. An @-completion reply (real absolute workdir) must not carry them, and a guest
- * must never receive them even if a "~" frame somehow slipped past GuestGuard (defence in depth — the
- * guard denies the anchor outright, see GuestGuardTest).
+ * home-anchor listing. An @-completion reply (real absolute workdir) must not carry them.
  */
 class RequestRouterPathEntriesTest {
 
@@ -52,12 +48,11 @@ class RequestRouterPathEntriesTest {
     }
 
     /** Route one ListPathEntries and await its (launch-emitted) PathEntries reply. */
-    private fun reply(frame: ListPathEntries, guestScope: GuestScope? = null): PathEntries = runBlocking {
+    private fun reply(frame: ListPathEntries): PathEntries = runBlocking {
         val got = CompletableDeferred<PathEntries>()
         router(CoroutineScope(Dispatchers.Default)).handle(
             frame,
             { f -> if (f is PathEntries) got.complete(f) },
-            guestScope = guestScope,
         )
         withTimeout(5_000) { got.await() }
     }
@@ -76,15 +71,5 @@ class RequestRouterPathEntriesTest {
         val r = reply(ListPathEntries(wd))
         assertTrue(r.ok)
         assertTrue(r.roots.isEmpty(), "roots must ride only the '~' anchor reply")
-    }
-
-    @Test
-    fun a_guest_never_receives_roots_even_on_a_home_anchor_frame() {
-        val scope = GuestScope(
-            roots = listOf(Files.createTempDirectory("ccp-share").toRealPath().toString()),
-            ownedSessions = emptySet(), label = "alex", expiresAt = null, tier = AccessTier.COLLABORATE,
-        )
-        val r = reply(ListPathEntries("~"), guestScope = scope)
-        assertTrue(r.roots.isEmpty(), "a guest reply must never enumerate the disk layout")
     }
 }

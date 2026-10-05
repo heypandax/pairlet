@@ -1,19 +1,17 @@
 package dev.ccpocket.daemon.bridge
 
 import dev.ccpocket.daemon.util.logger
-import dev.ccpocket.protocol.PocketJson
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import java.io.File
 import java.security.MessageDigest
 import java.util.Base64
 
 /**
  * The daemon-local authority on which paired credentials are RESTRICTED — headless [CredentialKind.BRIDGE]
- * automations (issue #91) or scoped [CredentialKind.GUEST] folder shares (issue #115) — and the only place
- * a credential's kind is decided. The relay's `headless` flag is advisory (push hygiene + replay gating
- * only) and never trusted here. BOTH kinds ride ONE binding chain; only their persistence file and their
- * capability policy (caps + guard) differ.
+ * automations (issue #91) and [CredentialKind.EXECUTION] links (issue #367), plus the retired kinds still
+ * recognised so they can be refused and cleared (see [CredentialKind]) — and the only place a credential's
+ * kind is decided. The relay's `headless` flag is advisory (push hygiene + replay gating only) and never
+ * trusted here. Every kind rides ONE binding chain; only its persistence file and its capability policy
+ * differ.
  *
  * Binding chain (the security anchor, proposal §3 / reviewer item S1 — kind-agnostic):
  *  1. A mint records [recordIntent] with `sha256(ticket) -> spec` (spec carries the kind + scope + expiry).
@@ -35,15 +33,14 @@ class BridgeRegistry(
     private val store: File = BridgeStore.file(),
     // derive the sibling stores from the bridges.json dir so a test that passes only a temp `store` stays
     // fully isolated (production uses ~/.cc-pocket for all three)
+    // the retired folder-share GUEST keys (issue #115): still loaded, so they can be refused and then retired
     private val guestStore: File = store.parentFile?.let { File(it, "guests.json") } ?: GuestStore.file(),
-    private val guestSessionStore: File = store.parentFile?.let { File(it, "guest-sessions.json") }
-        ?: File(BridgeStore.file().parentFile, "guest-sessions.json"),
     private val collaboratorKeyStore: File = store.parentFile?.let { File(it, "collaborator-keys.json") }
         ?: CollaboratorKeyStore.file(),
     // issue #367: the fourth credential file, derived the same way so a temp-dir test stays isolated
     private val executionKeyStore: File = store.parentFile?.let { File(it, "execution-credentials.json") }
         ?: ExecutionCredentialStore.file(),
-    // the retired-credential tombstones (see [retireCollaborators] / [retireGuests]), derived the same way
+    // the retired-credential tombstones (see [retireCollaborators] / [tombstoneGuests]), derived the same way
     private val retiredStore: File = store.parentFile?.let { File(it, RetiredCredentialStore.FILE_NAME) }
         ?: RetiredCredentialStore.file(),
 ) {
@@ -59,13 +56,10 @@ class BridgeRegistry(
     private val specs = HashMap<String, BridgeSpec>()        // deviceId -> constraints (carries the kind)
     private val provisionalPub = HashMap<String, ByteArray>() // deviceId -> pub, pre-confirm
     private val guards = HashMap<String, BridgeGuard>()      // deviceId -> BRIDGE enforcement (per E2E session)
-    private val guestGuards = HashMap<String, GuestGuard>()  // deviceId -> GUEST enforcement (per E2E session)
     private val createdAts = HashMap<String, Long>()         // deviceId -> when the credential was bound
-    // deviceId -> sessionIds the guest started, PERSISTED so "visibility by initiator" survives a restart
-    private val guestSessions = HashMap<String, MutableSet<String>>()
 
     // deviceIds of retired credentials (Collaborator Links, folder-share guests) whose relay-side revoke is not
-    // confirmed yet (see [retireCollaborators] / [retireGuests]); guarded by `this`
+    // confirmed yet (see [retireCollaborators] / [tombstoneGuests]); guarded by `this`
     private val retired = LinkedHashSet<String>()
     // false when the tombstone file exists but could not be read at startup: it is then never overwritten,
     // and nothing whose retirement depends on writing it is retired this run; guarded by `this`
@@ -75,12 +69,6 @@ class BridgeRegistry(
         BridgeStore.load(store).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.BRIDGE) }
         GuestStore.load(guestStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.GUEST) }
         ExecutionCredentialStore.load(executionKeyStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.EXECUTION) }
-        runCatching {
-            if (guestSessionStore.exists()) {
-                PocketJson.decodeFromString<Map<String, List<String>>>(guestSessionStore.readText())
-                    .forEach { (id, sids) -> guestSessions[id] = sids.toMutableSet() }
-            }
-        }
         val bridges = specs.values.count { it.kind == CredentialKind.BRIDGE }
         val guests = specs.values.count { it.kind == CredentialKind.GUEST }
         val executions = specs.values.count { it.kind == CredentialKind.EXECUTION }
@@ -249,7 +237,9 @@ class BridgeRegistry(
     @Synchronized
     fun isBridge(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.BRIDGE && deviceId in bridgePubs
 
-    /** issue #115: this deviceId is a confirmed GUEST folder-share credential. */
+    /** issue #115: this deviceId is a confirmed GUEST folder-share credential — a retired kind, still loaded until
+     *  it is retired. Remote execution's collision check ([dev.ccpocket.daemon.relay.DeviceSessions.isKnownDevice])
+     *  relies on it. */
     @Synchronized
     fun isGuest(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.GUEST && deviceId in bridgePubs
 
@@ -318,7 +308,6 @@ class BridgeRegistry(
         if (guests.isEmpty()) return
         guests.forEach { id ->
             bridgePubs.remove(id); specs.remove(id); createdAts.remove(id); provisionalPub.remove(id)
-            guards.remove(id); guestGuards.remove(id)
         }
         GuestStore.save(rows(CredentialKind.GUEST), guestStore)
         log.info("retired ${guests.size} folder-share guest credential(s): keys cleared, relay revoke pending")
@@ -339,7 +328,7 @@ class BridgeRegistry(
     fun kindOf(deviceId: String): CredentialKind? = specs[deviceId]?.kind
 
     /** True for a CONFIRMED restricted credential OR one still provisional. EGRESS filtering + DaemonInfo
-     *  withholding key on this: both bridge and guest are relay-only (no LAN), and the handshake DaemonInfo
+     *  withholding key on this: every restricted kind is relay-only (no LAN), and the handshake DaemonInfo
      *  is sealed BEFORE the first transport frame confirms the kind, so a provisional restricted candidate
      *  must not be handed the LAN address it can't use anyway. */
     @Synchronized
@@ -351,54 +340,22 @@ class BridgeRegistry(
     @Synchronized
     fun specOf(deviceId: String): BridgeSpec? = specs[deviceId]
 
-    /** Begin (or reuse) a live BRIDGE enforcement guard. Null for a non-bridge (guest → [startGuestGuard]). */
+    /** Begin (or reuse) a live BRIDGE enforcement guard. Null for a non-bridge. */
     @Synchronized
     fun startGuard(deviceId: String): BridgeGuard? {
         val spec = specs[deviceId]?.takeIf { it.kind == CredentialKind.BRIDGE } ?: return null
         return guards.getOrPut(deviceId) { BridgeGuard(spec) }
     }
 
-    /** Begin (or reuse) a live GUEST enforcement guard (issue #115), seeded with the guest's persisted
-     *  owned-session set + a callback that persists newly-minted ones. Null for a non-guest. */
-    @Synchronized
-    fun startGuestGuard(deviceId: String): GuestGuard? {
-        val spec = specs[deviceId]?.takeIf { it.kind == CredentialKind.GUEST } ?: return null
-        return guestGuards.getOrPut(deviceId) {
-            GuestGuard(spec, seedSessions = guestSessions[deviceId]?.toSet() ?: emptySet(),
-                persistSession = { sid -> noteGuestSession(deviceId, sid) })
-        }
-    }
-
     @Synchronized
     fun guardOf(deviceId: String): BridgeGuard? = guards[deviceId]
 
-    @Synchronized
-    fun guestGuardOf(deviceId: String): GuestGuard? = guestGuards[deviceId]
-
-    /** Record a sessionId the guest started (persisted, bounded) — the ledger [startGuestGuard] seeds from
-     *  so "list only the guest's own sessions" survives a daemon restart (issue #115 comment §3). */
-    @Synchronized
-    fun noteGuestSession(deviceId: String, sessionId: String) {
-        if (deviceId !in bridgePubs) return
-        val set = guestSessions.getOrPut(deviceId) { LinkedHashSet() }
-        if (set.add(sessionId)) {
-            if (set.size > MAX_GUEST_SESSIONS) set.iterator().let { it.next(); it.remove() }
-            persistGuestSessions()
-        }
-    }
-
-    /** The sessionIds a guest owns (persisted ledger ∪ live guard) — the router filters ListSessions by it. */
-    @Synchronized
-    fun guestSessionIds(deviceId: String): Set<String> =
-        (guestSessions[deviceId].orEmpty()) + (guestGuards[deviceId]?.ownedSessionIds().orEmpty())
-
-    /** Revoked (or pruned by attach-replay reconcile): forget the credential + its guard + guest ledger. */
+    /** Revoked (or pruned by attach-replay reconcile): forget the credential + its guard. */
     @Synchronized
     fun remove(deviceId: String) {
         val existed = bridgePubs.remove(deviceId) != null || specs.remove(deviceId) != null
         if (existed) {
-            provisionalPub.remove(deviceId); guards.remove(deviceId); guestGuards.remove(deviceId); createdAts.remove(deviceId)
-            if (guestSessions.remove(deviceId) != null) persistGuestSessions()
+            provisionalPub.remove(deviceId); guards.remove(deviceId); createdAts.remove(deviceId)
             persist()
             log.info("restricted credential ${deviceId.take(8)}… removed")
         }
@@ -408,8 +365,8 @@ class BridgeRegistry(
     @Synchronized
     fun list(): List<Pair<String, BridgeSpec>> = bridges().map { (id, spec, _) -> id to spec }
 
-    /** Confirmed BRIDGEs — deviceId + spec + when bound — for the owner's management page. The [list]
-     *  twin of [guests]; carries the bind time the CLI listing has no use for. */
+    /** Confirmed BRIDGEs — deviceId + spec + when bound — for the owner's management page. Carries the bind
+     *  time the CLI listing ([list]) has no use for. */
     @Synchronized
     fun bridges(): List<Triple<String, BridgeSpec, Long>> =
         specs.entries.filter { it.value.kind == CredentialKind.BRIDGE }
@@ -423,18 +380,6 @@ class BridgeRegistry(
         purgeExpired(now)
         return intents.values.map { it.spec }
     }
-
-    /** Confirmed GUEST shares (issue #115) — deviceId + spec + when bound — for the owner's management page. */
-    @Synchronized
-    fun guests(): List<Triple<String, BridgeSpec, Long>> =
-        specs.entries.filter { it.value.kind == CredentialKind.GUEST }
-            .map { Triple(it.key, it.value, createdAts[it.key] ?: 0L) }
-
-    /** Confirmed GUEST deviceIds whose share has expired as of [now] — the reaper cuts + purges these so
-     *  an expired share drops the guest immediately and its ticket/credential can't be reused (issue #115 §6). */
-    @Synchronized
-    fun expiredGuestIds(now: Long = System.currentTimeMillis()): List<String> =
-        specs.entries.filter { it.value.kind == CredentialKind.GUEST && it.value.expired(now) }.map { it.key }
 
     private fun persist() {
         // split by kind: bridges.json holds ONLY bridges, guests.json ONLY guests, execution-credentials.json
@@ -455,21 +400,12 @@ class BridgeRegistry(
             id to BridgeEntry(b64enc.encodeToString(pub), specs[id]!!, createdAts[id] ?: System.currentTimeMillis())
         }
 
-    private fun persistGuestSessions() {
-        runCatching {
-            guestSessionStore.parentFile?.mkdirs()
-            guestSessionStore.writeText(PocketJson.encodeToString(guestSessions.mapValues { it.value.toList() }))
-        }
-    }
-
     private fun purgeExpired(now: Long) { intents.entries.removeAll { it.value.expiresAt <= now } }
 
     @OptIn(ExperimentalStdlibApi::class)
     private fun hashHex(b: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(b).toHexString()
 
     companion object {
-        private const val MAX_GUEST_SESSIONS = 512
-
         /** How long a [reserveMint] claim survives without release — a safety net only (the relay mint
          *  round-trip is bounded at ~10s and every caller releases in `finally`); generous enough that no
          *  live mint ever loses its slot mid-flight, short enough that an orphaned claim can't wedge
@@ -482,9 +418,9 @@ class BridgeRegistry(
          * classification robust to redeem→connect→first-frame latency and modest clock skew, so a
          * slow-to-first-frame bridge/guest is never mis-promoted to a full-power device (issue #91).
          *
-         * One constant for every mint path — loopback `pair --headless`, the wire [dev.ccpocket.protocol.CreateBridge],
-         * and folder-share — because they must classify identically. An abandoned mint blocks re-mint for
-         * at most this long.
+         * One constant for every mint path — loopback `pair --headless` and the wire
+         * [dev.ccpocket.protocol.CreateBridge] — because they must classify identically. An abandoned mint
+         * blocks re-mint for at most this long.
          */
         const val INTENT_GRACE_MS = 120_000L
     }

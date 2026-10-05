@@ -5,7 +5,6 @@ import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
-import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
@@ -15,7 +14,6 @@ import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
-import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.HistoryMessage
@@ -43,10 +41,8 @@ import kotlin.test.assertTrue
  * The "open a project" contract (issue #152): OpenSession with resumeId == null must work for a
  * directory that has NO agent history at all — the phone's folder browser upgrades any browsed
  * directory into a session cwd, so the router must accept a fresh dir (and the raw `~` form the
- * picker ships, mirroring the ListSessions tilde rule), refuse an unusable path with `bad_workdir`,
- * and keep a GUEST clamped to its shared root (`share_out_of_scope`) even at this second gate —
- * GuestGuard vets first, but the router's re-check is the belt-and-suspenders the #115 scope relies
- * on. The lazy open (#61) spawns no process, so a stub backend drives the whole path.
+ * picker ships, mirroring the ListSessions tilde rule), and refuse an unusable path with `bad_workdir`.
+ * The lazy open (#61) spawns no process, so a stub backend drives the whole path.
  *
  * ANNOUNCE ECHO (issue #219): the SessionLive answering an open must carry the opener's workdir
  * string VERBATIM, not the daemon's canonicalized form. The phone's identity guard recognizes a
@@ -60,15 +56,15 @@ class RequestRouterOpenSessionTest {
     fun diagnosticHistoryCompletionIsNegotiatedPerOwnerIngress() = runBlocking {
         val root = Files.createTempDirectory("ccp-open-diagnostic")
         val context = dev.ccpocket.protocol.DiagnosticContext("1234567890abcdef1234567890abcdef")
-        for (mode in listOf("owner", "legacy", "guest")) {
+        // "bridge": the non-owner ingress (a restricted origin) — it declares the capability yet gets none of it
+        for (mode in listOf("owner", "legacy", "bridge")) {
             val job = kotlinx.coroutines.SupervisorJob()
             try {
                 val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>()
                 val caps = RequestRouter.ClientCapsHolder().apply { supportsDiagnostics = mode != "legacy" }
                 router(CoroutineScope(Dispatchers.Default + job)).handle(
                     OpenSession(root.toString(), diagnostic = context), { emitted += it },
-                    origin = if (mode == "guest") "share:alex" else null,
-                    guestScope = if (mode == "guest") guestScope(root) else null, caps = caps,
+                    origin = if (mode == "bridge") "feishu:alex" else null, caps = caps,
                 )
                 val live = awaitLive(emitted)
                 if (mode == "owner") {
@@ -131,11 +127,6 @@ class RequestRouterOpenSessionTest {
         emitted.filterIsInstance<SessionLive>().first()
     }
 
-    private fun guestScope(root: Path) = GuestScope(
-        roots = listOf(root.toRealPath().toString()),
-        ownedSessions = emptySet(), label = "alex", expiresAt = null, tier = AccessTier.COLLABORATE,
-    )
-
     @Test
     fun a_directory_with_no_history_opens_a_new_session() = runBlocking {
         val fresh = Files.createTempDirectory("ccp-open-fresh") // no ~/.claude project, no rollouts — nothing
@@ -176,28 +167,18 @@ class RequestRouterOpenSessionTest {
     }
 
     @Test
-    fun a_guest_open_outside_its_shared_root_is_refused_at_the_router_too() = runBlocking {
-        val root = Files.createTempDirectory("ccp-open-root")
-        val outside = Files.createTempDirectory("ccp-open-outside")
-        val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>() // COW, not synchronizedList: assertions iterate while daemon coroutines still emit (CME)
-        router(CoroutineScope(Dispatchers.Default))
-            .handle(OpenSession(outside.toString()), { emitted += it }, origin = "share:alex", guestScope = guestScope(root))
-
-        val err = emitted.filterIsInstance<PocketError>().firstOrNull()
-        assertNotNull(err, "the router's own scope re-check must refuse an out-of-root open")
-        assertEquals("share_out_of_scope", err.code)
-        assertTrue(emitted.none { it is SessionLive })
-    }
-
-    @Test
-    fun a_guest_open_of_a_fresh_subfolder_under_its_root_still_works() = runBlocking {
-        val root = Files.createTempDirectory("ccp-open-root2")
-        val sub = Files.createDirectory(root.resolve("fresh-project")) // exists, zero history
-        val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>() // COW, not synchronizedList: assertions iterate while daemon coroutines still emit (CME)
-        router(CoroutineScope(Dispatchers.Default))
-            .handle(OpenSession(sub.toString()), { emitted += it }, origin = "share:alex", guestScope = guestScope(root))
-
-        val live = awaitLive(emitted)
-        assertEquals(sub.toString(), live.workdir, "in-scope fresh dirs stay openable for a guest, echoed verbatim (#219)")
+    fun a_bridge_open_of_a_backend_without_an_enforceable_approval_channel_answers_share_forbidden() = runBlocking {
+        // the code a bridge (the Feishu engine included) has always received here — it carries the retired
+        // folder-share name, but adapters key on it, so it stays exactly as it was
+        val root = Files.createTempDirectory("ccp-open-bridge")
+        for (agent in listOf(AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH)) {
+            val emitted = java.util.concurrent.CopyOnWriteArrayList<Frame>()
+            router(CoroutineScope(Dispatchers.Default))
+                .handle(OpenSession(root.toString(), agent = agent), { emitted += it }, origin = "feishu:g")
+            val err = assertNotNull(emitted.filterIsInstance<PocketError>().singleOrNull(), "$agent: $emitted")
+            assertEquals("share_forbidden", err.code)
+            assertEquals("$agent sessions are not available over shared/bridge access yet", err.message)
+            assertTrue(emitted.none { it is SessionLive })
+        }
     }
 }

@@ -181,7 +181,7 @@ class RetiredCollaborationCleanupTest {
         assertNull(sourceLinks().secretOf(grantId)!!.ticket, "precondition: the execution link's first contact is done")
 
         restricted("dev-bridge", BridgeSpec("feishu-bot", listOf(ws.path)))
-        restricted("dev-guest", BridgeSpec.guest("guest", ws.path, AccessTier.REVIEW, expiresAt = System.currentTimeMillis() + 3_600_000))
+        restricted("dev-guest", BridgeSpec("guest", listOf(ws.path), kind = CredentialKind.GUEST, expiresAt = System.currentTimeMillis() + 3_600_000, tier = AccessTier.REVIEW))
         val ownerKeys = E2ECrypto.generateKeyPair()
         harness.sessions.onMintedTicket("phone-ticket", headless = true) // headless: no #91 exclusion stamp
         harness.sessions.onDevicePaired("owner-phone", b64.encodeToString(ownerKeys.publicRaw))

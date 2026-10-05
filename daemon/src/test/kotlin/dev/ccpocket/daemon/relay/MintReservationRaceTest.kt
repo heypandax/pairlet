@@ -53,7 +53,7 @@ class MintReservationRaceTest {
     }
 
     private fun registry(tag: String) = BridgeRegistry(
-        File(dir, "bridges-$tag.json"), File(dir, "guests-$tag.json"), File(dir, "gs-$tag.json"),
+        File(dir, "bridges-$tag.json"), guestStore = File(dir, "guests-$tag.json"),
     )
 
     private fun bridgeService(reg: BridgeRegistry, mint: suspend () -> PairTicket?) = BridgeService(

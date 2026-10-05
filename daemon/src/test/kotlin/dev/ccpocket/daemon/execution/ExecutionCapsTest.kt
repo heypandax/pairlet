@@ -1,7 +1,6 @@
 package dev.ccpocket.daemon.execution
 
 import dev.ccpocket.daemon.bridge.BridgeCaps
-import dev.ccpocket.daemon.bridge.GuestCaps
 import dev.ccpocket.protocol.ExecutionGrantInfo
 import dev.ccpocket.protocol.ExecutionGrantQuery
 import dev.ccpocket.protocol.ExecutionRunAccepted
@@ -65,11 +64,9 @@ class ExecutionCapsTest {
         assertEquals(5, requests.size); assertEquals(4, replies.size)
         for (f in requests) {
             assertFalse(BridgeCaps.ingressAllowed(f), "bridge ingress ${f.name()}")
-            assertFalse(GuestCaps.ingressAllowed(f), "guest ingress ${f.name()}")
         }
         for (f in replies) {
             assertFalse(BridgeCaps.egressAllowed(f), "bridge egress ${f.name()}")
-            assertFalse(GuestCaps.egressAllowed(f), "guest egress ${f.name()}")
         }
     }
 }

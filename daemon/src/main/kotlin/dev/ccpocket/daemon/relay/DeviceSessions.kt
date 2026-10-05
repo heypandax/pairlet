@@ -11,7 +11,6 @@ import dev.ccpocket.daemon.bridge.BridgeCaps
 import dev.ccpocket.daemon.bridge.BridgeRegistry
 import dev.ccpocket.daemon.bridge.BridgeVerdict
 import dev.ccpocket.daemon.bridge.CredentialKind
-import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.server.RequestRouter
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.memo.withVoiceMemo
@@ -618,7 +617,6 @@ class DeviceSessions(
         // control planes. ----
         var toRoute: Frame = env.body
         var origin: String? = null
-        var guestScope: GuestScope? = null
         when {
             bridges.isBridge(deviceId) -> {
                 val guard = bridges.startGuard(deviceId)
@@ -747,7 +745,7 @@ class DeviceSessions(
                             else sink.emit(frame)
                         },
                     )
-                    route(env.body, pinSink, origin, guestScope, deviceId, { inboundCaps }, RelayPinConnection(deviceId, link, inboundCaps))
+                    route(env.body, pinSink, origin, deviceId, { inboundCaps }, RelayPinConnection(deviceId, link, inboundCaps))
                     return
                 }
                 if (isOwnerControlFrame(env.body)) {
@@ -766,7 +764,7 @@ class DeviceSessions(
                 }
             }
         }
-        route(toRoute, sink, origin, guestScope, deviceId, capsNow)
+        route(toRoute, sink, origin, deviceId, capsNow)
     }
 
     /** The router hand-off, extracted so a frame can take it either inline or off the reader loop.
@@ -776,7 +774,6 @@ class DeviceSessions(
         frame: Frame,
         sink: OutboundSink,
         origin: String?,
-        guestScope: GuestScope?,
         deviceId: String,
         caps: () -> RequestRouter.ClientCapsHolder,
         /** #362: the pin context of the connection that sent a project-pin request; null for every other frame. */
@@ -786,10 +783,9 @@ class DeviceSessions(
             // deviceId is the Noise-authenticated transport identity — never a frame field
             // listingLane: this reader serves EVERY device, so a session-list reply (a transcript scan) is produced on
             // the device's own lane instead of here — in order with that device's other listings, behind nobody else's
-            core.router.handle(frame, sink, origin, guestScope, caps = caps(), deviceId = deviceId, pinConnection = pin, listingLane = deviceId) { convoId ->
+            core.router.handle(frame, sink, origin, caps = caps(), deviceId = deviceId, pinConnection = pin, listingLane = deviceId) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
                 bridges.guardOf(deviceId)?.noteOpened(convoId)     // bridge (#91)
-                bridges.guestGuardOf(deviceId)?.noteOpened(convoId) // guest (#115)
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -935,20 +931,19 @@ class DeviceSessions(
     }
 
     private suspend fun sealAndSend(deviceId: String, frame: Frame) {
-        // ---- restricted EGRESS gate (issue #91 bridges + #115 guests): this is the ONLY place frames are
-        // sealed toward a relay device, so filtering here covers every source — conversation fan-out,
-        // handshake DaemonInfo, resurfaced asks, router errors. A bridge can never receive a PermissionAsk;
-        // a guest CAN (it answers its own), but neither ever receives the management/identity frames.
+        // ---- restricted EGRESS gate (issue #91 bridges, #367 execution links, the retired kinds): this is the
+        // ONLY place frames are sealed toward a relay device, so filtering here covers every source — conversation
+        // fan-out, handshake DaemonInfo, resurfaced asks, router errors. A bridge can never receive a PermissionAsk
+        // nor any management/identity frame.
         // Keyed on isBridgeCandidate so the provisional window (pre-first-transport handshake) is covered.
         if (bridges.isBridgeCandidate(deviceId)) {
             // learn the sessionIds minted for this credential's convos (SessionLive backfills them) so a
-            // later open(resumeId=…)/read is recognized as OWN; the guest guard also persists to the ledger
+            // later open(resumeId=…)/read is recognized as OWN
             if (frame is SessionLive) frame.sessionId?.let { sid ->
                 bridges.guardOf(deviceId)?.noteSession(frame.convoId, sid)
-                bridges.guestGuardOf(deviceId)?.noteSession(frame.convoId, sid)
             }
             // egress whitelist by kind. A provisional (kind not yet confirmed) candidate only ever has the
-            // handshake DaemonInfo in flight, which BOTH whitelists drop — so fall back to the stricter
+            // handshake DaemonInfo in flight, which every whitelist drops — so fall back to the stricter
             // BRIDGE whitelist until the first transport frame confirms the kind (fail closed).
             val allowed = when (bridges.kindOf(deviceId)) {
                 // a retired folder-share guest (2026-10) gets the access-ended notice and nothing else

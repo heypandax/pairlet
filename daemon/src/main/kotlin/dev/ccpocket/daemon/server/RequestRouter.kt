@@ -4,8 +4,6 @@ import dev.ccpocket.daemon.DaemonPrefs
 import dev.ccpocket.daemon.diagnostics.FileReadDiagnostics
 import dev.ccpocket.daemon.diagnostics.SessionOpenDiagnostics
 import dev.ccpocket.daemon.agent.ApprovalTimeout
-import dev.ccpocket.daemon.bridge.GuestScope
-import dev.ccpocket.daemon.bridge.PathScope
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.claude.ClaudeModelService
 import dev.ccpocket.daemon.conversation.OutboundSink
@@ -26,7 +24,6 @@ import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.ActivatePreset
-import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.ApprovalAttentionHeartbeat
 import dev.ccpocket.protocol.ApprovalHistoryPage
 import dev.ccpocket.protocol.ApprovalGrantMutationResult
@@ -328,15 +325,15 @@ class RequestRouter(
      * for "refused" — the caller then answers with the frame shape its request expects, so the phone gets
      * a readable state instead of silence.
      */
-    private fun gitWorkdir(workdir: String, origin: String?, guestScope: GuestScope?): java.nio.file.Path? {
-        if (!gitOwnerOnly(origin, guestScope)) return null
+    private fun gitWorkdir(workdir: String, origin: String?): java.nio.file.Path? {
+        if (!gitOwnerOnly(origin)) return null
         return dirs.validateWorkdir(workdir)
     }
 
     /** Why a git request was refused. A non-owner learns only that the surface is owner-only — never
      *  whether the path they named exists, which would make this a directory oracle. */
-    private fun gitDenial(origin: String?, guestScope: GuestScope?, workdir: String): String =
-        if (!gitOwnerOnly(origin, guestScope)) GIT_OWNER_ONLY else "not a readable directory: $workdir"
+    private fun gitDenial(origin: String?, workdir: String): String =
+        if (!gitOwnerOnly(origin)) GIT_OWNER_ONLY else "not a readable directory: $workdir"
 
     /**
      * Run a launched reply [block]; when it throws, answer [fallback] first so the client is not left waiting
@@ -457,9 +454,9 @@ class RequestRouter(
 
         /**
          * The Git panel's owner test (#280 §3.1 / #281 §5), as a pure function so it can be asserted
-         * without standing up a router: [isOwner] — no bridge or share origin, no guest scope.
+         * without standing up a router: [isOwner] — no restricted-credential origin.
          */
-        internal fun gitOwnerOnly(origin: String?, guestScope: GuestScope?): Boolean = isOwner(origin, guestScope)
+        internal fun gitOwnerOnly(origin: String?): Boolean = isOwner(origin)
 
         /** The one refusal sentence a non-owner sees — no repository facts leak with it. */
         internal const val GIT_OWNER_ONLY = "the Git panel is owner-only"
@@ -488,14 +485,12 @@ class RequestRouter(
             agent == null || agent == AgentKind.CLAUDE || agent == AgentKind.CODEX || caps?.allows(agent) == true
     }
 
-    /** [origin] names the restricted credential this frame arrived from (issue #91 bridge / #115 guest) —
-     *  null for every interactive owner client. [guestScope] (issue #115) is non-null ONLY for a GUEST:
-     *  it clamps the project/session VISIBILITY to the shared root + the guest's own sessions, and rides
-     *  into [SessionRegistry.open] as the conversation's tool path guard. [caps] is the connection's
-     *  capability holder — null (legacy ingress / bridges) filters like an undeclared client.
+    /** [origin] names the restricted credential this frame arrived from (issue #91 bridge) — null for every
+     *  interactive owner client. [caps] is the connection's capability holder — null (legacy ingress /
+     *  bridges) filters like an undeclared client.
      *  [bridgeAllowedCommands] (issue #91) is a BRIDGE's owner-configured Bash allow-list, ridden down to the
      *  new conversation's PermissionBridge so whitelisted commands auto-run without a phone prompt; empty for
-     *  every owner/guest client. */
+     *  every owner client. */
     // [ownerBypass] (issue #91): this OpenSession is the bridge's CONFIGURED OWNER's OWN dedicated session, so
     // the WHOLE session auto-allows (per-session ⇒ race-free). Passed ONLY by trusted in-process code (the
     // built-in engine); the relay/LAN ingress never sets it, so an external adapter can never claim it.
@@ -510,7 +505,7 @@ class RequestRouter(
     // one at a time and in request order with every other reply of the same lane (see [emitSessions]). The
     // relay ingress passes the deviceId — its single reader serves every device, so a listing produced
     // inline holds all of them. Null (LAN socket, in-process callers, tests) keeps the reply inline.
-    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, pinConnection: dev.ccpocket.daemon.pins.ProjectPinConnection? = null, listingLane: String? = null, onOpened: suspend (String) -> Unit = {}) {
+    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, pinConnection: dev.ccpocket.daemon.pins.ProjectPinConnection? = null, listingLane: String? = null, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
             // capability declaration (wire-compat gate for AgentKind additions) — no reply; the very
             // next list request answers unfiltered. Ingress handlers may process frames concurrently,
@@ -531,45 +526,42 @@ class RequestRouter(
             }
 
             is ListDirectories ->
-                if (guestScope != null) sink.emit(Directories(filterDirs(scopedDirectories(guestScope, caps), caps)))
-                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true, includeZcode = caps?.supportsZcode == true, includeDsh = caps?.supportsDsh == true), caps)))
+                sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true, includeZcode = caps?.supportsZcode == true, includeDsh = caps?.supportsDsh == true), caps)))
 
             // Owner control-plane pull: push is alert-only, so every foreground client can reconstruct the
             // complete queue even if APNs/FCM was delayed or lost. Restricted credentials must never learn
-            // another user's approvals; GuestCaps/BridgeGuard deny this frame and this check is defence in depth.
-            is ListPendingApprovals -> if (origin == null && guestScope == null) {
+            // another user's approvals; BridgeGuard denies this frame and this check is defence in depth.
+            is ListPendingApprovals -> if (origin == null) {
                 sink.emit(PendingApprovals(registry.pendingApprovals(shell.pendingApprovals() + exports.pendingApprovals())))
             }
 
-            is ListSessions -> emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
+            is ListSessions -> emitSessions(frame.workdir, sink, caps, listingLane)
 
             // session groups (issue #119): mutate the daemon-side group store, then re-push this workdir's
             // session list so the grouping change reflects immediately (same response path as ListSessions).
-            // A GUEST can't manage groups (they belong to the owner's project view) — silently no-op the
-            // mutation but still answer with the (re-filtered) list so the client isn't left hanging.
             is GroupCreate -> {
-                if (guestScope == null) SessionGroups.create(groupWorkdir(frame.workdir), frame.name)
-                emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
+                SessionGroups.create(groupWorkdir(frame.workdir), frame.name)
+                emitSessions(frame.workdir, sink, caps, listingLane)
             }
             is GroupRename -> {
-                if (guestScope == null) SessionGroups.rename(groupWorkdir(frame.workdir), frame.groupId, frame.name)
-                emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
+                SessionGroups.rename(groupWorkdir(frame.workdir), frame.groupId, frame.name)
+                emitSessions(frame.workdir, sink, caps, listingLane)
             }
             is GroupDelete -> {
-                if (guestScope == null) SessionGroups.delete(groupWorkdir(frame.workdir), frame.groupId)
-                emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
+                SessionGroups.delete(groupWorkdir(frame.workdir), frame.groupId)
+                emitSessions(frame.workdir, sink, caps, listingLane)
             }
             is GroupAssign -> {
-                if (guestScope == null) SessionGroups.assign(groupWorkdir(frame.workdir), frame.sessionId, frame.groupId)
-                emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
+                SessionGroups.assign(groupWorkdir(frame.workdir), frame.sessionId, frame.groupId)
+                emitSessions(frame.workdir, sink, caps, listingLane)
             }
 
             // session archive (issue #202): same daemon-side-truth + re-push contract as the groups above.
             // Acting from the cross-project archive view answers with the ARCHIVE list instead, so restoring
             // a row there never repoints the client's currently-listed directory to that row's project.
-            // OWNER means no restricted credential: no bridge/share origin and no guest scope ([isOwner]).
+            // OWNER means no restricted credential: no restricted-credential origin ([isOwner]).
             is SetSessionArchived -> {
-                val owner = isOwner(origin, guestScope)
+                val owner = isOwner(origin)
                 if (owner) {
                     val ok = SessionArchive.setArchived(groupWorkdir(frame.workdir), frame.sessionId, frame.archived, archiveFile)
                     // a refused write (bad id, cap hit) must not read as success: the re-pushed list would
@@ -582,40 +574,37 @@ class RequestRouter(
                 // the emit is gated too, not just the mutation: emitArchivedSessions is a whole-machine
                 // enumeration with no scope filter, so a non-owner must never reach it through this door
                 if (owner && frame.fromArchiveView) scope.launch { emitArchivedSessions(sink, caps) }
-                else emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
+                else emitSessions(frame.workdir, sink, caps, listingLane)
             }
             // a multi-project scan → off the inbound pump like FetchUsage. Owner only: this is a
-            // cross-project discovery surface, strictly more than the per-dir listing a guest may have.
+            // cross-project discovery surface, strictly more than any per-dir listing.
             is ListArchivedSessions ->
-                if (isOwner(origin, guestScope)) {
+                if (isOwner(origin)) {
                     scope.launch { emitArchivedSessions(sink, caps) }
                 }
 
             // project-pin sync (issue #362): OWNER-ONLY and deliberately NOT launched — both transports hand it
             // over in receive order, so one connection's fetch and operation batches commit in the order sent.
-            // Restricted credentials never reach here (GuestCaps / BridgeCaps default-deny both pin frame
-            // types); the owner test below is the second door.
-            is dev.ccpocket.protocol.SyncProjectPins -> syncProjectPins(frame, sink, origin, guestScope, caps, deviceId, pinConnection)
+            // Restricted credentials never reach here (BridgeCaps default-denies both pin frame types); the
+            // owner test below is the second door.
+            is dev.ccpocket.protocol.SyncProjectPins -> syncProjectPins(frame, sink, origin, caps, deviceId, pinConnection)
 
-            // managed session list (issue #360): OWNER-ONLY. Restricted credentials never reach here (GuestCaps /
-            // BridgeCaps default-deny all five request types); the owner test in [managedSessionsRequest] is
+            // managed session list (issue #360): OWNER-ONLY. Restricted credentials never reach here (BridgeCaps
+            // default-denies all five request types); the owner test in [managedSessionsRequest] is
             // the second door and refuses before any directory or title is read.
             is dev.ccpocket.protocol.ListManagedSessions,
             is dev.ccpocket.protocol.EnableManagedSessions,
             is dev.ccpocket.protocol.DiscoverSessions,
             is dev.ccpocket.protocol.ImportSession,
-            is dev.ccpocket.protocol.RemoveManagedSession -> managedSessionsRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, guestScope, caps)
+            is dev.ccpocket.protocol.RemoveManagedSession -> managedSessionsRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, caps)
 
             // session rename (issue #158): lands claude's own custom-title record (live daemon session:
             // the CLI appends it itself over a control_request; idle: a one-line transcript append) —
             // an agent-ack/disk round-trip → off the inbound pump like FetchUsage. Success answers with
-            // the re-pushed Sessions (the group ops' refresh contract); failure with a PocketError. A
-            // guest never reaches here (GuestCaps default-denies the frame type at the choke point) —
-            // the null-check is belt-and-suspenders like the group mutations', answering with the list.
+            // the re-pushed Sessions (the group ops' refresh contract); failure with a PocketError.
             is RenameSession -> scope.launch {
-                if (guestScope != null) { emitSessions(frame.workdir, sink, guestScope, caps, listingLane); return@launch }
                 val err = registry.renameSession(groupWorkdir(frame.workdir), frame.sessionId, frame.title)
-                if (err == null) emitSessions(frame.workdir, sink, guestScope, caps, listingLane)
+                if (err == null) emitSessions(frame.workdir, sink, caps, listingLane)
                 else sink.emit(PocketError("rename_failed", err))
             }
 
@@ -629,14 +618,14 @@ class RequestRouter(
             // A network round trip to Anthropic → off the inbound pump like FetchUsage, or the socket
             // would stall for every device while api.anthropic.com is slow.
             //
-            // OWNER-ONLY, guarded here as well as by the caps allow-lists: GuestCaps / BridgeCaps both
-            // default-deny an unlisted type, and this is the second door so a future ingress change cannot
-            // silently open the surface. [gitOwnerOnly] is the owner judgement, shared rather than
-            // re-derived. This is account-wide BILLING state for the machine's owner, strictly wider than
-            // anything a scoped share covers, so a non-owner gets SILENCE (no reply frame at all) rather
-            // than an empty snapshot that would read as "your allowance is fine".
+            // OWNER-ONLY, guarded here as well as by the caps allow-lists: BridgeCaps default-denies an
+            // unlisted type, and this is the second door so a future ingress change cannot silently open the
+            // surface. [gitOwnerOnly] is the owner judgement, shared rather than re-derived. This is
+            // account-wide BILLING state for the machine's owner, strictly wider than anything a restricted
+            // credential covers, so a non-owner gets SILENCE (no reply frame at all) rather than an empty
+            // snapshot that would read as "your allowance is fine".
             is ClaudeQuotaGet ->
-                if (gitOwnerOnly(origin, guestScope)) {
+                if (gitOwnerOnly(origin)) {
                     scope.launch {
                         // Dispatch by the REQUESTED backend (issue #348). The frame name stays
                         // `claude.quota.get` for wire compatibility; `agent` is the selector.
@@ -664,11 +653,11 @@ class RequestRouter(
                         sink.emit(tagged)
                     }
                 } else {
-                    quotaLog.info("quota REFUSED origin=$origin guest=${guestScope != null}")
+                    quotaLog.info("quota REFUSED origin=$origin")
                 }
 
             // installed skills/plugins browse page (issue #132): a disk scan → off the inbound pump like
-            // FetchUsage. Guests never reach here (GuestCaps denies the frame type at the choke point).
+            // FetchUsage.
             is FetchSkillCatalog -> scope.launch {
                 sink.emit(SkillCatalogService.build(frame.workdir?.let { dirs.validateWorkdir(it) }))
             }
@@ -685,7 +674,7 @@ class RequestRouter(
             // streams over-cap binaries as FileContentChunk frames (issue #134)
             is ReadFile -> scope.launch {
                 val observation = FileReadDiagnostics(frame.diagnostic?.validated()?.takeIf {
-                    caps?.supportsDiagnostics == true && origin == null && guestScope == null
+                    caps?.supportsDiagnostics == true && origin == null
                 }, sink::emit)
                 // the ok=false FileContent also settles a half-sent chunk stream (it supersedes the partial)
                 replyOnFailure(sink, { FileContent(frame.workdir, frame.sessionId, frame.path, ok = false, error = FILE_SURFACE_FAILED) }) {
@@ -703,7 +692,7 @@ class RequestRouter(
             // comes from the daemon's own registry so the gate can't be spoofed client-side.
             is ExportFile -> scope.launch {
                 val observation = FileReadDiagnostics(frame.diagnostic?.validated()?.takeIf {
-                    caps?.supportsDiagnostics == true && origin == null && guestScope == null
+                    caps?.supportsDiagnostics == true && origin == null
                 }, sink::emit)
                 replyOnFailure(sink, { FileContent(frame.workdir, frame.sessionId, frame.path, ok = false, error = FILE_SURFACE_FAILED) }) {
                     try { exports.run(frame, registry.modeOf(frame.convoId), observation::send) }
@@ -711,46 +700,46 @@ class RequestRouter(
                 }
             }
             // ---- Git panel (issue #280) + worktree management (issue #281) ----
-            // OWNER-ONLY, and deliberately guarded HERE as well as by the caps allow-lists. GuestCaps /
-            // BridgeCaps default-deny already stops these types at the ingress; this is the second door, so a
-            // future ingress change cannot silently open the surface ([gitOwnerOnly]).
+            // OWNER-ONLY, and deliberately guarded HERE as well as by the caps allow-lists. BridgeCaps'
+            // default-deny already stops these types at the ingress; this is the second door, so a future
+            // ingress change cannot silently open the surface ([gitOwnerOnly]).
             //
-            // The READS are gated too, not just the writes: a guest's files/diff surface answers "what did
-            // this session change", while git status answers "what does the whole repository look like" —
-            // a strictly wider face, including paths and branches no share ever covered.
+            // The READS are gated too, not just the writes: a files/diff surface answers "what did this
+            // session change", while git status answers "what does the whole repository look like" — a
+            // strictly wider face, including paths and branches no restricted credential ever covered.
             //
             // All of them scope.launch: a fetch/pull/push is a network round trip and the relay pumps
             // inbound frames sequentially and inline, so awaiting here would wedge the socket for every
             // device until git returned. The workdir goes through the SAME dirs.validateWorkdir() the
             // files surface uses — an arbitrary path is never handed to a git process.
             is FetchGitStatus -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope)
-                if (wd == null) sink.emit(GitStatus(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, guestScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin)
+                if (wd == null) sink.emit(GitStatus(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, frame.workdir)))
                 else sink.emit(git.status(frame, wd))
             }
             is ReadGitDiff -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope)
-                if (wd == null) sink.emit(GitDiff(frame.convoId, frame.workdir, frame.path, frame.staged, ok = false, error = gitDenial(origin, guestScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin)
+                if (wd == null) sink.emit(GitDiff(frame.convoId, frame.workdir, frame.path, frame.staged, ok = false, error = gitDenial(origin, frame.workdir)))
                 else sink.emit(git.diff(frame, wd))
             }
             is GitAction -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope)
-                if (wd == null) sink.emit(GitActionResult(frame.convoId, frame.op, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin)
+                if (wd == null) sink.emit(GitActionResult(frame.convoId, frame.op, ok = false, exitCode = -1, error = gitDenial(origin, frame.workdir)))
                 else sink.emit(git.act(frame, wd))
             }
             is ListWorktrees -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope)
-                if (wd == null) sink.emit(WorktreeList(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, guestScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin)
+                if (wd == null) sink.emit(WorktreeList(frame.convoId, frame.workdir, ok = false, error = gitDenial(origin, frame.workdir)))
                 else sink.emit(git.listWorktrees(frame, wd))
             }
             is AddWorktree -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope)
-                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_ADD, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin)
+                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_ADD, ok = false, exitCode = -1, error = gitDenial(origin, frame.workdir)))
                 else sink.emit(git.addWorktree(frame, wd))
             }
             is RemoveWorktree -> scope.launch {
-                val wd = gitWorkdir(frame.workdir, origin, guestScope)
-                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_REMOVE, ok = false, exitCode = -1, error = gitDenial(origin, guestScope, frame.workdir)))
+                val wd = gitWorkdir(frame.workdir, origin)
+                if (wd == null) sink.emit(GitActionResult(frame.convoId, GIT_OP_WORKTREE_REMOVE, ok = false, exitCode = -1, error = gitDenial(origin, frame.workdir)))
                 else sink.emit(git.removeWorktree(frame, wd))
             }
 
@@ -759,10 +748,9 @@ class RequestRouter(
             is ListPathEntries -> scope.launch {
                 val res = dirs.listPathEntries(frame.workdir, frame.subPath, frame.limit, frame.filter)
                 // filesystem roots (#176) ride ONLY the owner's "~" home-anchor reply (the folder browser's
-                // opening request — a real session's workdir is never the bare "~"): a guest must not learn
-                // the disk layout (GuestGuard already denies its "~" anchor outright; this gate is defence in
-                // depth), and @-completion replies don't need it.
-                val fsRoots = if (guestScope == null && frame.workdir == "~") dirs.listFsRoots() else emptyList()
+                // opening request — a real session's workdir is never the bare "~"); @-completion replies
+                // don't need it.
+                val fsRoots = if (frame.workdir == "~") dirs.listFsRoots() else emptyList()
                 sink.emit(
                     PathEntries(
                         workdir = frame.workdir,
@@ -778,18 +766,16 @@ class RequestRouter(
 
             is OpenSession -> {
                 // a new project: create the named folder if it doesn't exist yet (under an existing writable parent).
-                // A GUEST may only open UNDER its shared root — the guard already vetted the workdir, but re-check the
-                // (possibly newly created) real path so a create-under-parent can't land outside the scope.
                 val wd = dirs.validateOrCreateWorkdir(frame.workdir)
                 when {
                     wd == null -> sink.emit(PocketError("bad_workdir", "not a readable directory: ${frame.workdir}"))
                     // OpenCode runs `--auto` (no approval protocol): every tool call is CLI-approved, so the
-                    // PermissionBridge that enforces a guest's path scope / a bridge's command policy is never
+                    // PermissionBridge that enforces a bridge's workdir fence / command policy is never
                     // consulted. Until opencode exposes an enforceable approval channel, a RESTRICTED origin
-                    // (guest #115 / bridge #91) must not be able to open one — it would be unsandboxed
+                    // (bridge #91) must not be able to open one — it would be unsandboxed
                     // full-auto under a credential whose whole design is scoped, per-call consent.
                     // KIMI (issue #206): P1 fail-closed alongside OpenCode. Its ACP approval channel COULD
-                    // route a guest's path scope through PermissionBridge, but that path is unverified (probe
+                    // route a bridge's workdir fence through PermissionBridge, but that path is unverified (probe
                     // blocked on device-code auth), so a restricted credential must not open one yet. P2
                     // re-evaluates once the ACP approval face is proven end-to-end.
                     // DSH: still fail-closed AFTER the approval bridge landed (issue #291) and after the
@@ -797,33 +783,32 @@ class RequestRouter(
                     // ask does reach PermissionBridge, and on the ACP wire it even carries the tool's real
                     // `rawInput` now — but the walls a restricted session depends on all key on CLAUDE
                     // tool SPELLINGS, and dsh matches none of them:
-                    //   - the guest/bridge path wall reads `file_path`/`path`/`notebook_path` out of the
+                    //   - the bridge path wall reads `file_path`/`path`/`notebook_path` out of the
                     //     tool input; dsh happens to spell its write target `file_path`, but nothing keeps
                     //     the two vocabularies in step, so the match is a coincidence rather than a wall.
                     //   - `BridgeCommandPolicy` only classifies `toolName == "Bash"` with an `input.command`;
                     //     dsh's shell tool is `bash`, so every command classifies as unknown.
-                    // A guest/bridge would therefore self-approve tool calls the daemon cannot even name.
+                    // A restricted session would therefore run tool calls the daemon cannot even name.
                     // Lifting this needs tool-name normalization + real target extraction FIRST, not just
                     // the presence of an approval channel.
-                    (guestScope != null || origin != null) &&
+                    // The error code stays `share_forbidden` (and the text as it was): it is what a bridge — the
+                    // Feishu engine included — has always received here, and adapters key on the code.
+                    origin != null &&
                         (
                             frame.agent == AgentKind.OPENCODE || frame.agent == AgentKind.KIMI ||
                                 frame.agent == AgentKind.ZCODE || frame.agent == AgentKind.DSH
                             ) ->
                         sink.emit(PocketError("share_forbidden", "${frame.agent} sessions are not available over shared/bridge access yet"))
-                    guestScope != null && !PathScope.contains(guestScope.roots, wd.toString()) ->
-                        sink.emit(PocketError("share_out_of_scope", "that folder is outside your shared folder"))
                     else -> {
                         dirs.noteRecent(wd.toString())
-                        // pathScope = the guest's roots (issue #115 §4) → the conversation's
-                        // PermissionBridge denies any Read/Write/Edit outside them. Null for an owner.
+                        // no pathScope from this router (owner and bridge opens never carried one; remote
+                        // execution passes its own through RunService)
                         val convoId = registry.open(
                             frame.copy(workdir = wd.toString()),
                             frame.diagnostic?.validated()?.takeIf {
-                                caps?.supportsDiagnostics == true && origin == null && guestScope == null
+                                caps?.supportsDiagnostics == true && origin == null
                             }?.let { SessionOpenDiagnostics(sink, it) } ?: sink,
                             origin,
-                            pathScope = guestScope?.roots,
                             // null caps (legacy ingress / bridges) = undeclared, same as everywhere else here
                             peerSupportsOpencode = caps?.supportsOpencode == true,
                             peerSupportsKimi = caps?.supportsKimi == true,
@@ -841,11 +826,11 @@ class RequestRouter(
             }
 
             is dev.ccpocket.protocol.HistoryApplied -> {
-                if (caps?.supportsDiagnostics == true && origin == null && guestScope == null)
+                if (caps?.supportsDiagnostics == true && origin == null)
                     SessionOpenDiagnostics.applied(frame, sink)
             }
             is SendPrompt -> if (!registry.sendPrompt(frame.copy(diagnostic = frame.diagnostic?.validated()?.takeIf {
-                caps?.supportsDiagnostics == true && origin == null && guestScope == null
+                caps?.supportsDiagnostics == true && origin == null
             }))) sink.emit(SessionGone(frame.convoId))
             // Verdicts (question answers ride this same frame) resolve at ONE routing point — agent tool ask,
             // bridge request approval, quick-shell command, file export — by (convoId, askId) in the
@@ -853,7 +838,7 @@ class RequestRouter(
             // pending map. An unknown/expired askId answers the TAPPING device honestly (issue #100): its
             // optimistic card-clear must not read as success.
             is PermissionVerdict -> if (!approvals.onVerdict(frame.copy(diagnostic = frame.diagnostic?.validated()?.takeIf {
-                caps?.supportsDiagnostics == true && origin == null && guestScope == null
+                caps?.supportsDiagnostics == true && origin == null
             }), diagnosticEmit = sink::emit)) {
                 sink.emit(PocketError("ask_expired", "That approval expired before it reached your computer — ask the agent to try the action again.", frame.convoId))
             }
@@ -861,11 +846,11 @@ class RequestRouter(
             is SwitchServiceTier -> registry.switchServiceTier(frame)
             // dsh incomplete-install one-tap repair (rides [PocketError.repair]): reinstall the CLI whose
             // broken npm install crashed the session, then the next prompt respawns it clean. OWNER-only —
-            // a global `npm i -g` is a machine-wide side effect no guest/bridge credential may
+            // a global `npm i -g` is a machine-wide side effect no restricted credential may
             // trigger (their capability whitelists already default-deny this unknown frame; this is the
             // in-router echo of that boundary). Off the inbound loop like RunShellCommand: the reinstall
             // takes minutes and must never wedge the shared socket.
-            is AgentRepairStart -> if (isOwner(origin, guestScope)) {
+            is AgentRepairStart -> if (isOwner(origin)) {
                 if (frame.agent == AgentKind.DSH) {
                     scope.launch(Dispatchers.IO) { DshRepairService.repair(frame.convoId, sink::emit) }
                 } else {
@@ -916,7 +901,7 @@ class RequestRouter(
             is ApprovalAttentionHeartbeat -> approvals.heartbeat(frame.convoId, frame.askId, frame.visible)
             // "收紧后续授权" from the autorun chip: owner-only (same gate as ListPendingApprovals); the
             // store re-checks the grant belongs to the named conversation.
-            is RevokeGrant -> if (origin == null && guestScope == null) {
+            is RevokeGrant -> if (origin == null) {
                 val success = grants.revoke(frame.convoId, frame.grantId)
                 frame.requestId?.let { requestId ->
                     sink.emit(
@@ -930,7 +915,7 @@ class RequestRouter(
                 }
             }
             // §18.2 P2-2: the recoverable decision trail — owner-only, newest first, redacted rows only
-            is FetchApprovalHistory -> if (origin == null && guestScope == null) {
+            is FetchApprovalHistory -> if (origin == null) {
                 sink.emit(ApprovalHistoryPage(approvalHistory?.recent(frame.limit) ?: emptyList()))
             }
 
@@ -963,13 +948,13 @@ class RequestRouter(
 
             // voice memo → tasks: OWNER-ONLY and deliberately NOT launched — a start must be registered before its
             // chunks, and both transports hand frames over in receive order. Restricted credentials never reach
-            // here (GuestCaps / BridgeCaps / ExecutionCaps default-deny all four types); the
+            // here (BridgeCaps / ExecutionCaps default-deny all four types); the
             // checks in [voiceMemoRequest] are the second door.
             is dev.ccpocket.protocol.VoiceMemoStart,
             is dev.ccpocket.protocol.VoiceMemoAudio,
             is dev.ccpocket.protocol.VoiceMemoGet,
             is dev.ccpocket.protocol.VoiceMemoCancel ->
-                voiceMemoRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, guestScope, caps, deviceId)
+                voiceMemoRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, caps, deviceId)
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)
@@ -995,7 +980,7 @@ class RequestRouter(
             is ActivatePreset -> scope.launch { presets.activate(frame.id, frame.force, sink::emit) }
 
             // scheduled tasks (issue #137): quick store ops; each answers with the full ScheduleState
-            // truth (same single-reply contract as pocket/presets.*). Guests/bridges never reach here —
+            // truth (same single-reply contract as pocket/presets.*). Bridges never reach here —
             // their capability whitelists deny the frame type at the choke point (default-deny).
             is ScheduleCreate -> sink.emit(filterSchedule(scheduler.create(frame, dirs.validateWorkdir(frame.workdir)?.toString()), caps))
             is ScheduleList -> sink.emit(filterSchedule(scheduler.state(), caps))
@@ -1008,13 +993,13 @@ class RequestRouter(
             }
 
             // issue #201 "wait for my decision": same single-reply contract as the push toggle. Owner-only
-            // by the same default-deny choke point as the frames above — a guest/bridge can never flip how
+            // by the same default-deny choke point as the frames above — a bridge can never flip how
             // long the OWNER's approvals wait. Persist AND mirror into the per-ask read, so the next card
             // picks it up without a relaunch.
-            // origin/guestScope re-checked here like every other owner-plane approval frame
+            // origin re-checked here like every other owner-plane approval frame
             // (ListPendingApprovals / RevokeGrant / FetchApprovalHistory): the capability choke point
             // already denies it, and this is the second lock the rest of the plane carries.
-            is SetApprovalPrefs -> if (origin == null && guestScope == null) {
+            is SetApprovalPrefs -> if (origin == null) {
                 frame.noAutoDeny?.let {
                     prefs.setAskNoAutoDeny(it)
                     ApprovalTimeout.noAutoDeny = it
@@ -1062,7 +1047,7 @@ class RequestRouter(
      * One managed session list request (issue #360). Order of the gates matters:
      *  1. a connection that has not declared [ClientCapsHolder.supportsManagedSessions] gets SILENCE — no managed
      *     frame could reach it (egress gates on the same bit), and it must not learn anything else either;
-     *  2. a non-owner (bridge / guest — [isOwner]) gets `managed_forbidden` before the
+     *  2. a non-owner (a bridge — [isOwner]) gets `managed_forbidden` before the
      *     service is touched, so no directory, scan or store is read on its behalf;
      *  3. an unwired service answers `managed_unsupported`.
      * The service then validates agent / workdir / ids itself, runs reads off this pump, serializes mutations, and
@@ -1072,7 +1057,6 @@ class RequestRouter(
         frame: dev.ccpocket.protocol.ToDaemon,
         sink: OutboundSink,
         origin: String?,
-        guestScope: GuestScope?,
         caps: ClientCapsHolder?,
     ) {
         if (caps == null || !caps.supportsManagedSessions) return
@@ -1093,7 +1077,7 @@ class RequestRouter(
                 allAgents = (frame as? dev.ccpocket.protocol.ListManagedSessions)?.allAgents == true, error = code,
             )
         }
-        if (!isOwner(origin, guestScope)) {
+        if (!isOwner(origin)) {
             refuse(dev.ccpocket.protocol.ManagedSessionErrors.FORBIDDEN)?.let { sink.emit(it) }
             return
         }
@@ -1111,7 +1095,7 @@ class RequestRouter(
      * Voice memo admission. A memo holds a recording and its transcript, so the request is served only when ALL
      * of these hold, and is dropped in silence otherwise — a refusal frame would itself be a `pocket/memo.state`,
      * which an undeclared or restricted peer must never receive:
-     *  1. the owner test ([isOwner]: no bridge origin, no guest scope);
+     *  1. the owner test ([isOwner]: no restricted-credential origin);
      *  2. a TRANSPORT-authenticated device id — in-process callers have none, and the [LOCAL_DEVICE_ID] fallback is not an identity a recording may be filed under;
      *  3. the connection declared [ClientCapsHolder.supportsVoiceMemo];
      *  4. the service is wired.
@@ -1122,11 +1106,10 @@ class RequestRouter(
         frame: dev.ccpocket.protocol.ToDaemon,
         sink: OutboundSink,
         origin: String?,
-        guestScope: GuestScope?,
         caps: ClientCapsHolder?,
         deviceId: String?,
     ) {
-        if (!isOwner(origin, guestScope)) return
+        if (!isOwner(origin)) return
         val device = deviceId?.takeIf { it.isNotBlank() && it != LOCAL_DEVICE_ID } ?: return
         if (caps == null || !caps.supportsVoiceMemo) return
         val service = voiceMemo ?: return
@@ -1154,12 +1137,11 @@ class RequestRouter(
         frame: dev.ccpocket.protocol.SyncProjectPins,
         sink: OutboundSink,
         origin: String?,
-        guestScope: GuestScope?,
         caps: ClientCapsHolder?,
         deviceId: String?,
         pin: dev.ccpocket.daemon.pins.ProjectPinConnection?,
     ) {
-        if (!isOwner(origin, guestScope)) return
+        if (!isOwner(origin)) return
         if (caps == null || !caps.supportsProjectPins) return
         val subscription = frame.subscriptionId.takeIf { dev.ccpocket.protocol.isValidProjectPinToken(it) }
         fun refusal(code: String, message: String) = dev.ccpocket.protocol.ProjectPinsState(
@@ -1214,18 +1196,17 @@ class RequestRouter(
      * Emit this [workdir]'s resumable-session list — the single reply to [ListSessions] AND the re-push after
      * every session-group mutation (issue #119). Resolves the workdir like [OpenSession] (else a raw `~/…`
      * listing scans a non-existent dir and answers EMPTY — desktop ⌘N regression), merges every backend's
-     * sessions, marks the busy ones, and stamps the project's groups. A GUEST (issue #115) sees ONLY the
-     * sessions IT started (visibility "by initiator") and no group headers.
+     * sessions, marks the busy ones, and stamps the project's groups.
      *
      * With a [lane] the reply is produced on that lane instead of the caller's loop ([listingLaneFor]) and
      * this returns as soon as it is queued.
      */
-    private suspend fun emitSessions(workdir: String, sink: OutboundSink, guestScope: GuestScope?, caps: ClientCapsHolder? = null, lane: String? = null) {
-        if (lane == null) return emitSessionsNow(workdir, sink, guestScope, caps)
+    private suspend fun emitSessions(workdir: String, sink: OutboundSink, caps: ClientCapsHolder? = null, lane: String? = null) {
+        if (lane == null) return emitSessionsNow(workdir, sink, caps)
         // send, not trySend: when the lane is full the caller waits its turn rather than jumping the queue
         listingLaneFor(lane).send {
             try {
-                emitSessionsNow(workdir, sink, guestScope, caps)
+                emitSessionsNow(workdir, sink, caps)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 // inline, the transport's own catch answers a failed request; out here nothing else would
@@ -1271,11 +1252,10 @@ class RequestRouter(
         }
     }
 
-    private suspend fun emitSessionsNow(workdir: String, sink: OutboundSink, guestScope: GuestScope?, caps: ClientCapsHolder?) {
+    private suspend fun emitSessionsNow(workdir: String, sink: OutboundSink, caps: ClientCapsHolder?) {
         val busy = registry.busySessionIds()
         val wd = groupWorkdir(workdir)
         var items = registry.listSessions(wd).map { if (it.sessionId in busy) it.copy(busy = true) else it }
-        if (guestScope != null) items = items.filter { it.sessionId in guestScope.ownedSessions }
         // archived rows are filtered HERE, not client-side (issue #202): the desktop's RECENT snapshot holds
         // rows for projects it isn't currently listing and could never re-filter them, and doing it daemon-side
         // means even an old app gets the tidied list. One store load per listing, then O(1) per row.
@@ -1284,13 +1264,12 @@ class RequestRouter(
         // wire-compat (ClientCaps): an undeclared client would drop this WHOLE frame on one opencode/kimi row
         items = items.filter { capsAllow(caps, it.agent) }
         items = items.map { if (it.firstPrompt.length > SESSION_PROMPT_CLIP) it.copy(firstPrompt = it.firstPrompt.take(SESSION_PROMPT_CLIP)) else it }
-        val groups = if (guestScope != null) null else SessionGroups.groupsFor(wd)
-        // renameSupported (issue #158) / archiveSupported (issue #202): owner-only — a guest's frame is
-        // capability-denied anyway, so its client must not show the entry
+        val groups = SessionGroups.groupsFor(wd)
+        // renameSupported (issue #158) / archiveSupported (issue #202): this daemon serves both
         sink.emit(
             Sessions(
                 workdir, items, groups = groups,
-                renameSupported = guestScope == null, archiveSupported = guestScope == null,
+                renameSupported = true, archiveSupported = true,
             ),
         )
     }
@@ -1328,50 +1307,8 @@ class RequestRouter(
     private fun filterSchedule(state: ScheduleState, caps: ClientCapsHolder?): ScheduleState =
         if (state.items.all { capsAllow(caps, it.agent) }) state
         else state.copy(items = state.items.filter { capsAllow(caps, it.agent) })
-
-    /**
-     * The project list a GUEST sees (issue #115): ONLY the shared root(s) — each stamped with the origin
-     * label + expiry + tier for the "Shared" row — and never any of the owner's other project folders. The
-     * live-session enrichment is filtered to the guest's OWN sessions, so the owner's activity under the
-     * same root never leaks into the guest's row. A root with no history yet still appears (the guest can
-     * start there), so the shared folder shows up the moment the guest joins. [caps] gates opencode-only
-     * rows exactly like the owner path (issue #184 mechanism ②).
-     */
-    private suspend fun scopedDirectories(scope: GuestScope, caps: ClientCapsHolder?): List<DirectoryEntry> {
-        val all = dirs.listDirectories(null, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true, includeZcode = caps?.supportsZcode == true, includeDsh = caps?.supportsDsh == true)
-        val underScope = all
-            .filter { e -> PathScope.contains(scope.roots, e.path) }
-            .map { it.stampShare(scope) }
-        // ensure each shared root itself is present even with no transcript history under it yet
-        val present = underScope.mapNotNullTo(HashSet()) { PathScope.canonical(it.path) }
-        val bareRoots = scope.roots
-            .filter { it !in present }
-            .map { root ->
-                DirectoryEntry(path = root, name = java.io.File(root).name.ifEmpty { root }, isDir = true, hasSessions = false)
-                    .stampShare(scope)
-            }
-        return (bareRoots + underScope).sortedByDescending { it.lastModified }
-    }
-
-    /** Stamp a guest's shared-folder row: the origin/expiry/tier badges, and filter the live-session
-     *  enrichment down to sessions the guest owns (the owner's live sessions under the same root are hidden). */
-    private fun DirectoryEntry.stampShare(scope: GuestScope): DirectoryEntry {
-        val mine: List<ActiveSession> = activeSessions.filter { it.sessionId in scope.ownedSessions }
-        val first = mine.firstOrNull()
-        return copy(
-            sharedBy = scope.label, shareExpiresAt = scope.expiresAt, shareTier = scope.tier,
-            activeSessions = mine,
-            open = mine.isNotEmpty(),
-            executing = mine.any { it.executing },
-            busy = mine.any { it.busy },
-            activeSessionId = first?.sessionId,
-            activeSessionTitle = first?.title,
-            gitBranch = first?.gitBranch,
-        )
-    }
 }
 
-/** A FULL-POWER owner caller: no restricted credential is present — no bridge/share [origin] and no guest
- *  [guestScope]. Spelled out once so every owner-only op tests the same thing. */
-internal fun isOwner(origin: String?, guestScope: GuestScope?) =
-    origin == null && guestScope == null
+/** A FULL-POWER owner caller: no restricted credential is present — no restricted-credential [origin].
+ *  Spelled out once so every owner-only op tests the same thing. */
+internal fun isOwner(origin: String?) = origin == null

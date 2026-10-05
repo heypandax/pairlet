@@ -18,9 +18,10 @@ import java.nio.file.attribute.PosixFilePermissions
  *
  *  - [BRIDGE] (issue #91): a headless external automation. It never SEES a permission ask (approvals
  *    route to the OWNER) and can only open/prompt/cancel/close. Long-lived, no expiry.
- *  - [GUEST] (issue #115): a scoped INTERACTIVE collaborator on one shared folder. It approves its OWN
- *    asks, lists + browses inside the shared root, but never reaches the daemon's management plane or any
- *    path outside the root. Expires; the owner can revoke.
+ *  - [GUEST]: the folder-share guest (issue #115), RETIRED 2026-10 (已下线，仅为清除存量凭据保留). Nothing
+ *    mints one any more; guests.json is still loaded so the transport recognises the kind and refuses every
+ *    frame from it, and so the relay link can retire each one (tombstone, key cleared, relay revoke — see
+ *    [BridgeRegistry.tombstoneGuests]). Never remove it, for the same coercion reason as [COLLABORATOR].
  *  - [EXECUTION] (issue #367): the link a PEER DAEMON holds so its owner's agent can ask THIS machine to
  *    run a task. Its baseline is ZERO of the existing surface — no session plane at all, only the typed
  *    execution frames ([dev.ccpocket.daemon.execution.ExecutionCaps]) — and every authority it has lives
@@ -54,19 +55,17 @@ enum class CredentialKind { BRIDGE, GUEST, COLLABORATOR, EXECUTION }
 @Serializable
 data class BridgeSpec(
     val name: String,
-    /** Absolute workdir roots the credential may open sessions under (canonical, no trailing sep).
-     *  For a GUEST this is the single shared folder (its subtree) — the whole scope boundary. */
+    /** Absolute workdir roots the credential may open sessions under (canonical, no trailing sep). */
     val workdirs: List<String>,
     val maxSessions: Int = DEFAULT_MAX_SESSIONS,
     val opensPerMin: Int = DEFAULT_OPENS_PER_MIN,
     val promptsPerMin: Int = DEFAULT_PROMPTS_PER_MIN,
     val kind: CredentialKind = CredentialKind.BRIDGE,
-    /** GUEST only: when this share expires (epoch ms). null = no expiry (a bridge). Past → the guest is
-     *  cut and the credential purged (issue #115 §6). */
+    /** Set only on a GUEST row (issue #115, retired): when that share expired (epoch ms). Kept so stored rows
+     *  keep decoding; nothing reads it any more. null for every live kind. */
     val expiresAt: Long? = null,
-    /** The autonomy tier the owner granted — the permission-mode CEILING (never bypass), enforced for
-     *  BOTH kinds via [TierClamp]. Always set explicitly at mint: [guest] takes the owner's chosen tier,
-     *  [clamped] defaults a bridge to the strictest.
+    /** The autonomy tier the owner granted — the permission-mode CEILING (never bypass), enforced via
+     *  [TierClamp]. Always set explicitly at mint: [clamped] defaults a bridge to the strictest.
      *
      *  The default here is REVIEW because it is the FALLBACK, and a fallback must fail safe: it applies to
      *  a spec built without naming a tier (a stored entry from before the field existed, a test, a future
@@ -93,32 +92,19 @@ data class BridgeSpec(
      */
     val grantId: String? = null,
 ) {
-    val isGuest: Boolean get() = kind == CredentialKind.GUEST
-
-    /** True if this is a GUEST share whose lifetime has lapsed as of [now]. */
-    fun expired(now: Long): Boolean = expiresAt?.let { it <= now } == true
-
     companion object {
         const val DEFAULT_MAX_SESSIONS = 2
         const val DEFAULT_OPENS_PER_MIN = 6
         const val DEFAULT_PROMPTS_PER_MIN = 20
-
-        // a GUEST is interactive (a human at a phone), so its caps are looser than a bridge's but still
-        // bounded — one collaborator must not be able to fork-bomb the owner's machine.
-        const val GUEST_MAX_SESSIONS = 4
-        const val GUEST_OPENS_PER_MIN = 12
-        const val GUEST_PROMPTS_PER_MIN = 60
 
         /**
          * Clamp owner-supplied bridge overrides into sane bounds — a typo'd `--max-sessions 999` must not
          * turn one credential into a fork bomb.
          *
          * [tier] is the granted permission-mode CEILING (issue #91's "configurable default execution
-         * mode"), and it defaults to the STRICTEST — unlike a guest share, which defaults to COLLABORATE.
-         * The asymmetry is deliberate: a folder share is handed to a specific person the owner chose,
-         * whereas a bridge relays prompts from ANYONE in an IM chat. Silent file edits are a reasonable
-         * default for the former and a bad one for the latter, so an owner who wants that for a bot has
-         * to say so at mint time.
+         * mode"), and it defaults to the STRICTEST: a bridge relays prompts from ANYONE in an IM chat, so
+         * silent file edits are a bad default, and an owner who wants that for a bot has to say so at mint
+         * time.
          */
         fun clamped(
             name: String,
@@ -166,18 +152,6 @@ data class BridgeSpec(
             tier = AccessTier.REVIEW,
             grantId = grantId,
         )
-
-        /** Build a GUEST spec (issue #115): a single canonical shared root, an access tier, and an expiry. */
-        fun guest(name: String, root: String, tier: AccessTier, expiresAt: Long) = BridgeSpec(
-            name = name,
-            workdirs = listOf(root),
-            maxSessions = GUEST_MAX_SESSIONS,
-            opensPerMin = GUEST_OPENS_PER_MIN,
-            promptsPerMin = GUEST_PROMPTS_PER_MIN,
-            kind = CredentialKind.GUEST,
-            expiresAt = expiresAt,
-            tier = tier,
-        )
     }
 }
 
@@ -214,15 +188,11 @@ object BridgeStore {
 
 /**
  * The persisted registry of GUEST folder-share credentials (issue #115): deviceId -> [BridgeEntry]
- * (kind = GUEST), in `~/.cc-pocket/guests.json`. A SEPARATE file from bridges.json AND devices.json for
- * the same downgrade-safety reason #91 keeps bridges out of devices.json, now applied one level deeper:
- *
- *  - A daemon that predates #115 (bridge-aware but guest-unaware) never loads guests.json, so a guest
- *    key is an unknown device to it → handshake refused, fail closed. It CANNOT mis-file a guest as a
- *    full-power bridge either (guests never touch bridges.json).
- *  - A guest key must never leak into devices.json (full power) or bridges.json (bridge power) — its
- *    strictly-scoped enforcement lives only on the relay guest path, so there is no other gate to keep
- *    in sync.
+ * (kind = GUEST), in `~/.cc-pocket/guests.json`. Folder sharing is RETIRED (2026-10, 已下线): nothing writes a
+ * new row; the file is only read, so stored guests stay recognised (and refused) until each one is retired,
+ * and rewritten without them as they are ([BridgeRegistry.forgetRetiredGuests]). A SEPARATE file from
+ * bridges.json AND devices.json for the same downgrade-safety reason #91 keeps bridges out of devices.json:
+ * a guest key must never leak into devices.json (full power) or bridges.json (bridge power).
  *
  * Same owner-only permissions as bridges.json / the identity key.
  */
