@@ -198,6 +198,8 @@ class SidePaneModelDelegationGuardTest {
         "configureBridgeRunner", "clearBridgeCredential",
         // app + self-update
         "appVersion", "relayUrl", "updateState", "daemonVersion", "daemonUpdateCommand",
+        // Settings ▸ About: pairing fingerprints (pairing security phase 0) — the window's binding, like relayUrl
+        "deviceFingerprint", "computerFingerprint",
         "checkForUpdates", "applyUpdate", "updateCommand", "updateReleasesUrl",
         // settings / preferences
         "defaultAgent", "defaultMode", "defaultPermissionMode", "defaultEffort", "defaultServiceTier",
