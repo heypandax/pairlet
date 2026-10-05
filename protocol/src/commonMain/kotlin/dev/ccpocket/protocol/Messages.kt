@@ -566,12 +566,15 @@ data class DeletePreset(val id: String, val force: Boolean = false) : ToDaemon
 @SerialName("pocket/presets.activate")
 data class ActivatePreset(val id: String? = null, val force: Boolean = false) : ToDaemon
 
+// ---- RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留. The pocket/share.* types below are
+//      kept unchanged so older apps still decode; a new daemon answers ListShares with an empty ShareListing,
+//      CreateShare/RevokeShare with `unsupported`, and sends no share frame except ShareEnded (see there). ----
 // ---- folder-share (issue #115): OWNER-only control plane. These are a full-power device gesture —
 //      the daemon handles them only for an interactive OWNER device, NEVER a scoped guest or a headless
 //      bridge (a guest re-sharing the owner's machine is exactly the escalation the scope prevents). A
 //      guest's capability whitelist omits them, and the daemon double-checks the sender is full-power. ----
 
-/**
+/** RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留: a new daemon answers `unsupported`.
  * owner -> daemon: mint a scoped, expiring folder-share invite. The daemon mints a pairing ticket over
  * its relay link, records a GUEST intent binding [path]+[tier]+lifetime to that ticket, and returns a
  * [ShareCreated] carrying the redeemable [ShareInvite]. [expiresInSec] is the SHARE lifetime (the guest
@@ -587,12 +590,14 @@ data class CreateShare(
     val label: String? = null, // an optional nickname for the guest, shown on the owner's management page
 ) : ToDaemon
 
-/** owner -> daemon: list the folders I've shared + who is using them (the management page). Reply: [ShareListing]. */
+/** RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留: a new daemon answers an empty [ShareListing].
+ *  owner -> daemon: list the folders I've shared + who is using them (the management page). Reply: [ShareListing]. */
 @Serializable
 @SerialName("pocket/share.list")
 data object ListShares : ToDaemon
 
-/** owner -> daemon: revoke a share by its guest [deviceId] — cuts the guest's live link NOW and deletes
+/** RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留: a new daemon answers `unsupported`.
+ *  owner -> daemon: revoke a share by its guest [deviceId] — cuts the guest's live link NOW and deletes
  *  the credential (the ticket is already spent; the key dies). Reply: [ShareRevoked]. */
 @Serializable
 @SerialName("pocket/share.revoke")
@@ -1939,9 +1944,10 @@ data class FileDiff(
     val truncated: Boolean = false,
 ) : ToPhone
 
-// ---- folder-share (issue #115): OWNER-side replies ----
+// ---- folder-share (issue #115): OWNER-side replies — RETIRED (2026-10), 已下线，仅为兼容保留 ----
 
-/** daemon -> owner: the reply to [CreateShare]. On success [invite] carries the redeemable [ShareInvite]
+/** RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留: a new daemon never sends it.
+ *  daemon -> owner: the reply to [CreateShare]. On success [invite] carries the redeemable [ShareInvite]
  *  (the app renders it as a QR / copyable blob for the guest); on failure [error] says why (e.g. a phone
  *  pairing is mid-flight, bad path, relay offline). */
 @Serializable
@@ -1952,12 +1958,14 @@ data class ShareCreated(
     val error: String? = null,
 ) : ToPhone
 
-/** daemon -> owner: the reply to [ListShares] — my active shares + their activity (the management page). */
+/** RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留: a new daemon sends it only empty.
+ *  daemon -> owner: the reply to [ListShares] — my active shares + their activity (the management page). */
 @Serializable
 @SerialName("pocket/share.listing")
 data class ShareListing(val items: List<ShareInfo> = emptyList()) : ToPhone
 
-/** daemon -> owner: the reply to [RevokeShare]. [ok] false + [error] when the deviceId wasn't a share. */
+/** RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留: a new daemon never sends it.
+ *  daemon -> owner: the reply to [RevokeShare]. [ok] false + [error] when the deviceId wasn't a share. */
 @Serializable
 @SerialName("pocket/share.revoked")
 data class ShareRevoked(val deviceId: String, val ok: Boolean, val error: String? = null) : ToPhone
@@ -2005,6 +2013,10 @@ data class BridgeRunnerStatus(
 ) : ToPhone
 
 /**
+ * RETIRED (2026-10, folder sharing #115 removed) — 已下线，仅为兼容保留. Still SENT, once: when a new daemon retires
+ * the guest credentials an older one left behind, a guest online at that moment gets this with [REASON_REVOKED],
+ * so an old guest app shows "Access ended". Nothing else uses it.
+ *
  * daemon -> GUEST (issue #115 follow-up): this device's folder share just ended — the precise "why"
  * behind the disconnect that follows, so the guest terminal can light "Access ended · revoked"
  * instead of a bare connection drop. [reason] is [REASON_REVOKED] (the owner cut it) or
@@ -2344,7 +2356,10 @@ const val PROTO_V_HEADLESS: Int = 2
  *  The daemon MUST gate the offer push on this: an older relay silently ignores the unknown `deviceId`
  *  key and falls back to the ACCOUNT-level fan-out, which would deliver the collaborator's offer alert to
  *  the OWNER's own phone. Not sending at all is the honest degradation — the recipient still discovers the
- *  offer on its next connect/foreground pull. */
+ *  offer on its next connect/foreground pull.
+ *
+ *  The offer push went with session handoff (RETIRED 2026-10, 已下线，仅为兼容保留): a new daemon sends no
+ *  targeted push; the constant stays for the relay's capability level and the daemon's defensive write gate. */
 const val PROTO_V_TARGETED_PUSH: Int = 3
 
 /** The [Attached.relayProtoV] from which a relay sends [DeviceReplayComplete] after the complete
@@ -2413,7 +2428,10 @@ data class AuthError(val code: String, val message: String? = null) : ToRelay
  *  addressed by [NotifyPush.deviceId]. Two orthogonal markers, not one three-valued one: `headless` keeps
  *  meaning "invisible to presence / excluded from the account fan-out" for both, and `collaborator` only
  *  re-opens the two doors an inbox needs. An old relay ignores the key → the link still works, just with no
- *  offer push (the daemon's capability gate refuses to send one anyway). */
+ *  offer push (the daemon's capability gate refuses to send one anyway).
+ *
+ *  The Collaborator Link is RETIRED (2026-10, 已下线). The [collaborator] marker itself is NOT: the #367
+ *  execution-link mint still sets it, so it stays a live field under its historical name. */
 @Serializable
 @SerialName("pocket/pair.begin")
 data class PairBegin(
@@ -2550,9 +2568,13 @@ data class NotifyPush(
      * DANGEROUS ON AN OLD RELAY: it ignores the unknown key and fans out to the ACCOUNT, i.e. the owner's
      * own phone. Senders MUST gate on [PROTO_V_TARGETED_PUSH] from [Attached.relayProtoV] and simply not
      * send when it is absent.
+     *
+     * RETIRED with session handoff (2026-10, 已下线，仅为兼容保留): a new daemon never sets it.
      */
     val deviceId: String? = null,
     /**
+     * RETIRED with session handoff (2026-10, 已下线，仅为兼容保留): a new daemon never sets it.
+     *
      * Routing for a targeted OFFER push (§3.4): the opaque handoff id, and nothing else. It deep-links the
      * woken app into its offer inbox (`ccpocket://handoff?id=…`) where the real, END-TO-END-ENCRYPTED offer
      * is pulled with `ListHandoffs()`. Deliberately carried INSTEAD of [workdir]/[sessionId], which are
