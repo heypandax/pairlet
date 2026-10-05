@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
@@ -343,23 +344,12 @@ internal class RunCmd(
 }
 
 private class TestClientCmd : CliktCommand(name = "test-client") {
-    private val host by option().default("127.0.0.1")
-    private val port by option().int().default(8765)
-    private val relay by option("--relay", help = "relay ws base for device mode, e.g. ws://host:9000")
-    private val daemonPub by option("--daemon-pub", help = "daemon E2E public key from `pair` (relay mode)")
-    private val ticket by option("--ticket", help = "pairing ticket from `pair` (relay mode)")
+    private val relay by option("--relay", help = "relay ws base, e.g. ws://host:9000").required()
+    private val daemonPub by option("--daemon-pub", help = "daemon E2E public key from `pair`").required()
+    private val ticket by option("--ticket", help = "pairing ticket from `pair`").required()
 
     override fun run() {
-        val r = relay
-        if (r != null) {
-            TestClient.relay(
-                r,
-                daemonPub ?: error("--daemon-pub is required with --relay"),
-                ticket ?: error("--ticket is required with --relay"),
-            ).run()
-        } else {
-            TestClient.direct("ws://$host:$port/v1/ws").run()
-        }
+        TestClient.relay(relay, daemonPub, ticket).run()
     }
 }
 
