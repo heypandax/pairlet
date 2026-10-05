@@ -204,7 +204,6 @@ import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.ui.CheckMiniGlyph
 import dev.ccpocket.app.ui.ModelChip
 import dev.ccpocket.app.ui.modelChipLabel
-import dev.ccpocket.app.diaCdpSupported
 import dev.ccpocket.app.launchDiaCdp
 import dev.ccpocket.app.ui.RetryGlyph
 import dev.ccpocket.app.ui.SpinnerRing
@@ -1688,7 +1687,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 var composerFocused by remember { mutableStateOf(false) }
                 // CDP: relaunch Dia with the debug port so an agent can drive the browser (docs-dia-cdp-launch-需求.md).
                 // Killing the running Dia is the price of reusing its logged-in profile, so gate the tap behind a confirm.
-                val diaSupported = remember { diaCdpSupported() }
+                val diaSupported = remember(model) { model.diaCdpAvailable }
                 var diaConfirm by remember { mutableStateOf(false) }
                 var diaBusy by remember { mutableStateOf(false) }
                 var diaStatus by remember { mutableStateOf<String?>(null) } // last launch result → transient line under the hints

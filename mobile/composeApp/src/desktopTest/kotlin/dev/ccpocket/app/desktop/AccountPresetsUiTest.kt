@@ -66,7 +66,7 @@ class AccountPresetsUiTest {
         // the secrets red line, stated on the pane
         assertPresent(str(Res.string.settings_presets_secret_note))
         // settled note names the computer (design 3b)
-        assertPresent(str(Res.string.settings_presets_active_note, "Lidapeng-MacBook"))
+        assertPresent(str(Res.string.settings_presets_active_note, "Studio-MacBook"))
     }
 
     @Test

@@ -201,6 +201,8 @@ class SidePaneModelDelegationGuardTest {
         // Settings ▸ About: pairing fingerprints (pairing security phase 0) — the window's binding, like relayUrl
         "deviceFingerprint", "computerFingerprint",
         "checkForUpdates", "applyUpdate", "updateCommand", "updateReleasesUrl",
+        // whether THIS machine can relaunch Dia with a CDP port — a host fact, identical in every column
+        "diaCdpAvailable",
         // settings / preferences
         "defaultAgent", "defaultMode", "defaultPermissionMode", "defaultEffort", "defaultServiceTier",
         "defaultModelFor", "contextWindowOverride", "terminalApp", "terminalDefaultEmbedded",

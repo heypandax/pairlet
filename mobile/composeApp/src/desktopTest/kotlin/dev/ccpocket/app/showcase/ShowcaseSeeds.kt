@@ -67,7 +67,7 @@ internal object ShowcaseSeeds {
      */
     val ACCOUNT = dev.ccpocket.app.pairing.PairedDaemon(
         relay = "wss://showcase.invalid", accountId = "showcase", daemonPub = "pub",
-        deviceId = "dev", credential = "cred", hostName = "alex-macbook",
+        deviceId = "dev", credential = "cred", hostName = "macbook",
     )
 
     /** The attached session announce: what the daemon says this conversation IS. */
@@ -131,13 +131,13 @@ internal object ShowcaseSeeds {
     fun directories() = Directories(
         listOf(
             DirectoryEntry(
-                path = WORKDIR, name = "cc-pocket", isDir = true, hasSessions = true, recent = true,
+                path = WORKDIR, name = "pairlet", isDir = true, hasSessions = true, recent = true,
                 lastModified = ago(3 * MINUTE), open = true, executing = true,
                 activeSessionId = "entry-s1", activeSessionTitle = "Add demo mode for App Review",
                 gitBranch = "main",
             ),
             DirectoryEntry(
-                path = "/Users/alex/code/cc-pocket-site", name = "cc-pocket-site", isDir = true,
+                path = "/Users/alex/code/pairlet-site", name = "pairlet-site", isDir = true,
                 hasSessions = true, lastModified = ago(90 * MINUTE),
             ),
             DirectoryEntry(

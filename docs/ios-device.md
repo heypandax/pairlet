@@ -57,14 +57,14 @@ cp iosApp/iosApp/GoogleService-Info.plist.template iosApp/iosApp/GoogleService-I
    daemon/build/install/cc-pocket-daemon/bin/pairlet run --relay wss://pocket.ark-nexus.cc --claude-bin ~/.local/bin/claude
    ```
 
-2. **配对**：另开一个终端，让 daemon 出一张一次性配对链接：
+2. **配对**：另开一个终端，让 daemon 出一个一次性配对码：
 
    ```bash
    daemon/build/install/cc-pocket-daemon/bin/pairlet pair
-   # 输出 ccpocket://pair?relay=...&acct=...&dpk=...&ticket=...
+   # 输出二维码（只编码配对码：ccpocket://pair?code=…）与 "code:  123 456"，随后等待配对结果
    ```
 
-3. **App 里配对**：用 App 内置相机扫终端里的二维码，或手输 6 位码，或把上面的 `ccpocket://pair?...` 链接粘进「Pair」框 → Pair。配对成功后设备记住该 daemon，以后开 App 直接「Connect」。
+3. **App 里配对**：用 App 内置相机扫终端里的二维码，或手输 6 位码 → Pair。配对成功后终端显示新设备与这台电脑的指纹，可与 App「关于」里的「本机指纹」「电脑指纹」核对（五组都要一致）；设备记住该 daemon，以后开 App 直接「Connect」。
 
 > 票据 120s 单次有效；过期就再 `pair` 一次。自托管 relay：把 `wss://pocket.ark-nexus.cc` 换成你自己的域名（`deploy/` 有 systemd + Caddyfile）。
 

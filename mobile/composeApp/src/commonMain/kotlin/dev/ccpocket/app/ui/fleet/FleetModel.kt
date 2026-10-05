@@ -220,8 +220,8 @@ object DemoFleet {
 
     private val allMachines = listOf(
         FleetMachine(
-            "demo-mbp", "Lidapeng-MacBook", MachineOs.MAC, MachineStatus.ONLINE,
-            MachineActivity.Active(2, "~/proj/app/cc-pocket"), MachineLastSeen.ActiveNow, 0, current = true,
+            "demo-mbp", "Studio-MacBook", MachineOs.MAC, MachineStatus.ONLINE,
+            MachineActivity.Active(2, "~/proj/app/pairlet"), MachineLastSeen.ActiveNow, 0, current = true,
         ),
         FleetMachine(
             "demo-studio", "mac-studio", MachineOs.MAC, MachineStatus.ONLINE,
@@ -241,7 +241,7 @@ object DemoFleet {
         AttentionEntry("demo-ask-2", "demo-devbox", "devbox-linux", MachineOs.LINUX, "Write", "Edit file", "~/src/relay/src/main/kotlin/Relay.kt  +42 −7", 41, current = false),
     )
     val finished = listOf(
-        FinishedEntry("Lidapeng-MacBook", MachineOs.MAC, "Refactor auth module", ok = true, minutesAgo = 4),
+        FinishedEntry("Studio-MacBook", MachineOs.MAC, "Refactor auth module", ok = true, minutesAgo = 4),
         FinishedEntry("devbox-linux", MachineOs.LINUX, "Fix stream parser test", ok = false, minutesAgo = 12),
     )
 

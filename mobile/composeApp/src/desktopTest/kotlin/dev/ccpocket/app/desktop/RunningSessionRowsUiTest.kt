@@ -25,7 +25,7 @@ class RunningSessionRowsUiTest {
     /**
      * The seed with its session pins cleared. [DesktopModel.runningVisible] drops a project already
      * represented by a running PIN (so one live thing never shows twice), and the seed pins s1 in
-     * ~/code/cc-pocket — which would hide the very rows under test. Nothing else is changed: s1
+     * ~/code/pairlet — which would hide the very rows under test. Nothing else is changed: s1
      * ("Refactor auth module") and s2 ("Fix stream parser test") are both running in that one project.
      */
     private class NoPinsModel : SeedDesktopModel() {
@@ -45,14 +45,14 @@ class RunningSessionRowsUiTest {
         onAllNodes(hasTestTag("running:s1")).assertCountEquals(1)
         onAllNodes(hasTestTag("running:s2")).assertCountEquals(1)
         // …and the project row they replaced is gone: one row per live turn, not one per folder
-        onAllNodes(hasTestTag("running:~/code/cc-pocket")).assertCountEquals(0)
+        onAllNodes(hasTestTag("running:~/code/pairlet")).assertCountEquals(0)
 
         // each row LEADS with its own title — the whole point of the issue. The row is clickable, so its
         // texts merge INTO the tagged node: match them on the node itself, not as descendants.
         onAllNodes(hasTestTag("running:s1") and hasText("Refactor auth module")).assertCountEquals(1)
         onAllNodes(hasTestTag("running:s2") and hasText("Fix stream parser test")).assertCountEquals(1)
         // the project stays on the row as the muted second fact
-        onAllNodes(hasTestTag("running:s2") and hasText("cc-pocket")).assertCountEquals(1)
+        onAllNodes(hasTestTag("running:s2") and hasText("pairlet")).assertCountEquals(1)
     }
 
     /** A machine reached through its satellite link reports [DkProject.running] with no sessions behind

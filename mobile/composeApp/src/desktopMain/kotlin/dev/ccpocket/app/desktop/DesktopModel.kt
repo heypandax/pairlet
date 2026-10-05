@@ -1092,6 +1092,10 @@ interface DesktopModel {
     val updateCommand: String? get() = null
     /** Releases page for the "can't self-update from here" fallback (brew/scoop/unknown). */
     val updateReleasesUrl: String get() = DesktopUpdater.RELEASES_URL
+    /** Whether this machine can relaunch Dia with its CDP debug port (macOS with Dia installed) — gates the
+     *  composer's "Launch Dia" pill. A fact about THIS machine, not the daemon; the seed/demo model reports
+     *  false so screenshots and demos never show a developer-machine affordance. */
+    val diaCdpAvailable: Boolean get() = dev.ccpocket.app.diaCdpSupported()
     /** Agent choices accepted by the active daemon. Seed/preview models emulate a current daemon, so they
      *  offer the full enum — the live adapter narrows it through the same projection mobile uses. */
     val availableAgents: List<AgentKind> get() = AgentKind.entries

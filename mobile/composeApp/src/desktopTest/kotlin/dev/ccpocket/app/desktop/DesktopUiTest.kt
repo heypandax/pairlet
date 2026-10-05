@@ -55,7 +55,7 @@ class DesktopUiTest {
         assertPresent(str(Res.string.new_session_title))           // the single entry point under the header
         assertPresent(str(Res.string.switcher_all_projects) + "…") // the browse escape hatch docked above Settings
         assertPresent(str(Res.string.support_title))               // customer support stays one click from the sidebar
-        assertPresent("Lidapeng-MacBook")      // machine switcher header
+        assertPresent("Studio-MacBook")      // machine switcher header
         assertPresent("Refactor auth module")  // selected session (sidebar + chat header)
         assertPresent("Tidy CI workflow")      // a Codex session in the list
         // the docked rows above Settings (Archived, Reviews) each take a row off the RECENT viewport, so
@@ -104,7 +104,7 @@ class DesktopUiTest {
         assertPresent("Tidy CI workflow")               // s3 under "CI & release", expanded (and not pinned)
         onAllNodes(hasText("CI & release")).onLast().performClick() // collapse that group
         waitForIdle()
-        assertTrue(model.groupCollapsed("~/code/cc-pocket", "g-ci"), "the header click toggled collapse state")
+        assertTrue(model.groupCollapsed("~/code/pairlet", "g-ci"), "the header click toggled collapse state")
         assertTrue(!present("Tidy CI workflow"), "collapsing a custom group hides its sessions")
     }
 
@@ -203,20 +203,20 @@ class DesktopUiTest {
     @Test
     fun seedGroupCollapseToggles() {
         val m = SeedDesktopModel()
-        assertTrue(!m.groupCollapsed("~/code/cc-pocket", "g-auth"))
-        m.setGroupCollapsed("~/code/cc-pocket", "g-auth", true)
-        assertTrue(m.groupCollapsed("~/code/cc-pocket", "g-auth"))
-        m.setGroupCollapsed("~/code/cc-pocket", "g-auth", false)
-        assertTrue(!m.groupCollapsed("~/code/cc-pocket", "g-auth"))
+        assertTrue(!m.groupCollapsed("~/code/pairlet", "g-auth"))
+        m.setGroupCollapsed("~/code/pairlet", "g-auth", true)
+        assertTrue(m.groupCollapsed("~/code/pairlet", "g-auth"))
+        m.setGroupCollapsed("~/code/pairlet", "g-auth", false)
+        assertTrue(!m.groupCollapsed("~/code/pairlet", "g-auth"))
     }
 
     @Test
     fun runningRowsDedupeAgainstRunningPins() {
         val m = SeedDesktopModel()
         assertEquals(3, m.running.size)
-        // cc-pocket is already represented by the running pin "Refactor auth module" — shown once, not twice
+        // pairlet is already represented by the running pin "Refactor auth module" — shown once, not twice
         assertEquals(2, m.runningVisible.size)
-        assertTrue(m.runningVisible.none { it.second.name == "cc-pocket" })
+        assertTrue(m.runningVisible.none { it.second.name == "pairlet" })
     }
 
     @Test
@@ -283,7 +283,7 @@ class DesktopUiTest {
         }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        assertEquals("~/code/cc-pocket", model.newSessionDir) // ⌘N would land here…
+        assertEquals("~/code/pairlet", model.newSessionDir) // ⌘N would land here…
         onAllNodesWithContentDescription(str(Res.string.new_session_here)).onFirst().performClick()
         waitForIdle()
         assertTrue(model.showNewSession, "the ＋ opens the new-session popover")
@@ -504,7 +504,7 @@ class DesktopUiTest {
         waitForIdle()
         assertPresent(str(Res.string.new_path_start))
         assertPresent(str(Res.string.mode_default_short))
-        assertPresent("~/code/cc-pocket") // path field seeded with the current project
+        assertPresent("~/code/pairlet") // path field seeded with the current project
     }
 
     @Test
@@ -514,7 +514,7 @@ class DesktopUiTest {
         waitForIdle()
         assertPresent(str(Res.string.new_path_start))
         // the path field is auto-focused on open; Enter = the Start button
-        onAllNodes(hasText("~/code/cc-pocket")).onFirst().performKeyInput { pressKey(Key.Enter) }
+        onAllNodes(hasText("~/code/pairlet")).onFirst().performKeyInput { pressKey(Key.Enter) }
         waitForIdle()
         assertTrue(!present(str(Res.string.new_path_start)), "Enter submits and closes the popover")
     }
@@ -549,7 +549,7 @@ class DesktopUiTest {
         waitForIdle()
         assertPresent(str(Res.string.palette_placeholder))                // placeholder
         assertPresent(str(Res.string.palette_switch_to, "mac-studio"))    // machine verbs lead the blank-query list
-        assertPresent("cc-pocket")                           // a project row
+        assertPresent("pairlet")                           // a project row
         // sessions sit below the lazy viewport on a blank query (machine verbs push them down) —
         // filtering brings one into view, which is also the real usage path
         onAllNodes(hasSetTextAction()).onFirst().performTextInput("parser")
@@ -566,7 +566,7 @@ class DesktopUiTest {
         waitForIdle()
         assertPresent(str(Res.string.palette_switch_to, "mac-studio"))         // machine verb + ⌘n hint
         assertPresent("⌘0 2") // switcher chord: ⌘0 opens it, the digit picks the machine
-        assertPresent(str(Res.string.palette_new_on, "Lidapeng-MacBook"))      // machine-scoped action
+        assertPresent(str(Res.string.palette_new_on, "Studio-MacBook"))      // machine-scoped action
         assertPresent(str(Res.string.palette_approve_on, "mac-studio"))        // the "needs you" verb from the attention queue
         assertPresent(str(Res.string.this_machine))                            // local machine detail
     }
