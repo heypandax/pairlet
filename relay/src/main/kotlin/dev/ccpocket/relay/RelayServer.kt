@@ -312,6 +312,11 @@ class RelayServer(
         }
     }
 
+    /** Only an interactive owner pairing gets a 6-digit code: the daemon marks every restricted mint headless
+     *  (and the #367 execution mint collaborator too), so the absence of both markers is what "interactive"
+     *  means on the wire — the same reading old and new daemons share. */
+    private fun pairCodeAllowed(begin: PairBegin): Boolean = !begin.headless && !begin.collaborator
+
     // internal: the push tests drive the daemon control plane directly, as RelayServerControlTest does the device's
     internal suspend fun handleDaemonControl(account: String, text: String) {
         when (val body = runCatching { PocketJson.decodeFromString<Envelope>(text).body }.getOrNull()) {
@@ -324,7 +329,13 @@ class RelayServer(
                 // what the redeeming client declares (and `collaborator` has no client-declared form at all)
                 when (val m = pairing.mint(account, headless = body.headless, collaborator = body.collaborator)) {
                     is PairingService.MintResult.Ok -> {
-                        val code = codeStore.put(account, body.e2ePub, m.ticket) // 6-digit code resolves to this payload
+                        // A 6-digit code resolves to this payload — but only an INTERACTIVE owner pairing (`pairlet
+                        // pair`, a person reading the code off the screen) ever uses one. Restricted mints (bridge
+                        // #91, execution link #367, and every retired guest/collaborator kind) hand the full ticket
+                        // out of band and never read the code, so registering one there only gave a code-guesser a
+                        // second way to redeem those credentials. They get an empty code: the field stays on the
+                        // wire, and every daemon that ever minted them (all with headless=true) ignores it.
+                        val code = if (pairCodeAllowed(body)) codeStore.put(account, body.e2ePub, m.ticket) else ""
                         broker.controlToDaemon(account, controlText(PairTicket(m.ticket, m.ttlSec, code)))
                     }
                     is PairingService.MintResult.Err -> broker.controlToDaemon(account, controlText(AuthError(m.code)))
