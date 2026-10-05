@@ -49,7 +49,7 @@ KEY_ENV = 'RELEASE_SIGNING_KEY'
 KEY_FILE_ENV = 'RELEASE_SIGNING_KEY_FILE'
 
 # Kept identical to protocol ReleaseSignature.kt — a manifest the client would reject is never produced.
-VERSION_RE = re.compile(r'^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$')
+VERSION_RE = re.compile(r'^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.+-]+)?$')
 ASSET_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._+-]*$')
 SHA256_RE = re.compile(r'^[0-9a-f]{64}$')
 
@@ -288,39 +288,44 @@ def parse_manifest(data: bytes) -> dict:
     return document
 
 
-def previous_hashes(asset_dir: pathlib.Path, version: str, public_key: str | None) -> dict[str, str] | None:
+def previous_hashes(asset_dir: pathlib.Path, version: str, public_key: str | None) -> tuple[dict[str, str] | None, str]:
     """The asset hashes of the manifest a previous run already signed for this release (it is part of a
-    full `gh release download`), if it verifies with [public_key] and is for [version]; else None."""
+    full `gh release download`), if it verifies with [public_key] and is for [version]. Returns
+    (hashes or None, why it is None — '' when used)."""
     manifest, signature = asset_dir / MANIFEST, asset_dir / SIGNATURE
     if not manifest.is_file() or not signature.is_file():
-        return None
+        return None, f'the release has no earlier signed {MANIFEST}'
     if public_key is None:
-        warn(f'{MANIFEST} from an earlier run is present but no public key was given to check it — ignored')
-        return None
+        reason = f'the earlier {MANIFEST} could not be checked (no public key given)'
+        warn(reason + ' — ignored')
+        return None, reason
     try:
         if not signature_verifies(manifest, decode_signature_file(signature.read_bytes()), [public_key]):
             raise ManifestError('signature does not verify with the current signing key')
         document = parse_manifest(manifest.read_bytes())
     except ManifestError as error:
-        warn(f'ignoring the {MANIFEST} from an earlier run ({error}); carried-over assets are hashed as downloaded')
-        return None
+        reason = f'the earlier {MANIFEST} could not be used ({error})'
+        warn(reason + '; carried-over assets are hashed as downloaded')
+        return None, reason
     if document['version'] != version:
-        warn(f'ignoring the {MANIFEST} from an earlier run: it is for {document["version"]}, not {version}')
-        return None
-    return {name: entry['sha256'] for name, entry in document['assets'].items()}
+        reason = f'the earlier {MANIFEST} is for {document["version"]}, not {version}'
+        warn(reason + ' — ignored')
+        return None, reason
+    return {name: entry['sha256'] for name, entry in document['assets'].items()}, ''
 
 
 def build(version: str, asset_dir: pathlib.Path, replacement_dir: pathlib.Path | None,
-          build_hash_dir: pathlib.Path | None, public_key: str | None, published_at: str) -> tuple[bytes, dict[str, str]]:
-    """Returns (manifest bytes, asset -> provenance). Provenance of each hash, strongest first:
+          build_hash_dir: pathlib.Path | None, public_key: str | None, published_at: str) -> tuple[bytes, dict[str, str], str]:
+    """Returns (manifest bytes, asset -> provenance, why no earlier manifest vouched — '' if one did).
+    Provenance of each hash, strongest first:
     `build` (recorded by the job that produced the file, or a hotfix replacement file itself),
     `signed-before` (unchanged since a manifest this key signed earlier for this release),
-    `downloaded` (only the downloaded copy vouches for it — warned)."""
+    `downloaded` (only the downloaded copy vouches for it — warned; ci-sign refuses it by default)."""
     check_version(version)
     assets = collect_assets(asset_dir, replacement_dir)
     recorded = read_hash_records(build_hash_dir)
     replaced = set(p.name for p in replacement_dir.iterdir() if p.is_file()) if replacement_dir else set()
-    before = previous_hashes(asset_dir, version, public_key)
+    before, no_previous = previous_hashes(asset_dir, version, public_key)
     hashes: dict[str, str] = {}
     provenance: dict[str, str] = {}
     for name, path in assets.items():
@@ -349,7 +354,7 @@ def build(version: str, asset_dir: pathlib.Path, replacement_dir: pathlib.Path |
     if unvouched:
         warn(f'signed with hashes of the downloaded copies only (no build record or earlier signed manifest): '
              f'{", ".join(unvouched)}', title='Release manifest provenance')
-    return render_manifest(version, published_at, hashes), provenance
+    return render_manifest(version, published_at, hashes), provenance, no_previous
 
 
 def verify(manifest_path: pathlib.Path, signature_path: pathlib.Path, public_keys: list[str],
@@ -384,8 +389,8 @@ def verify(manifest_path: pathlib.Path, signature_path: pathlib.Path, public_key
 # ── commands ───────────────────────────────────────────────────────────────────────────────────────
 
 def cmd_build(args: argparse.Namespace) -> None:
-    manifest, _ = build(args.version, args.asset_dir, args.replacement_dir, args.build_hashes_dir,
-                        args.public_key, args.published_at or utc_now())
+    manifest, _, _ = build(args.version, args.asset_dir, args.replacement_dir, args.build_hashes_dir,
+                           args.public_key, args.published_at or utc_now())
     args.out.write_bytes(manifest)
     print(f'wrote {args.out}')
 
@@ -426,8 +431,19 @@ def cmd_ci_sign(args: argparse.Namespace) -> None:
     manifest_path, signature_path = args.out_dir / MANIFEST, args.out_dir / SIGNATURE
     with private_key_file() as key_path:
         public_key = public_key_of(key_path)
-        manifest, provenance = build(args.version, args.asset_dir, args.replacement_dir, args.build_hashes_dir,
-                                     public_key, args.published_at or utc_now())
+        manifest, provenance, no_previous = build(args.version, args.asset_dir, args.replacement_dir,
+                                                  args.build_hashes_dir, public_key, args.published_at or utc_now())
+        unvouched = sorted(name for name, origin in provenance.items() if origin == 'downloaded')
+        if unvouched and not args.allow_unvouched:
+            raise ManifestError(
+                f'refusing to sign {len(unvouched)} asset(s) that only the downloaded release copy vouches for:\n  '
+                + '\n  '.join(unvouched)
+                + f'\nWhy: this run has no build-time sha256 record for them, and {no_previous or "they are not listed in the earlier signed manifest"}.'
+                ' Signing them would turn whatever is on the release page right now into "trusted".'
+                '\nIf you have checked these files (e.g. first signing of an existing release, a manual upload, or a'
+                ' build job whose record upload failed), re-run with the release.yml input allow_unvouched=true'
+                ' (daemon hotfix: repository variable RELEASE_SIGNING_ALLOW_UNVOUCHED=true for that run), or sign'
+                ' locally with `release-manifest.py ci-sign --allow-unvouched`.')
         manifest_path.write_bytes(manifest)
         signature_path.write_text(base64.b64encode(sign_bytes(key_path, manifest_path)).decode() + '\n')
     verify(manifest_path, signature_path, [public_key], args.version, args.asset_dir, args.replacement_dir)
@@ -470,8 +486,10 @@ Public key (add to ReleaseTrustedKeys.kt, see docs/RELEASE.md「更新包签名�
 Keep the private key file safe:
   - Store it offline / in your password manager; anyone holding it can ship code to every client.
   - Never commit it, paste it into chat, or pass it on a command line.
-Configure the release workflows (reads the file from stdin, nothing on the command line):
-    gh secret set {KEY_ENV} --repo heypandax/cc-pocket < {out}
+Configure the release workflows — ONLY as a secret of the protected `release-signing` environment
+(create it with required reviewers + allowed refs FIRST; never a repository-level secret). The value is
+read from stdin, nothing on the command line:
+    gh secret set {KEY_ENV} --env release-signing --repo heypandax/cc-pocket < {out}
 Check what the secret signs with at any time:
     {KEY_FILE_ENV}={out} python3 scripts/release-manifest.py public-key''')
 
@@ -516,6 +534,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('--published-at')
     p.add_argument('--out-dir', type=path, required=True)
     p.add_argument('--trusted-keys-source', type=path, default=TRUSTED_KEYS_KT)
+    p.add_argument('--allow-unvouched', action='store_true',
+                   help='also sign assets vouched for only by the downloaded copy (after checking them yourself)')
     p.set_defaults(func=cmd_ci_sign)
 
     p = sub.add_parser('keygen', help='create a NEW key pair (project owner only)')

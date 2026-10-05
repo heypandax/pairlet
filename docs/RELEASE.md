@@ -114,7 +114,15 @@ daemon 与桌面 App 的自动更新共用 `protocol` 的 `ReleaseClient`。安�
   - 未重建的资产：与本版本上一次签名的清单核对；
   - 两者都没有：只能取下载副本的哈希，并打出警告。
 
-  任何一项对不上就拒签，工作流失败。
+  任何一项对不上就拒签，工作流失败。配置了私钥时，只有下载副本作证的资产默认也会拒签：
+  失败信息会列出这些资产、说明原因，并给出放行方式。确认文件无误后，按以下方式放行：
+  - `release.yml`：用输入 `allow_unvouched=true` 重跑；
+  - 热修复：临时把仓库变量 `RELEASE_SIGNING_ALLOW_UNVOUCHED` 设为 `true`，用完删掉；
+  - 本地：`ci-sign --allow-unvouched`。
+
+  第一次给已有版本签名时，由于还没有上一份清单，必然要走一次放行。
+- 签名 job（`release.yml` 的 `sign-manifest`、热修复的 `publish`）声明了 environment
+  `release-signing`，私钥从这个 environment 读取。
 - 客户端内嵌受信公钥列表
   [`ReleaseTrustedKeys.kt`](../protocol/src/jvmMain/kotlin/dev/ccpocket/protocol/update/ReleaseTrustedKeys.kt)：
   - **列表为空（未配置，当前状态）**：行为与以前完全一致，只核对 `SHA256SUMS`。
@@ -123,7 +131,14 @@ daemon 与桌面 App 的自动更新共用 `protocol` 的 `ReleaseClient`。安�
     - 取到清单和签名；
     - 签名能被任一受信公钥验证；
     - 清单版本等于所选版本，并且严格高于当前版本；
-    - 待安装文件的 sha256 与清单一致。
+    - 待安装文件的 sha256 与清单一致；
+    - 不低于本机已接受过的最新清单。
+
+    最后一条是防回滚高水位：已接受清单的「版本 + publishedAt」存放在
+    `~/.cc-pocket/update-signature-highwater.json`（daemon）和 `~/.cc-pocket-app/` 下的同名文件（桌面）。
+    比高水位更旧的清单，包括同版本但 publishedAt 更早的那份，都会被拒绝；
+    文件损坏时按“没有高水位”处理，并记一条日志。客户端没有构建时间常量，
+    所以不额外比较 publishedAt 与本机构建时间。
 
     任一条件失败都不安装，用户看到 `update refused — <原因>`：
     - `pairlet update`：命令行报错，不切换版本；
@@ -146,14 +161,24 @@ daemon 与桌面 App 的自动更新共用 `protocol` 的 `ReleaseClient`。安�
    命令会打印公钥，以及要写进 `ReleaseTrustedKeys.kt` 的那一行。私钥至少离线备份两份，
    例如密码管理器加离线介质。不要入库、不要贴进聊天、不要出现在命令行参数里。
    持有私钥的人可以向所有开启自动更新的客户端推送代码。这一步对用户没有影响。
-2. **配置 Actions secret**：`gh secret set RELEASE_SIGNING_KEY --repo heypandax/cc-pocket < 私钥文件`。
-   之后每次发版和热修复都会签名并上传清单。客户端还没有内嵌公钥，所以仍不影响用户。
-   如需人工审批，可以把它改成 Environment secret，但要同时给两个签名 job 加 `environment:`，
-   本次没有这样做。
+2. **建受保护的 environment，并把私钥只放在里面**（仓库设置，只能负责人操作）：
+   - 在 Settings → Environments 新建 `release-signing`；
+   - 设置 Required reviewers（必需审批人）；
+   - 在 Deployment branches and tags 中只允许：发布 tag `v*`、热修复 tag `daemon-hotfix-v*`，
+     以及 `only_*` 重跑会用到的 `main`；
+   - 写入 secret：`gh secret set RELEASE_SIGNING_KEY --env release-signing --repo heypandax/cc-pocket < 私钥文件`。
+
+   **不要**把它配成仓库级 secret。不做保护或配成仓库级的后果：任何有仓库写权限的人推一个工作流，
+   就能读出私钥，进而向所有已启用签名校验的客户端推送代码。
+
+   工作流已经引用这个 environment。在它建好之前，第一次发版时 GitHub 会**自动创建一个没有任何保护的同名
+   environment**；里面没有 secret，签名照常跳过并告警。所以要先建好保护规则，再写入 secret。
+   这一步完成后，每次发版和热修复都会签名，并等待审批人批准签名 job。客户端还没有内嵌公钥，所以仍不影响用户。
 3. **部署新的镜像同步脚本**：`bash scripts/provision-relay-mirror.sh`。部署后镜像会原样同步
    清单和签名，并在 `latest.json` 里指向镜像。旧脚本会把这两个文件指回 GitHub：仍然可用，
    但国内用户会变慢。
 4. **自检一个已签名的版本**：发版，或对现有版本跑一次 `only_*` 重跑之后，下载全部资产，
+   （给已有版本首次签名需要 `allow_unvouched=true`，见上文）
    用 `scripts/README.md` 里的 `verify` 命令验证，并确认 `https://pocket.ark-nexus.cc/dl/<tag>/`
    上也有这两个文件。
 5. **填入公钥并发版 N**：把公钥加进 `ReleaseTrustedKeys.kt`，按 `ReleaseTrustedKeysTest`
@@ -176,6 +201,29 @@ daemon 与桌面 App 的自动更新共用 `protocol` 的 `ReleaseClient`。安�
 - 最后运行 `verify` 回读确认。
 
 `sign-manifest` 会核对签名公钥是否在被发布源码的 `ReleaseTrustedKeys.kt` 里，不在就发出警告。
+
+**没配私钥就重跑会留下旧清单**：启用后如果在没有私钥的情况下重跑某个版本（`only_*`），Release 上会
+留着上一次签名的清单，它不覆盖这次替换的资产。结果是：
+- 强制模式客户端拒绝这些资产；
+- 镜像发现清单与 `SHA256SUMS` 不一致，拒绝同步，停在之前的版本。
+
+这是有意的失败安全，不会装上未签名的内容。处理办法：恢复 environment secret 后，对同一版本再跑一次
+`release.yml`（相同的 `only_*`；未重建的资产由旧清单作证），必要时加 `allow_unvouched=true`；
+也可以在本地用私钥重签后上传。
+
+### 热修复与同版本签名（发布建议）
+
+daemon 热修复（`daemon-hotfix-v*`）是在**同一版本号**下替换包并重签，所以同一版本会同时存在两份
+有效签名：修复前的清单加旧包，修复后的清单加新包。两者都由发布密钥签发。
+- **高水位能保护的**：已经见过并接受了修复后清单的客户端，之后会拒绝修复前那份。
+- **高水位保护不了的**：从未见过修复后清单的客户端。被控的镜像仍可以把修复前的那份发给它们，
+  它们会装上旧包，而且因为版本号相同，以后也不会再“升级”到修复后的包。
+- **现有语义**：自动更新、`pairlet update` 和桌面检查都只在版本号**严格更高**时更新。所以即使不考虑
+  攻击，同版本热修复本来也到不了已经装着该版本的客户端，只影响新安装和从更低版本升级的客户端。
+  本次没有改变这一点。
+
+最稳妥的做法是热修复也提升版本号（例如 2.3.1）。这样签名、高水位和“只升不降”可以完整生效，
+代价是多走一次版本锁步和商店/包管理器同步。是否改变热修复的版本策略由负责人决定，本次没有改动发布流程。
 
 ### 轮换密钥
 

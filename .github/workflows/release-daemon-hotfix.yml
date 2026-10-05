@@ -214,6 +214,9 @@ jobs:
     timeout-minutes: 20
     needs: [preflight, macos, windows, linux]
     runs-on: ubuntu-latest
+    # holds RELEASE_SIGNING_KEY (docs/RELEASE.md「更新包签名」): its protection rules gate this job; a missing
+    # environment is auto-created unprotected by GitHub, a missing secret only skips signing with a warning
+    environment: release-signing
     permissions:
       contents: write
     # Shares the normal release's lock while modifying assets and SHA256SUMS.
@@ -279,9 +282,13 @@ jobs:
       - name: Re-sign the release manifest over the final asset set
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          # tag-push workflow, no inputs: a repository variable is the explicit, temporary opt-in
+          ALLOW_UNVOUCHED: ${{ vars.RELEASE_SIGNING_ALLOW_UNVOUCHED }}
         run: |
+          RELAX=()
+          if [ "$ALLOW_UNVOUCHED" = "true" ]; then RELAX=(--allow-unvouched); fi
           python3 source/scripts/release-manifest.py ci-sign --version "$VERSION" \
-            --asset-dir before --replacement-dir replacement --out-dir signed
+            --asset-dir before --replacement-dir replacement --out-dir signed "${RELAX[@]}"
       - name: Replace only daemon packages and their checksums
         run: |
           gh release upload "v$VERSION" replacement/cc-pocket-daemon-* --clobber

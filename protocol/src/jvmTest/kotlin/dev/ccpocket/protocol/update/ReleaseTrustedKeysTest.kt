@@ -20,7 +20,8 @@ class ReleaseTrustedKeysTest {
             ReleaseTrustedKeys.KEYS is no longer empty. Every daemon and desktop app built from this tree will now
             REFUSE any update that is not signed by one of these keys (ENFORCED mode, no SHA256SUMS fallback).
             Before merging this, follow docs/RELEASE.md「更新包签名」 in order and confirm:
-              1. the matching private key is stored by the owner and configured as the RELEASE_SIGNING_KEY Actions secret;
+              1. the matching private key is stored by the owner and configured as the RELEASE_SIGNING_KEY secret of
+                 the protected `release-signing` environment (never a repository-level secret);
               2. the latest published release already carries a valid release-manifest.json + .sig
                  (python3 scripts/release-manifest.py verify …), so the first enforced clients can still update;
               3. the mirror runs the new deploy/mirror-sync.sh (scripts/provision-relay-mirror.sh) and serves that

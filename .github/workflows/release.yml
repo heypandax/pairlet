@@ -39,6 +39,10 @@ on:
         description: "Only run the Harmony job against an existing release (implies include_harmony): attaches the signed HAP + retains the AGC App Pack, then regenerates SHA256SUMS. Skips every other platform job so their published assets (and the Homebrew cask / Scoop sha256 pins) stay byte-identical. Must still be dispatched from the release tag."
         type: boolean
         default: false
+      allow_unvouched:
+        description: "Signed release manifest only: also sign assets that neither this run built nor an earlier signed manifest of this release lists (their hash would come from the downloaded copy alone). Leave off unless sign-manifest refused and you have checked the listed files — e.g. the first signing of an existing release. See docs/RELEASE.md「更新包签名」."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -905,6 +909,21 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      # Build-time sha256 of the uploaded HAP for the signed release manifest (sign-manifest job). Runs after
+      # the signing material is wiped, like the step above; best effort, never fails the Harmony release.
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        run: |
+          mkdir -p release-hashes
+          (cd harmony/release && shasum -a 256 "cc-pocket-harmony-${RELEASE_VERSION}-signed.hap") > release-hashes/harmony.sha256
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-hashes-harmony
+          path: release-hashes/
+          retention-days: 7
+
   # Keep the Scoop bucket (heypandax/scoop-bucket) on the release we just published: without this the
   # manifest stays pinned to an old version forever (its checkver/autoupdate fields are inert — no
   # excavator runs on a personal bucket), which stranded every Windows user on 1.1.9 (issue #25).
@@ -982,10 +1001,14 @@ jobs:
   # the manifest this key signed earlier for the release (assets left in place); see release-manifest.py.
   # Without the RELEASE_SIGNING_KEY secret this job only prints a warning — the rest of the release is
   # unaffected. Runs in every mode, including only_android (which skips `checksums`).
+  # The key lives in the `release-signing` environment so its protection rules (allowed refs, required
+  # reviewers — configured by the owner in the repository settings) gate every use. An environment that does
+  # not exist yet is created by GitHub on first use WITHOUT protection; without the secret it only warns.
   sign-manifest:
     if: ${{ !cancelled() && !failure() }}
     needs: [checksums, macos, windows, linux, android, macos-desktop, windows-desktop, linux-desktop, harmony]
     runs-on: ubuntu-latest
+    environment: release-signing
     steps:
       - uses: actions/checkout@v7
 
@@ -1013,8 +1036,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
           VER: ${{ inputs.version }}
+          ALLOW_UNVOUCHED: ${{ inputs.allow_unvouched }}
         run: |
           mkdir -p assets
+          RELAX=()
+          if [ "$ALLOW_UNVOUCHED" = "true" ]; then RELAX=(--allow-unvouched); fi
           if [ "${{ steps.key.outputs.configured }}" = "true" ]; then
             gh release download "v$VER" --repo "$GITHUB_REPOSITORY" --pattern '*' --dir assets
           else
@@ -1023,7 +1049,7 @@ jobs:
           fi
           # no key: prints the "NOT signed" warning and writes nothing
           python3 scripts/release-manifest.py ci-sign --version "$VER" --asset-dir assets \
-            --build-hashes-dir build-hashes --out-dir signed
+            --build-hashes-dir build-hashes --out-dir signed "${RELAX[@]}"
           if [ -f signed/release-manifest.json.sig ]; then
             gh release upload "v$VER" signed/release-manifest.json signed/release-manifest.json.sig \
               --clobber --repo "$GITHUB_REPOSITORY"

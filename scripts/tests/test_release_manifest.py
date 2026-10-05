@@ -88,9 +88,11 @@ class ReleaseManifestTest(unittest.TestCase):
         line = next(l for l in proc.stdout.splitlines() if l.strip().startswith('"'))
         return line.strip().split('"')[1]
 
-    def ci_sign(self, out='signed', *extra, key_file='default', check=True, asset_dir=None):
+    def ci_sign(self, out='signed', *extra, key_file='default', check=True, asset_dir=None, strict=False):
+        """strict=False passes --allow-unvouched (most tests have no build records); strict tests the default."""
+        relax = () if strict else ('--allow-unvouched',)
         return self.run_script('ci-sign', '--version', '9.1.0', '--asset-dir', asset_dir or self.assets,
-                               '--out-dir', self.tmp / out, *extra,
+                               '--out-dir', self.tmp / out, *relax, *extra,
                                key_file=self.key if key_file == 'default' else key_file, check=check)
 
     def verify(self, signed='signed', *extra, check=True, public=None):
@@ -241,6 +243,68 @@ class ReleaseManifestTest(unittest.TestCase):
         self.run_script('verify', '--manifest', self.tmp / 'hotfix' / 'release-manifest.json', '--public-key',
                         self.public, '--asset-dir', self.assets, '--replacement-dir', replacement)
 
+    # ── strict by default: nothing gets signed on the strength of the downloaded copy alone ─────
+
+    def all_records(self) -> pathlib.Path:
+        return self.write_records({p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                                   for p in self.assets.iterdir() if p.name != 'SHA256SUMS'})
+
+    def test_strict_refuses_unvouched_assets_on_a_release_without_an_earlier_manifest(self):
+        proc = self.ci_sign(strict=True, check=False)
+        self.assertEqual(1, proc.returncode)
+        self.assertIn('refusing to sign 3 asset(s) that only the downloaded release copy vouches for', proc.stderr)
+        self.assertIn('cc-pocket-desktop-macos-arm64.dmg', proc.stderr)
+        self.assertIn('the release has no earlier signed release-manifest.json', proc.stderr)
+        self.assertIn('allow_unvouched=true', proc.stderr)
+        self.assertFalse((self.tmp / 'signed' / 'release-manifest.json').exists(), 'nothing written on refusal')
+
+    def test_strict_signs_when_every_asset_has_a_build_record(self):
+        proc = self.ci_sign('full', '--build-hashes-dir', self.all_records(), strict=True)
+        self.assertNotIn('downloaded copies only', proc.stderr)
+        self.verify('full')
+
+    def test_strict_partial_rerun_is_vouched_by_the_earlier_manifest(self):
+        self.ci_sign('first', '--build-hashes-dir', self.all_records(), strict=True)
+        for name in ('release-manifest.json', 'release-manifest.json.sig'):
+            shutil.copy(self.tmp / 'first' / name, self.assets / name)
+        dmg = 'cc-pocket-desktop-macos-arm64.dmg'
+        (self.assets / dmg).write_bytes(b'rebuilt dmg\n')
+        shutil.rmtree(self.tmp / 'records')
+        rebuilt = self.write_records({dmg: hashlib.sha256(b'rebuilt dmg\n').hexdigest()})
+        self.ci_sign('rerun', '--build-hashes-dir', rebuilt, strict=True)
+
+    def test_strict_refuses_when_the_earlier_manifest_is_unusable(self):
+        self.ci_sign('first', '--build-hashes-dir', self.all_records(), strict=True)
+        for name in ('release-manifest.json', 'release-manifest.json.sig'):
+            shutil.copy(self.tmp / 'first' / name, self.assets / name)
+        new_key = self.tmp / 'keys' / 'rotated.pem'
+        self.keygen(new_key)  # e.g. after a rotation the earlier manifest no longer verifies
+        proc = self.ci_sign('rotated', key_file=new_key, strict=True, check=False)
+        self.assertEqual(1, proc.returncode)
+        self.assertIn('the earlier release-manifest.json could not be used', proc.stderr)
+        self.ci_sign('rotated-ok', '--allow-unvouched', key_file=new_key, strict=True)
+
+    def test_allow_unvouched_signs_and_still_warns(self):
+        proc = self.ci_sign('allowed', strict=True, check=False)
+        self.assertEqual(1, proc.returncode)
+        proc = self.ci_sign('allowed', '--allow-unvouched', strict=True)
+        self.assertIn('signed with hashes of the downloaded copies only', proc.stderr)
+        self.verify('allowed')
+
+    def test_without_a_key_strict_mode_still_only_warns(self):
+        proc = self.ci_sign(key_file=None, strict=True)
+        self.assertEqual(0, proc.returncode)
+        self.assertIn('RELEASE_SIGNING_KEY is not configured', proc.stderr)
+
+    def test_versions_shared_with_the_kotlin_client(self):
+        for version in ('2.3.0', '1.9.7-r2', '2.1.1-20260920-download-timeout'):
+            out = self.tmp / f'{version}.json'
+            self.run_script('build', '--version', version, '--asset-dir', self.assets, '--out', out)
+        for version in ('2.3', '2.3.0/x', '../2.3.0'):
+            proc = self.run_script('build', '--version', version, '--asset-dir', self.assets,
+                                   '--out', self.tmp / 'bad.json', check=False)
+            self.assertIn('invalid version', proc.stderr, version)
+
     def test_a_stale_manifest_is_flagged_when_signing_is_skipped(self):
         (self.assets / 'release-manifest.json').write_text('{}')
         proc = self.ci_sign(key_file=None)
@@ -271,7 +335,7 @@ class ReleaseManifestTest(unittest.TestCase):
         spied = {'OPENSSL': str(spy)}
         outputs = []
         for args in (('public-key',), ('ci-sign', '--version', '9.1.0', '--asset-dir', self.assets,
-                                       '--out-dir', self.tmp / 'env-signed')):
+                                       '--out-dir', self.tmp / 'env-signed', '--allow-unvouched')):
             proc = self.run_script(*args, key_text=pem, env_extra=spied)
             outputs += [proc.stdout, proc.stderr]
         outputs.append(argv_log.read_text())
