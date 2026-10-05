@@ -36,17 +36,7 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AccessTier
 import org.jetbrains.compose.resources.stringResource
 
-// ── tier label / description lookups (from the calibrated share_tier_* strings) ──
-
-@Composable
-fun tierLabel(t: AccessTier): String = stringResource(
-    when (t) {
-        AccessTier.REVIEW -> Res.string.share_tier_review
-        AccessTier.COLLABORATE -> Res.string.share_tier_collaborate
-        AccessTier.AUTONOMOUS -> Res.string.share_tier_autonomous
-        AccessTier.UNKNOWN -> Res.string.share_tier_review
-    },
-)
+// ── tier description lookups (from the calibrated share_tier_* strings) ──
 
 @Composable
 fun tierDesc(t: AccessTier): String = stringResource(
@@ -88,16 +78,6 @@ fun expiryOptionLabel(o: ShareExpiryOption): String = when (o) {
 }
 
 // ── badges ──
-
-/** The terracotta tier chip ("Collaborate") — attention hue, since the tier is what the owner is granting. */
-@Composable
-fun TierBadge(tier: AccessTier) {
-    Text(
-        tierLabel(tier), color = Tok.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Tok.accent.copy(alpha = 0.12f))
-            .border(1.dp, Tok.accent.copy(alpha = 0.3f), RoundedCornerShape(6.dp)).padding(horizontal = 9.dp, vertical = 4.dp),
-    )
-}
 
 /** The neutral "Shared" pill on a guest's shared row (issue #115) — deliberately a hairline, NOT terracotta:
  *  terracotta stays reserved for "needs you". A link glyph + muted text reads as provenance, not attention. */
@@ -186,17 +166,6 @@ fun SharePrimaryButton(text: String, enabled: Boolean = true, onClick: () -> Uni
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
             .background(if (enabled) Tok.accent else Tok.accent.copy(alpha = 0.4f))
             .clickable(enabled = enabled, onClick = onClick).padding(vertical = 15.dp),
-    )
-}
-
-/** A bordered secondary action ("Share…" / "New code" / "Remove from list"). */
-@Composable
-fun ShareOutlineButton(text: String, modifier: Modifier = Modifier, color: Color = Tok.tx, onClick: () -> Unit) {
-    Text(
-        text, color = color, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        modifier = modifier.clip(RoundedCornerShape(13.dp)).border(1.dp, Tok.hair, RoundedCornerShape(13.dp))
-            .clickable(onClick = onClick).padding(vertical = 13.dp),
     )
 }
 

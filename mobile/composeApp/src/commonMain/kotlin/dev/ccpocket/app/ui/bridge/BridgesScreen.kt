@@ -63,8 +63,6 @@ import dev.ccpocket.app.ui.FirstHopHeader
 import dev.ccpocket.app.ui.PocketSheet
 import dev.ccpocket.app.ui.connectedToSummary
 import dev.ccpocket.app.ui.session.Hairline
-import dev.ccpocket.app.ui.share.ShareOutlineButton
-import dev.ccpocket.app.ui.share.TierBadge
 import dev.ccpocket.protocol.BridgeInfo
 import dev.ccpocket.protocol.RUNNER_RESTART
 import dev.ccpocket.protocol.RUNNER_START
@@ -184,7 +182,7 @@ private fun BridgeCard(b: BridgeInfo, repo: PocketRepository, onRevoke: () -> Un
         // ── zone A · identity: the name, once, and what this bridge is allowed to do ──
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(b.name, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            TierBadge(b.tier)
+            AccessTierBadge(b.tier)
         }
 
         // ── zone B · facts: link state, then the two optional truths beside it. A FlowRow because these
@@ -481,7 +479,7 @@ private fun EditBridgeSheet(
             EditField(appSecret, { appSecret = it }, stringResource(Res.string.bridge_edit_secret_ph), secret = true)
             Spacer(Modifier.height(20.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                ShareOutlineButton(stringResource(Res.string.cancel), Modifier.weight(1f), onClick = onCancel)
+                OutlineActionButton(stringResource(Res.string.cancel), Modifier.weight(1f), onClick = onCancel)
                 Text(
                     stringResource(Res.string.bridge_edit_save),
                     color = if (dirty) Tok.tx else Tok.muted, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
@@ -533,7 +531,7 @@ private fun RevokeBridgeSheet(name: String, onCancel: () -> Unit, onConfirm: () 
             }
             Spacer(Modifier.height(22.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                ShareOutlineButton(stringResource(Res.string.cancel), Modifier.weight(1f), onClick = onCancel)
+                OutlineActionButton(stringResource(Res.string.cancel), Modifier.weight(1f), onClick = onCancel)
                 Text(
                     stringResource(Res.string.bridge_revoke_confirm), color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1.3f).clip(RoundedCornerShape(14.dp)).background(Tok.danger).clickable(onClick = onConfirm).padding(vertical = 15.dp),

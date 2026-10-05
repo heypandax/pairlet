@@ -47,6 +47,8 @@ import dev.ccpocket.app.ui.PocketSheet
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.ShareInfo
 import org.jetbrains.compose.resources.stringResource
+import dev.ccpocket.app.ui.bridge.AccessTierBadge
+import dev.ccpocket.app.ui.bridge.OutlineActionButton
 
 /**
  * Owner management page (issue #115, design frames 2a–2c + 4d): every folder I've shared out — who holds
@@ -110,7 +112,7 @@ private fun ActiveShareCard(s: ShareInfo, now: Long, onRevoke: () -> Unit) {
         Spacer(Modifier.height(13.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GuestChip(s.guestLabel)
-            TierBadge(s.tier)
+            AccessTierBadge(s.tier)
             Spacer(Modifier.weight(1f))
             Text(
                 stringResource(Res.string.share_expires_in, countdown(s.expiresAt, now)),
@@ -228,7 +230,7 @@ private fun RevokeSheet(folder: String, onCancel: () -> Unit, onConfirm: () -> U
             }
             Spacer(Modifier.height(22.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                ShareOutlineButton(stringResource(Res.string.cancel), Modifier.weight(1f), onClick = onCancel)
+                OutlineActionButton(stringResource(Res.string.cancel), Modifier.weight(1f), onClick = onCancel)
                 Text(
                     stringResource(Res.string.share_revoke_confirm), color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1.3f).clip(RoundedCornerShape(14.dp)).background(Tok.danger).clickable(onClick = onConfirm).padding(vertical = 15.dp),

@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import org.jetbrains.compose.resources.stringResource
+import dev.ccpocket.app.ui.bridge.OutlineActionButton
 
 /**
  * Guest terminal states (issue #115, design frames 4b/4c): endings are calm, explained and final — no
@@ -63,7 +64,7 @@ fun GuestEndedCard(ownerLabel: String?, ending: GuestEnding = GuestEnding.REVOKE
                 color = Tok.tx2, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 18.sp,
             )
             Spacer(Modifier.height(22.dp))
-            ShareOutlineButton(stringResource(Res.string.share_remove_from_list), Modifier.fillMaxWidth(), onClick = onRemove)
+            OutlineActionButton(stringResource(Res.string.share_remove_from_list), Modifier.fillMaxWidth(), onClick = onRemove)
             Spacer(Modifier.height(14.dp))
             Text(
                 stringResource(Res.string.share_ask_new_invite), color = Tok.tx2, fontSize = 13.sp, textAlign = TextAlign.Center,

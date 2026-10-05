@@ -61,6 +61,8 @@ import dev.ccpocket.protocol.ShareInvite
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 import qrgenerator.QRCodeImage
+import dev.ccpocket.app.ui.bridge.OutlineActionButton
+import dev.ccpocket.app.ui.bridge.accessTierLabel
 
 /**
  * Owner invite flow (issue #115, design frames 1a–1d): the share composer (the trust screen — access
@@ -170,7 +172,7 @@ private fun TierRadioCard(tier: AccessTier, selected: Boolean, recommended: Bool
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 if (warn) Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(15.dp))
-                Text(tierLabel(tier), color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(accessTierLabel(tier), color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 if (recommended) Text(
                     stringResource(Res.string.share_tier_recommended), color = Tok.accent, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.accent.copy(alpha = 0.15f))
@@ -259,7 +261,7 @@ private fun InviteReady(repo: PocketRepository, invite: ShareInvite, folderPath:
             // recap strip: access / expires / folder
             Spacer(Modifier.height(20.dp))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(13.dp)).padding(horizontal = 15.dp)) {
-                RecapRow(stringResource(Res.string.share_recap_access), tierLabel(invite.tier))
+                RecapRow(stringResource(Res.string.share_recap_access), accessTierLabel(invite.tier))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
                 RecapRow(stringResource(Res.string.share_recap_expires), countdown(invite.expiresAt, now))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -269,7 +271,7 @@ private fun InviteReady(repo: PocketRepository, invite: ShareInvite, folderPath:
             // secondary: Share… / New code
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ShareOutlineButton(stringResource(Res.string.share_invite_share), Modifier.weight(1f)) { clipboard.setText(AnnotatedString(blob)); copied = true }
+                OutlineActionButton(stringResource(Res.string.share_invite_share), Modifier.weight(1f)) { clipboard.setText(AnnotatedString(blob)); copied = true }
                 Row(
                     Modifier.weight(1f).clip(RoundedCornerShape(13.dp)).border(1.dp, Tok.hair, RoundedCornerShape(13.dp))
                         .clickable { copied = false; onNewCode() }.padding(vertical = 13.dp),

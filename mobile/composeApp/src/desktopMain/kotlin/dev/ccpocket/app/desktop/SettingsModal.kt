@@ -60,7 +60,6 @@ import dev.ccpocket.app.ui.share.expiryOptionLabel
 import dev.ccpocket.app.ui.share.groupShares
 import dev.ccpocket.app.ui.share.shareStatus
 import dev.ccpocket.app.ui.share.tierHelp
-import dev.ccpocket.app.ui.share.tierLabel
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -111,6 +110,7 @@ import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.PresetEnv
 import dev.ccpocket.protocol.PresetSummary
 import dev.ccpocket.protocol.PresetsState
+import dev.ccpocket.app.ui.bridge.accessTierLabel
 
 /**
  * The preferences sections. PUBLIC (issue #350) only so an entry point can NAME the pane it wants: the
@@ -1713,7 +1713,7 @@ private fun SharesPane(model: DesktopModel) {
     Column {
         Text(stringResource(Res.string.shared_folders_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
         if (invite != null) {
-            InviteResultCard(invite.folderName, tierLabel(invite.tier), invite.encode()) { model.clearLastShare() }
+            InviteResultCard(invite.folderName, accessTierLabel(invite.tier), invite.encode()) { model.clearLastShare() }
         } else {
             ShareCreateForm(model)
         }
@@ -1725,7 +1725,7 @@ private fun SharesPane(model: DesktopModel) {
         }
         groups.active.forEach { s ->
             ShareCard(
-                path = s.path, guest = s.guestLabel ?: stringResource(Res.string.share_guest_someone), tier = tierLabel(s.tier),
+                path = s.path, guest = s.guestLabel ?: stringResource(Res.string.share_guest_someone), tier = accessTierLabel(s.tier),
                 expires = stringResource(Res.string.share_expires_in, countdown(s.expiresAt, now)),
                 active = shareStatus(s, now) == ShareStatus.ACTIVE_NOW,
                 onRevoke = { model.revokeShare(s.deviceId) },
@@ -1761,7 +1761,7 @@ private fun ShareCreateForm(model: DesktopModel) {
         ShareFormLabel(stringResource(Res.string.share_access_level))
         Spacer(Modifier.height(7.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SHARE_TIERS.forEach { t -> SegPill(tierLabel(t), tier == t) { tier = t } }
+            SHARE_TIERS.forEach { t -> SegPill(accessTierLabel(t), tier == t) { tier = t } }
         }
         // #212: a one-line, mode-accurate explanation of the selected tier so a security choice isn't blind
         Text(

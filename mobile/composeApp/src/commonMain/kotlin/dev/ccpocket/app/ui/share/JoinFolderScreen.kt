@@ -47,6 +47,7 @@ import dev.ccpocket.protocol.ShareInvite
 import org.jetbrains.compose.resources.stringResource
 import qrscanner.CameraLens
 import qrscanner.QrScanner
+import dev.ccpocket.app.ui.bridge.AccessTierBadge
 
 /**
  * Guest join flow (issue #115, design frames 3a/3a-err/3b): redeem an invite by scanning or pasting it,
@@ -187,7 +188,7 @@ fun AcceptPreview(invite: ShareInvite, onJoin: () -> Unit, onDecline: () -> Unit
                 invite.ownerLabel?.let { Text(stringResource(Res.string.shared_by_caption, it), color = Tok.muted, fontSize = 12.sp) }
                 Spacer(Modifier.height(15.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TierBadge(invite.tier)
+                    AccessTierBadge(invite.tier)
                     val left = expiryLeft(invite.expiresAt, epochMillis())
                     Text(
                         expiryLeftText(left), color = Tok.tx2, fontSize = 11.5.sp,
