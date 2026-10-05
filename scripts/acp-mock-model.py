@@ -21,6 +21,11 @@ Behaviour is chosen by trigger words in the user text since the last assistant m
   BGAGENT   -> kimi Agent tool call with run_in_background=true, prompt "SUBBASH then SUBTASK"
   SUBBASH   -> (inside a sub-agent) a Bash call, so the sub-agent raises a permission request
   SUBTASK   -> (inside a sub-agent) text "sub-result mango"
+  WRITEFILE <path> -> the agent's file-write tool, writing "written-by-mock" to <path> (argument names are
+               read off the tool's own schema, so kimi's Write and dsh's write both work)
+  READFILE <path>  -> the agent's file-read tool on <path>
+  RUNCMD <path>    -> a PLAIN shell call (no escalation) `echo cmd-ran > <path>`, to see whether a mode runs,
+               asks or refuses an ordinary command
   "Reply with exactly: X" -> text X
   anything else -> text "ok"
 A request whose last message is a tool result answers "done".
@@ -55,17 +60,50 @@ def text_of(content):
     return ""
 
 
-def decide(last_text, last_is_tool, tool_names):
+def schemas_of(tools):
+    """tool name -> its JSON-schema `properties` (OpenAI `function.parameters` or Anthropic `input_schema`)."""
+    out = {}
+    for t in tools:
+        fn = t.get("function") or {}
+        name = t.get("name") or fn.get("name")
+        schema = t.get("input_schema") or fn.get("parameters") or {}
+        out[name] = schema.get("properties") or {}
+    return out
+
+
+def file_tool_call(kind, path, tool_names, schemas):
+    """A call of the agent's own read/write tool, with argument names taken from its schema."""
+    tool = next((n for n in tool_names if n and n.lower() == kind), None)
+    if tool is None:
+        return ("text", "no %s tool" % kind, 0)
+    props = schemas.get(tool) or {}
+    path_key = next((k for k in ("file_path", "path", "filePath", "file") if k in props), "path")
+    args = {path_key: path}
+    if kind == "write":
+        content_key = next((k for k in ("content", "contents", "text") if k in props), "content")
+        args[content_key] = "written-by-mock\n"
+    return ("tool", (tool, args), 0)
+
+
+def decide(last_text, last_is_tool, tool_names, schemas=None):
     if last_is_tool:
         return ("text", "done", 0)
+    schemas = schemas or {}
     t = last_text
-    for trig in ("BGAGENT", "AGENTME", "BGBASH", "BASHME", "SUBBASH", "SUBTASK", "SLOW", "PONG"):
+    for trig in ("BGAGENT", "AGENTME", "BGBASH", "BASHME", "SUBBASH", "SUBTASK", "WRITEFILE", "READFILE", "RUNCMD",
+                 "SLOW", "PONG"):
         if trig in t:
             break
     else:
         trig = None
     shell = next((n for n in tool_names if n.lower() in ("bash", "shell", "exec", "run_shell", "execute")), None) \
         or next((n for n in tool_names if "bash" in n.lower() or "shell" in n.lower() or "exec" in n.lower()), None)
+    if trig in ("WRITEFILE", "READFILE", "RUNCMD"):
+        m = re.search(trig + r"\s+(\S+)", t)
+        path = m.group(1).strip("`'\".,") if m else "mock-probe.txt"
+        if trig == "RUNCMD":
+            return ("tool", (shell or "Bash", {"command": "echo cmd-ran > %s" % path, "description": "probe plain command"}), 0)
+        return file_tool_call("write" if trig == "WRITEFILE" else "read", path, tool_names, schemas)
     if trig == "SUBTASK":
         return ("text", "sub-result mango", 0)
     if trig == "SUBBASH":
@@ -125,7 +163,7 @@ class H(BaseHTTPRequestHandler):
                     break
                 if m.get("role") == "user":
                     tail.append(text_of(m.get("content")))
-            act = decide("\n".join(tail), last_is_tool, names)
+            act = decide("\n".join(tail), last_is_tool, names, schemas_of(tools))
             log("REQ#%d openai model=%s stream=%s nmsg=%d last_role=%s tools=%s -> %s" % (
                 rid, body.get("model"), body.get("stream"), len(msgs), last.get("role"), names, json.dumps(act)[:200]))
             return self.openai(act, body)
@@ -135,7 +173,7 @@ class H(BaseHTTPRequestHandler):
             last_is_tool = last.get("role") == "user" and isinstance(lc, list) and any(
                 isinstance(b, dict) and b.get("type") == "tool_result" for b in lc)
             last_user_text = text_of(lc) if last.get("role") == "user" else ""
-            act = decide(last_user_text, last_is_tool, names)
+            act = decide(last_user_text, last_is_tool, names, schemas_of(tools))
             log("REQ#%d anthropic model=%s effort=%s stream=%s nmsg=%d tools=%s -> %s" % (
                 rid, body.get("model"), json.dumps(body.get("output_config") or body.get("thinking")), body.get("stream"), len(msgs), names, json.dumps(act)[:200]))
             return self.anthropic(act, body)

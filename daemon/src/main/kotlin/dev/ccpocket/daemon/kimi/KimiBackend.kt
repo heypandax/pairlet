@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.kimi
 
 import dev.ccpocket.daemon.acp.AcpClient
+import dev.ccpocket.daemon.acp.AcpConfigChain
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
@@ -17,10 +18,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -46,6 +49,17 @@ import java.util.concurrent.ConcurrentHashMap
  * IMAGES (issue #377): a prompt carries images only when THIS process's `initialize` answer advertises
  * `agentCapabilities.promptCapabilities.image` (current kimi-cli does, turning each ACP image block into a
  * model image URL). Otherwise the prompt is refused as an error turn rather than sent as its text alone.
+ *
+ * MODEL AND MODE (probe 2.1.1, 2026-10-04): `session/new` ignores `modelId` / `modeId`, so the session opens on
+ * kimi's own defaults. The user's pick is applied through `session/set_config_option` (`configId` `model` — a
+ * `config.toml` alias, the same ids [KimiModelService] lists — and `mode`) on the chain shared with dsh
+ * ([AcpConfigChain]), after the session opens and before the opening prompt. Both `session/new` and
+ * `session/load` answer with `configOptions`; a loaded session keeps its model but NOT its mode, so the launch
+ * writes run on both paths. Only DEFAULT → `default` and PLAN → `plan` are written: BYPASS_PERMISSIONS stays
+ * on kimi's `default` with the daemon's permission bridge approving every ask (never kimi's own `yolo`/`auto`,
+ * which would move the approval decision into kimi). kimi's `plan` is NOT read-only — a Bash call still asks
+ * and runs once approved. A mode switch on an open session is written at once (kimi switches without a
+ * restart); leaving Plan for Full access writes `default` back. A model switch relaunches.
  */
 class KimiBackend(
     private val kimiBin: String?,
@@ -53,13 +67,32 @@ class KimiBackend(
     private val taskPollMs: Long = TASK_POLL_MS,
     private val taskFile: (sessionId: String, taskId: String) -> Path? = KimiPaths::taskFile,
     private val handshakeTimeoutMs: Long = HANDSHAKE_TIMEOUT_MS,
+    /** How long one launch `session/set_config_option` may go unanswered. Injectable for tests. */
+    private val configTimeoutMs: Long = CONFIG_TIMEOUT_MS,
 ) : AgentBackend {
     private val log = logger("KimiBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     @Volatile private var resolvedExe: Path? = null
+
+    /** The user's picks — what the next launch writes. */
     @Volatile private var mode: PermissionMode = PermissionMode.DEFAULT
     @Volatile private var model: String? = null
+
+    /** What kimi last REPORTED the session is on (`configOptions` of the open / of a write's answer); null =
+     *  not reported. The header is told these, never the request. */
+    @Volatile private var currentModel: String? = null
+    @Volatile private var currentMode: String? = null
+
+    /** This process's session has been announced ([AgentEvent.SessionInit]) — once, after the launch writes. */
+    @Volatile private var announced = false
+
+    /** The mode the launch writes were computed for; a switch landing while they are in flight is caught up
+     *  once they settle (see the config host's onChainSettled). */
+    @Volatile private var launchMode: PermissionMode = PermissionMode.DEFAULT
+
+    /** Owns the mid-session mode writes fired from [applySettings]; replaced on attach, cancelled at process end. */
+    @Volatile private var scope: CoroutineScope? = null
 
     /**
      * The ACP protocol half shared with DSH: handshake, session open, the one-in-flight prompt FIFO
@@ -82,14 +115,51 @@ class KimiBackend(
                 "no answer to `initialize` within ${handshakeTimeoutMs / 1000}s — check that `kimi` is the Kimi Code " +
                     "CLI (`kimi acp`), not the legacy Python kimi-cli"
             },
-            describeError = { error -> error?.str("message") ?: "kimi error" },
+            describeError = ::describeError,
         ),
         log,
         object : AcpClient.Host {
-            override suspend fun onSessionOpened(sessionId: String, result: JsonObject?) = sessionOpened(sessionId)
+            override suspend fun onSessionOpened(sessionId: String, result: JsonObject?) = sessionOpened(sessionId, result)
             override fun onUpdate(update: JsonObject) = handleUpdate(update)
             override fun permissionCard(params: JsonObject?) = approvalCard(params)
-            override suspend fun onSyntheticFrame(type: String?, root: JsonObject) = taskSettled(type, root)
+            override suspend fun onResponse(id: Long, result: JsonObject?): List<AgentEvent>? =
+                config.onResponse(id, result)
+            override suspend fun onErrorResponse(id: Long?, why: String): List<AgentEvent>? =
+                config.onErrorResponse(id, why)
+            override suspend fun onSyntheticFrame(type: String?, root: JsonObject): List<AgentEvent>? =
+                config.onSyntheticFrame(type, root) ?: taskSettled(type, root)
+        },
+    )
+
+    /**
+     * The launch-time model/mode writes, on the chain shared with dsh: in order, the prompt gate opening on the
+     * last one's answer. A write kimi refuses (an alias not in `config.toml`: `-32603`) is quiet and the chain
+     * moves on — exactly dsh's launch behaviour; one that never answers fails the open with [STAGE_CONFIG].
+     */
+    private val config: AcpConfigChain = AcpConfigChain(
+        client, log,
+        tag = "kimi",
+        agentName = "Kimi Code",
+        stageConfig = STAGE_CONFIG,
+        timeoutMs = configTimeoutMs,
+        host = object : AcpConfigChain.Host {
+            override fun describe(configId: String) = if (configId == CONFIG_MODEL) "the model" else "the permission mode"
+
+            // kimi answers a write with the COMPLETE resulting configOptions — that read-back is the truth
+            override suspend fun onApplied(write: AcpConfigChain.Write, result: JsonObject?): List<AgentEvent> {
+                readBack(result?.arr("configOptions"))
+                return emptyList()
+            }
+
+            override suspend fun onChainSettled(timedOut: Boolean): List<AgentEvent> {
+                val events = announce(timedOut)
+                // the user switched mode while the launch writes were in flight — those were computed before it
+                if (!timedOut && mode != launchMode) {
+                    launchMode = mode
+                    switchTarget(mode).takeIf { it != (currentMode ?: MODE_DEFAULT) }?.let { writeMode(it) }
+                }
+                return events
+            }
         },
     )
 
@@ -125,6 +195,10 @@ class KimiBackend(
         this.mode = spec.mode
         this.model = spec.model
         // reset per-process state (runs on every (re)launch)
+        currentModel = null; currentMode = null; announced = false
+        config.reset()
+        scope?.let { runCatching { it.cancel() } }
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         toolCalls.clear()
         stopTaskWatchers() // the previous process's tasks are no longer this conversation's jobs
         // kick off the ACP handshake — session open happens when the initialize response lands
@@ -140,11 +214,48 @@ class KimiBackend(
         return listOf(AgentEvent.BackgroundTaskUpdated(taskId, root.str("status")))
     }
 
-    /** session/new returns {sessionId}; session/load returns {} (the id is the one we sent). Binding the session
-     *  releases whatever arrived before it, oldest first. */
-    private suspend fun sessionOpened(sid: String): List<AgentEvent> {
-        val refusals = client.openPromptGate(bind = sid)
-        return listOf(AgentEvent.SessionInit(sessionId = sid, cwd = client.workdir, model = model)) + refusals
+    /**
+     * session/new returns {sessionId, configOptions}; session/load returns {configOptions} for the id we sent
+     * (probe 2.1.1). The user's model/mode are written FIRST (see [launchWrites]); the session is announced and
+     * the prompt gate opened only once they settled, so the opening turn runs on the user's pick and the header
+     * names the model kimi reports — announcing at open would pin kimi's default into the conversation, because
+     * a later read-back no longer moves a model an init already set. Opening the gate releases whatever arrived
+     * before it, oldest first.
+     */
+    private suspend fun sessionOpened(sid: String, result: JsonObject?): List<AgentEvent> {
+        currentModel = null; currentMode = null
+        readBack(result?.arr("configOptions"))
+        client.bindSession(sid)
+        launchMode = mode
+        if (config.start(launchWrites())) return emptyList()
+        return announce(timedOut = false) + client.openPromptGate()
+    }
+
+    /** The writes this launch needs: the chosen model when kimi is not on it, then kimi's mode for [mode] when
+     *  it differs. Nothing for a value kimi already reports — an extra round trip only delays the first turn. */
+    private fun launchWrites(): List<AcpConfigChain.Write> = buildList {
+        model?.takeIf { it.isNotBlank() && it != currentModel }?.let { add(AcpConfigChain.Write(CONFIG_MODEL, it, announce = false)) }
+        // an unreported mode is kimi's own default
+        kimiMode(mode)?.takeIf { it != (currentMode ?: MODE_DEFAULT) }?.let { add(AcpConfigChain.Write(CONFIG_MODE, it, announce = false)) }
+    }
+
+    /** One `configOptions` array → what kimi says the session is on; an option it did not mention keeps its value. */
+    private fun readBack(options: JsonArray?) {
+        AcpConfigChain.currentValue(options, CONFIG_MODEL)?.takeIf { it.isNotBlank() }?.let { currentModel = it }
+        AcpConfigChain.currentValue(options, CONFIG_MODE)?.takeIf { it.isNotBlank() }?.let { currentMode = it }
+    }
+
+    /**
+     * The session announcement, once per process: the model kimi reports (or, from a kimi that reports none, the
+     * user's pick, as before). After a launch write TIMED OUT nothing is known about the model, so none is named
+     * — the conversation keeps the user's pick for the next launch instead of adopting kimi's default.
+     */
+    private fun announce(timedOut: Boolean): List<AgentEvent> {
+        val sid = client.sessionId ?: return emptyList()
+        if (announced) return emptyList()
+        announced = true
+        val reported = if (timedOut) null else currentModel ?: model
+        return listOf(AgentEvent.SessionInit(sessionId = sid, cwd = client.workdir, model = reported))
     }
 
     // ---- inbound: session/update ----
@@ -248,14 +359,32 @@ class KimiBackend(
         client.respondPermission(askId, allow, remember)
     }
 
-    // Model is chosen at session/new (ACP has no mid-session model swap) → relaunch to change it.
-    // Permission mode maps to ACP session modes (P2) — for P1 approvals always flow, so a mode change is a
-    // no-op that doesn't force a relaunch.
+    /**
+     * A model change relaunches; the new process writes it at session open ([launchWrites]). A mode change never
+     * relaunches (the return value keeps saying so): on an OPEN session it is written to kimi right away — kimi
+     * switches mode without a restart — through the same config chain, as a user-driven write that reports its own
+     * failure. Before the session is open it is only recorded; the launch writes carry it.
+     *
+     * Runs on the Conversation's command path, so the write is fired on the per-process scope, not awaited.
+     */
     override fun applySettings(mode: PermissionMode?, model: String?, effort: String?): Boolean {
         var relaunch = false
         model?.let { if (it != this.model) { this.model = it; relaunch = true } }
-        mode?.let { this.mode = it }
+        mode?.let { wanted ->
+            val before = switchTarget(this.mode)
+            this.mode = wanted
+            val target = switchTarget(wanted)
+            // a changed target, or one kimi is not on (a refused launch write); never a repeat of the same request
+            if (announced && (target != before || target != (currentMode ?: MODE_DEFAULT))) {
+                scope?.launch { writeMode(target) }
+            }
+        }
         return relaunch
+    }
+
+    /** A mid-session mode write. The chain's own settle re-opens nothing new: the gate is already open. */
+    private suspend fun writeMode(target: String) {
+        config.start(listOf(AcpConfigChain.Write(CONFIG_MODE, target, announce = true)))
     }
 
     // kimi self-manages its session store. A dead process cannot take a completion frame any more (inject
@@ -263,6 +392,9 @@ class KimiBackend(
     override suspend fun onProcessEnded(sessionId: String?) {
         stopTaskWatchers()
         client.processEnded()
+        config.close()
+        scope?.let { runCatching { it.cancel() } }
+        scope = null
     }
 
     // ---- background task completion (issue #391) ----
@@ -325,6 +457,48 @@ class KimiBackend(
         /** Handshake watchdog, as generous as DSH's: a cold start can take seconds on a slow machine, and a
          *  false "never completed its handshake" is worse than waiting. */
         const val HANDSHAKE_TIMEOUT_MS = 30_000L
+
+        /** One launch config write's bound — the handshake's, as dsh's is. */
+        const val CONFIG_TIMEOUT_MS = HANDSHAKE_TIMEOUT_MS
+
+        /** The launch-time model/mode never landed: the session was not started on the user's choice. */
+        const val STAGE_CONFIG = "could not apply the chosen model and mode to the Kimi Code session — " +
+            "nothing was sent with different settings"
+
+        /** kimi's `configOptions` ids (probe 2.1.1). */
+        const val CONFIG_MODEL = "model"
+        const val CONFIG_MODE = "mode"
+        const val MODE_DEFAULT = "default"
+
+        /** cc-pocket's mode → kimi's, for the modes that are kimi's to enforce. BYPASS_PERMISSIONS (and an
+         *  ACCEPT_EDITS from an old client) leave kimi on its own default: the daemon's permission bridge answers
+         *  those asks, and kimi's `yolo`/`auto` are deliberately never used. */
+        internal fun kimiMode(mode: PermissionMode): String? = when (mode) {
+            PermissionMode.DEFAULT -> MODE_DEFAULT
+            PermissionMode.PLAN -> "plan"
+            PermissionMode.ACCEPT_EDITS, PermissionMode.BYPASS_PERMISSIONS -> null
+        }
+
+        /** `error.data.details` is summarized, not quoted whole: it lands in a log line and, for a refused user
+         *  switch, in the chat. */
+        private const val MAX_ERROR_DETAIL_CHARS = 300
+
+        /**
+         * A JSON-RPC error object → one line. kimi answers a failure with `-32603 "Internal error"` and puts the
+         * real reason in `data.details` (probe 2.1.1: `Model "nope" is not configured in config.toml.`), so the
+         * reason rides along when present — otherwise every refusal logged as a bare "Internal error".
+         */
+        internal fun describeError(error: JsonObject?): String {
+            val message = error?.str("message")?.takeIf { it.isNotBlank() } ?: "kimi error"
+            val data = error?.get("data")
+            val details = ((data as? JsonObject)?.str("details") ?: (data as? JsonPrimitive)?.takeIf { it.isString }?.content)
+                ?.replace(Regex("\\s+"), " ")?.trim()?.takeIf { it.isNotBlank() && it != message }
+            return if (details == null) message else "$message: ${details.take(MAX_ERROR_DETAIL_CHARS)}"
+        }
+
+        /** The kimi mode a MID-SESSION switch moves to: the same mapping, with the daemon-enforced modes back on
+         *  kimi's `default` — leaving Plan for Full access must not leave kimi in `plan`. */
+        internal fun switchTarget(mode: PermissionMode): String = kimiMode(mode) ?: MODE_DEFAULT
 
         // kimi's own task-id shape (its VALID_TASK_ID, read out of the 2.1.1 bundle). The id becomes a file
         // name under the session dir, so anything else — a path, a `..` — is refused rather than resolved.

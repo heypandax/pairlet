@@ -145,6 +145,62 @@ class DshBackendLiveIT {
             "session/resume→first line ${msToFirstLineAfter("session/resume")} ms, config writes $config")
     }
 
+    /** A NEW session with a non-default model announces the model dsh reports AFTER the launch write — the
+     *  conversation keeps the init's model, so announcing dsh's default at `session/new` pinned it (2026-10-04). */
+    @Test
+    fun a_new_session_announces_the_model_it_was_switched_to() = runBlocking {
+        val backend = DshBackend(null)
+        val h = launch(backend, AgentSpec(workdir = scratch(), mode = PermissionMode.DEFAULT, model = "deepseek-v4-pro"), "announce")
+        val init = awaitEvent<AgentEvent.SessionInit>(h.events, 60_000)
+        val open = h.lines.firstOrNull { !it.outbound && it.id == h.outbound("session/new").single().id }?.text
+        println("[dsh-live] announce: SessionInit.model=${init?.model} live=${backend.liveModelForTest()} " +
+            "session/new currentValue=${open?.substringAfter("\"currentValue\":")?.take(50)}")
+        assertEquals("deepseek-v4-pro", init?.model, "the header was told another model than the session runs")
+    }
+
+    /**
+     * What PLAN means on dsh (`DSH_PERMISSION_MODE=read-only`, fixed at launch): the model asks for one read, one
+     * file write and one plain command, every ask is approved, and the disk says what really happened. Account-free
+     * with `scripts/acp-mock-model.py` (its READFILE / WRITEFILE / RUNCMD triggers).
+     */
+    @Test
+    fun plan_mode_reads_but_neither_writes_nor_runs() = runBlocking {
+        val workdir = scratch()
+        val note = workdir.resolve("note.txt").also { it.toFile().writeText("the secret word is mango\n") }
+        val written = workdir.resolve("plan-written.txt")
+        val ran = workdir.resolve("plan-cmd.txt")
+        val h = launch(DshBackend(null), AgentSpec(workdir = workdir, mode = PermissionMode.PLAN), "plan")
+        assertTrue(awaitEvent<AgentEvent.SessionInit>(h.events, 60_000) != null, "no session")
+        val asks = ArrayList<String>()
+        val approve: suspend (AgentEvent.ControlRequest) -> Unit = {
+            asks += it.toolName
+            h.backend.respondPermission(it.requestId, true, false, it.input, null, null)
+        }
+        for ((label, prompt) in listOf(
+            "read" to "READFILE $note then say done.",
+            "write" to "WRITEFILE $written then say done.",
+            "command" to "RUNCMD $ran then say done.",
+        )) {
+            val before = asks.size
+            h.backend.sendPrompt(prompt, emptyList())
+            val turn = h.turn(120_000, approve)
+            val settled = h.lines.filter {
+                !it.outbound && "\"tool_call_update\"" in it.text && ("\"completed\"" in it.text || "\"failed\"" in it.text)
+            }.lastOrNull()?.text
+            println("[dsh-live] plan $label: asks=${asks.drop(before)} turnError=${turn.result?.isError} settled=${settled?.take(400)}")
+        }
+        println("[dsh-live] plan: written exists=${written.toFile().exists()} command ran=${ran.toFile().exists()} asks=$asks")
+        assertTrue(asks.isEmpty(), "read-only refuses by sandbox, it does not ask: $asks")
+        assertTrue(!written.toFile().exists(), "plan let dsh write a file")
+        assertTrue(!ran.toFile().exists(), "plan let dsh run a command that writes")
+        // the one way out of the sandbox is an explicit escalation — and that is the user's call
+        h.backend.sendPrompt("BASHME: run the shell command `echo approved-run`, then say done.", emptyList())
+        val escalation = h.turn(120_000, approve)
+        h.dump("plan")
+        println("[dsh-live] plan escalation: asks=$asks turnError=${escalation.result?.isError}")
+        assertEquals(1, asks.size, "an escalation under plan must ask: $asks")
+    }
+
     /** Launch-time model/effort land BEFORE the opening prompt is written, even when the prompt was sent before
      *  the session existed — and each write answers well inside the 30 s config watchdog. */
     @Test
