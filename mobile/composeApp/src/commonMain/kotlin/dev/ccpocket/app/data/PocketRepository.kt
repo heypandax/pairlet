@@ -284,7 +284,6 @@ import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.JobStatus
-import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.SwitchServiceTier
 import dev.ccpocket.protocol.ToolEvent
@@ -2432,11 +2431,6 @@ class PocketRepository(
         if (v == defaultServiceTier.value) return
         defaultServiceTier.value = v
         SecureStore.putString(K_DEFAULT_SERVICE_TIER, v ?: "")
-    }
-
-    /** Mobile Settings' legacy Claude-only entry point. */
-    fun setDefaultModel(id: String?) {
-        setDefaultModelFor(AgentKind.CLAUDE, id)
     }
 
     /** Settings: persist a backend-scoped default model (null = that CLI's own default). */
@@ -5125,11 +5119,6 @@ class PocketRepository(
      * second copy, so the two can never disagree.
      */
     val claudeQuota: MutableState<ClaudeQuota?> = agentSlot(quotaByAgent, AgentKind.CLAUDE)
-    val claudeQuotaLoading: MutableState<Boolean> = agentFlag(quotaLoadingByAgent, AgentKind.CLAUDE, false)
-
-    /** The status of the LAST reply, including the transient failures [quotaByAgent] deliberately does not
-     *  absorb. Null = never answered. Diagnostics only — no UI should turn a blip into an alarm. */
-    val claudeQuotaStatus: MutableState<String?> = agentSlot(quotaStatusByAgent, AgentKind.CLAUDE)
 
     /** The backends whose allowance THIS daemon says it can read ([DaemonInfo.quotaAgents], wire names).
      *  Empty = an older daemon that never advertised: Claude only, exactly the pre-#348 behaviour. */
@@ -5175,9 +5164,6 @@ class PocketRepository(
             if (quotaLoadingByAgent.none { it.value }) onClaudeQuotaReply?.invoke()
         }
     }
-
-    /** The Claude-only entry point, kept for every pre-#348 caller. */
-    fun fetchClaudeQuota(forceRefresh: Boolean = false) = fetchQuota(AgentKind.CLAUDE, forceRefresh)
 
     /** One refresh trigger, every backend this daemon can answer for. */
     fun fetchAllQuotas(forceRefresh: Boolean = false) {
@@ -6199,7 +6185,6 @@ class PocketRepository(
 
     /** A managed member whose native record is gone: opening it would resume nothing. */
     fun isManagedMissing(s: SessionSummary): Boolean = s.managedRowKey() in managedMissing.value
-    fun isManagedAmbiguous(s: SessionSummary): Boolean = s.managedRowKey() in managedAmbiguous.value
 
     /** The listed project's daemon rows as they arrived — a RECENT snapshot taken while managed agents are held back. */
     internal fun listedDaemonRows(): List<SessionSummary> = legacySessions
@@ -8402,11 +8387,6 @@ class PocketRepository(
         sendGrantMutation(requestId, pending, ClearAllowRule(c, null, requestId))
     }
 
-    fun switchDir(wd: String) {
-        val c = convoId.value ?: return
-        scope.launch { send(SwitchDirectory(c, wd)) }
-    }
-
     /** Interrupt the current turn (composer ■): the session stays alive, generation stops. */
     fun cancelTurn() {
         val c = convoId.value ?: return
@@ -8778,17 +8758,4 @@ private fun <V : Any> agentSlot(
         set(v) { if (v == null) map.remove(agent) else map[agent] = v }
     override fun component1(): V? = value
     override fun component2(): (V?) -> Unit = { value = it }
-}
-
-/** The non-null slot: an absent key reads as [absent] (a missing loading flag is "not loading"). */
-private fun <V : Any> agentFlag(
-    map: androidx.compose.runtime.snapshots.SnapshotStateMap<AgentKind, V>,
-    agent: AgentKind,
-    absent: V,
-): MutableState<V> = object : MutableState<V> {
-    override var value: V
-        get() = map[agent] ?: absent
-        set(v) { map[agent] = v }
-    override fun component1(): V = value
-    override fun component2(): (V) -> Unit = { value = it }
 }

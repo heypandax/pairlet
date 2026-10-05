@@ -341,8 +341,8 @@ class ResetInventoryTest {
             listOf("appLock\$delegate", "recorder\$delegate", "memo\$delegate").forEach { put(it, "lazy platform service") }
             listOf("pinLink", "memoHost", "approvalOutcomes", "promptOutcomes", "backgroundOutcomes", "fileChunks")
                 .forEach { put(it, "owned helper; its internal state is outside S0 (modules join the inventory from S1)") }
-            listOf("claudeQuota", "claudeQuotaLoading", "claudeQuotaStatus")
-                .forEach { put(it, "derived view over the CLAUDE slot of quotaByAgent / quotaLoadingByAgent / quotaStatusByAgent") }
+            listOf("claudeQuota")
+                .forEach { put(it, "derived view over the CLAUDE slot of quotaByAgent") }
             EXPANDED.keys.forEach { put(it, "expanded: its fields are tabled under the '${EXPANDED.getValue(it)}.' prefix") }
             listOf("scope", "send", "newPromptId", "daemonOwnsPromptRecovery", "diagnosticsSupported", "productDimensions",
                 "receiptExpired", "responseExpired", "receiptTimeoutMs", "turnTimeoutMs")

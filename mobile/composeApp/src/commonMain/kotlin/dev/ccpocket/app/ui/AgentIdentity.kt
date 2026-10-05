@@ -60,7 +60,7 @@ fun agentName(agent: AgentKind): String = when (agent) {
     AgentKind.ZCODE -> "ZCode"
     // "DeepSeek", not "DeepSeek Harness": these names render in the desktop AgentCard grid, whose
     // autosize floor (9sp, #178) was already reached by "OpenCode" at 8 chars — a 16-char name bottoms
-    // out and then CLIPS mid-word. The tagline below carries the full product name.
+    // out and then CLIPS mid-word.
     AgentKind.DSH -> "DeepSeek"
     AgentKind.CLAUDE -> "Claude"
 }
@@ -73,14 +73,6 @@ fun agentAbbrev(agent: AgentKind): String = when (agent) {
     AgentKind.ZCODE -> "ZC"
     AgentKind.DSH -> "DS"
     AgentKind.CLAUDE -> "CC"
-}
-fun agentTagline(agent: AgentKind): String = when (agent) {
-    AgentKind.CODEX -> "Codex"
-    AgentKind.OPENCODE -> "OpenCode · Open Source"
-    AgentKind.KIMI -> "Kimi Code · Moonshot"
-    AgentKind.ZCODE -> "ZCode · Z.ai"
-    AgentKind.DSH -> "DeepSeek Harness · DeepSeek"
-    AgentKind.CLAUDE -> "Claude Code · Anthropic"
 }
 
 /** The two standard agent-color tints — a 12% fill + a 42% border — shared by the chip and the selection cards. */

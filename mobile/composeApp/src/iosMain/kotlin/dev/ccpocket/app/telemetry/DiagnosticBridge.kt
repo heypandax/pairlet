@@ -59,8 +59,6 @@ internal object DiagnosticBridge {
     fun incrementCounter(name: String) {
         DiagnosticCounter.entries.firstOrNull { it.name == name }?.let { counters?.increment(it) }
     }
-
-    fun flushCounters() { counters?.flush() }
 }
 
 /** `sandboxReceipt` is what TestFlight and App Review installs carry; an App Store install has `receipt`. */

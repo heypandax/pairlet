@@ -84,9 +84,6 @@ internal inline fun listProbed(probe: PinPathProbe, listPresent: () -> PinFileLi
     is PinPathProbe.Failed -> PinFileListing.Failed
 }
 
-/** Temporary bridge for callers that only understand success; not for scope internals. */
-fun ProjectPinPersistence.writeLegacyBoolean(name: String, text: String): Boolean = write(name, text) == PinFileWrite.Durable
-
 /** The platform's durable pin-document store (app-private data directory). */
 expect fun platformProjectPinPersistence(): ProjectPinPersistence
 
@@ -226,8 +223,6 @@ class ProjectPinScope internal constructor(
 
     /** A new explicit user edit, an accepted current fetch, or a new connection — never mere listener churn. */
     fun clearFlushBlockedOnExplicitTrigger() = lock.withLock { flushBlocked = null }
-
-    fun flushBlockedReason(): PinSyncIssue? = lock.withLock { flushBlocked }
 
     /** True when [lease] may send this scope's pending operations now. Storage trouble overrides everything. */
     fun canFlush(lease: PinBindingLease): Boolean = lock.withLock {

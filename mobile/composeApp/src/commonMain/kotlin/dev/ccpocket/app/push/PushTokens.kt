@@ -64,7 +64,4 @@ object PushTokens {
 
     /** Test seam: publish a token without a platform push stack. */
     internal fun deliverForTest(token: PushToken?) { _token.value = token }
-
-    /** Test seam: publish a registration failure without a platform push stack. */
-    internal fun failForTest(request: Long, failure: PushRegistrationFailure) { _failures.tryEmit(PushFailureEvent(request, failure)) }
 }
