@@ -442,18 +442,22 @@ class Conversation(
     private val seq = AtomicLong(0)
 
     // background work (bg shells / sub-agents / monitors) tracked from the tool stream; drives the in-chat
-    // jobs indicator and keeps the session "busy" (un-reapable) while anything is still running
+    // jobs indicator and keeps the session "busy" (un-reapable) while anything is still running.
+    // Written mostly by the pump but also by the panel's stop, the reaper and stopProcess — internally
+    // synchronized (lifecycle design S6).
     private val jobs = BackgroundJobRegistry()
 
     // Workflow orchestration runs (issue #106) tracked from the same stream — the fan-out container
-    // the phone renders as a run card + progress tree. Pump-only, like `jobs` (no locking).
+    // the phone renders as a run card + progress tree. Same threads as `jobs`; internally synchronized too.
     private val workflows = WorkflowTracker()
 
     // in-flight top-level sub-agent (Task/Agent) calls, keyed by tool_use id (issue #77). Drives the
     // phone's Task card: START on the tool_use, RESULT with the report on completion. `background`
     // (run_in_background) flips the completion source: a foreground run's tool_result IS the report;
     // a background run's tool_result is only the launch ack — task_notification carries the outcome.
-    // Only touched from the single stdout pump (like `jobs`), so no locking. Bounded by MAX_SUBAGENTS.
+    // Mostly the stdout pump, but stopProcess settles it from the stopping thread while an old pump may still
+    // be draining (lifecycle design D4) — so every access holds its monitor (S6), never across a suspension:
+    // the card frames are emitted after the lock is released. Bounded by MAX_SUBAGENTS.
     private data class SubagentRun(val tool: String, val background: Boolean)
     private val subagentRuns = LinkedHashMap<String, SubagentRun>()
 
@@ -2308,7 +2312,8 @@ class Conversation(
                         }
                     }
                     is AgentEvent.ToolResult -> {
-                        val wasSubagent = ev.parentId == null && ev.toolUseId?.let(subagentRuns::containsKey) == true
+                        val wasSubagent = ev.parentId == null &&
+                            ev.toolUseId?.let { id -> synchronized(subagentRuns) { subagentRuns.containsKey(id) } } == true
                         if (ev.parentId == null) finishSubagentFromResult(ev)
                         // an ordinary tool that returned a PICTURE gets a RESULT with thumbnails (issue #332);
                         // every other ordinary tool gets a bare outcome RESULT (issue #380 live folding), which
@@ -3375,9 +3380,9 @@ class Conversation(
         backend.onProcessEnded(sessionId)
     }
 
-    // ---- sub-agent (Task/Agent) card lifecycle (issue #77) — pump-thread only, like `jobs` ----
+    // ---- sub-agent (Task/Agent) card lifecycle (issue #77) — guarded by subagentRuns' monitor (S6) ----
 
-    private fun rememberSubagent(id: String, tool: String, background: Boolean) {
+    private fun rememberSubagent(id: String, tool: String, background: Boolean) = synchronized(subagentRuns) {
         subagentRuns[id] = SubagentRun(tool, background)
         // bounded like the jobs registry: a leaked entry (completion never seen) must not grow forever
         while (subagentRuns.size > MAX_SUBAGENTS) subagentRuns.remove(subagentRuns.keys.first())
@@ -3452,9 +3457,12 @@ class Conversation(
      *  it); its ERROR result means the launch itself failed, so settle now. */
     private suspend fun finishSubagentFromResult(ev: AgentEvent.ToolResult) {
         val id = ev.toolUseId ?: return
-        val run = subagentRuns[id] ?: return
-        if (run.background && !ev.isError) return
-        subagentRuns.remove(id)
+        val run = synchronized(subagentRuns) {
+            val run = subagentRuns[id] ?: return
+            if (run.background && !ev.isError) return
+            subagentRuns.remove(id)
+            run
+        }
         emitSubagentResult(id, run.tool, ok = !ev.isError, output = subagentReport(ev.content))
     }
 
@@ -3463,25 +3471,33 @@ class Conversation(
      *  it carries the full report, where the notification only has a summary. */
     private suspend fun finishSubagentFromTask(ev: AgentEvent.BackgroundTaskUpdated) {
         val id = ev.toolUseId ?: return
-        val run = subagentRuns[id]?.takeIf { it.background } ?: return
         val ok = when (ev.status?.lowercase()) {
             "completed", "complete", "done", "success" -> true
             "failed", "error", "killed", "cancelled", "canceled", "interrupted" -> false
             else -> return // not terminal — keep the card running
         }
-        subagentRuns.remove(id)
+        val run = synchronized(subagentRuns) {
+            val run = subagentRuns[id]?.takeIf { it.background } ?: return
+            subagentRuns.remove(id)
+            run
+        }
         emitSubagentResult(id, run.tool, ok, output = subagentReport(ev.summary))
     }
 
     /** Settle every still-tracked sub-agent as not-ok (its completion can no longer arrive). */
     private suspend fun settleSubagents(includeBackground: Boolean) {
-        val iter = subagentRuns.entries.iterator()
-        while (iter.hasNext()) {
-            val (id, run) = iter.next()
-            if (!includeBackground && run.background) continue
-            iter.remove()
-            emitSubagentResult(id, run.tool, ok = false, output = null)
+        val settled = synchronized(subagentRuns) {
+            val out = ArrayList<Pair<String, SubagentRun>>()
+            val iter = subagentRuns.entries.iterator()
+            while (iter.hasNext()) {
+                val (id, run) = iter.next()
+                if (!includeBackground && run.background) continue
+                iter.remove()
+                out += id to run
+            }
+            out
         }
+        for ((id, run) in settled) emitSubagentResult(id, run.tool, ok = false, output = null)
     }
 
     private suspend fun emitSubagentResult(id: String, tool: String, ok: Boolean, output: String?) {

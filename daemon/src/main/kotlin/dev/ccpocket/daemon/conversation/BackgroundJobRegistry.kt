@@ -13,7 +13,11 @@ import kotlinx.serialization.json.contentOrNull
  * Tracks a conversation's background work — backgrounded shells (`Bash` with `run_in_background`),
  * sub-agents (`Task`), and monitors (`Monitor`) — by watching claude's stream.
  *
- * NOT thread-safe: the owning [Conversation] drives it from its single stdout pump (no locks needed).
+ * Internally synchronized (lifecycle design S6): the stdout pump is the main writer, but the phone's panel
+ * "stop" ([markKilled]), the reaper's [reapStale], a reattach's [snapshot] and a process stop ([clear]) run
+ * on other threads. Every public method holds this instance's monitor for its whole (non-suspending) body,
+ * so no reader iterates the maps mid-mutation (ConcurrentModificationException) and a compound update such
+ * as [putNew]'s eviction is atomic. Observable behaviour is unchanged.
  *
  * Lifecycle signals (verified against claude 2.1.x stream-json):
  *  - A job is born on its `tool_use` (Bash+run_in_background / Task / Monitor), keyed by the tool_use id.
@@ -51,7 +55,10 @@ class BackgroundJobRegistry {
     private val foregroundBash = LinkedHashSet<String>()
 
     /** A tool_use crossed the stream. Returns true if the visible job set/status changed (caller re-emits). */
-    fun onToolUse(id: String?, name: String, input: JsonObject?, now: Long): Boolean {
+    fun onToolUse(id: String?, name: String, input: JsonObject?, now: Long): Boolean =
+        synchronized(this) { onToolUseLocked(id, name, input, now) }
+
+    private fun onToolUseLocked(id: String?, name: String, input: JsonObject?, now: Long): Boolean {
         when (name) {
             "Bash" -> if (id != null) {
                 if (input.flag("run_in_background")) {
@@ -78,7 +85,10 @@ class BackgroundJobRegistry {
 
     /** A tool_result crossed the stream. Completes a synchronous Task/Monitor; a backgrounded job's
      *  result only marks "started" (bg Bash always, a run_in_background sub-agent too). */
-    fun onToolResult(toolUseId: String?, content: String?, isError: Boolean, now: Long): Boolean {
+    fun onToolResult(toolUseId: String?, content: String?, isError: Boolean, now: Long): Boolean =
+        synchronized(this) { onToolResultLocked(toolUseId, content, isError, now) }
+
+    private fun onToolResultLocked(toolUseId: String?, content: String?, isError: Boolean, now: Long): Boolean {
         val job = jobs[toolUseId] ?: return false
         job.lastUpdate = now
         if (job.background) {
@@ -95,7 +105,10 @@ class BackgroundJobRegistry {
     }
 
     /** `system/task_started` — links the background task_id to its job (created earlier by the tool_use). */
-    fun onTaskStarted(taskId: String, toolUseId: String?, description: String?, taskType: String?, now: Long): Boolean {
+    fun onTaskStarted(taskId: String, toolUseId: String?, description: String?, taskType: String?, now: Long): Boolean =
+        synchronized(this) { onTaskStartedLocked(taskId, toolUseId, description, taskType, now) }
+
+    private fun onTaskStartedLocked(taskId: String, toolUseId: String?, description: String?, taskType: String?, now: Long): Boolean {
         // a remembered FOREGROUND call's completion-time task event (see [foregroundBash]) — not
         // background work, and not worth a taskToKey entry either (its later task_notification has
         // nothing to update; unbounded fg traffic must not grow the map)
@@ -110,7 +123,10 @@ class BackgroundJobRegistry {
     }
 
     /** `system/task_updated` / `task_notification` — the authoritative completion of a backgrounded shell. */
-    fun onTaskUpdated(taskId: String, status: String?, now: Long): Boolean {
+    fun onTaskUpdated(taskId: String, status: String?, now: Long): Boolean =
+        synchronized(this) { onTaskUpdatedLocked(taskId, status, now) }
+
+    private fun onTaskUpdatedLocked(taskId: String, status: String?, now: Long): Boolean {
         val job = jobs[taskToKey[taskId] ?: return false] ?: return false
         job.lastUpdate = now
         val next = when (status?.lowercase()) {
@@ -133,7 +149,10 @@ class BackgroundJobRegistry {
      * monitors complete synchronously from the turn and are never reaped here. Returns true if anything
      * changed (caller re-emits the snapshot).
      */
-    fun reapStale(now: Long, staleMs: Long): Boolean {
+    fun reapStale(now: Long, staleMs: Long): Boolean =
+        synchronized(this) { reapStaleLocked(now, staleMs) }
+
+    private fun reapStaleLocked(now: Long, staleMs: Long): Boolean {
         var changed = false
         for (job in jobs.values) {
             if (job.background && job.status == JobStatus.RUNNING && now - job.lastUpdate > staleMs) {
@@ -153,7 +172,10 @@ class BackgroundJobRegistry {
      * lands here; returns true when it actually flipped (RUNNING → KILLED) so the caller re-emits. No-op
      * for an unknown id or an already-settled job.
      */
-    fun markKilled(jobId: String, now: Long): Boolean {
+    fun markKilled(jobId: String, now: Long): Boolean =
+        synchronized(this) { markKilledLocked(jobId, now) }
+
+    private fun markKilledLocked(jobId: String, now: Long): Boolean {
         val job = jobs[jobId] ?: return false
         if (job.status != JobStatus.RUNNING) return false
         job.status = JobStatus.KILLED
@@ -162,19 +184,24 @@ class BackgroundJobRegistry {
         return true
     }
 
-    fun hasRunning(): Boolean = jobs.values.any { it.status == JobStatus.RUNNING }
+    fun hasRunning(): Boolean = synchronized(this) { jobs.values.any { it.status == JobStatus.RUNNING } }
 
     /** A backgrounded sub-agent or Workflow run is still RUNNING (issue #389). Each one wakes the main agent
      *  for another turn when it finishes, so a turn ending now is not the end of the task. Background shells
      *  and monitors are deliberately excluded: a dev server may never finish. */
-    fun hasRunningBackgroundAgents(): Boolean =
+    fun hasRunningBackgroundAgents(): Boolean = synchronized(this) {
         jobs.values.any { it.status == JobStatus.RUNNING && it.background && it.kind == JobKind.SUBAGENT }
+    }
 
-    fun snapshot(): List<BackgroundJob> =
+    fun snapshot(): List<BackgroundJob> = synchronized(this) {
         jobs.values.map { BackgroundJob(it.key, it.kind, it.label, it.status, it.startedAt, it.lastUpdate) }
+    }
 
     /** Drop everything (a relaunch kills the process tree, taking its background shells with it). */
-    fun clear(): Boolean {
+    fun clear(): Boolean =
+        synchronized(this) { clearLocked() }
+
+    private fun clearLocked(): Boolean {
         val had = jobs.isNotEmpty()
         jobs.clear()
         taskToKey.clear()
