@@ -190,17 +190,6 @@ val PlayTriangleGlyph: ImageVector by lazy {
         .build()
 }
 
-/** Two bars — pause, for the full-screen player's toggle (design: PauseGlyph). */
-val PauseBarsGlyph: ImageVector by lazy {
-    ImageVector.Builder(name = "PauseBars", defaultWidth = 20.dp, defaultHeight = 20.dp, viewportWidth = 20f, viewportHeight = 20f)
-        .apply {
-            path(fill = SolidColor(Color.White)) {
-                moveTo(4.5f, 3.5f); horizontalLineTo(8.7f); verticalLineTo(16.5f); horizontalLineTo(4.5f); close()
-                moveTo(11.3f, 3.5f); horizontalLineTo(15.5f); verticalLineTo(16.5f); horizontalLineTo(11.3f); close()
-            }
-        }.build()
-}
-
 /** Attach-sheet "Video" option: framed landscape with a center play triangle (26-grid, issue #98). */
 val VideoOptGlyph: ImageVector by lazy {
     strokedIcon("VideoOpt", 26f) {

@@ -28,9 +28,6 @@ data class ManagedProjectList(
     /** Agents whose rows come from this list: READY here AND managed by the daemon (per [DaemonInfo.managedAgents]). */
     fun readyAgents(managedAgents: Set<AgentKind>): Set<AgentKind> =
         agents.mapNotNullTo(HashSet()) { s -> s.agent?.takeIf { s.migration == ManagedMigrationState.READY && it in managedAgents } }
-
-    fun uninitializedAgents(managedAgents: Set<AgentKind>): List<AgentKind> =
-        agents.mapNotNull { s -> s.agent?.takeIf { s.migration == ManagedMigrationState.UNINITIALIZED && it in managedAgents } }
 }
 
 /** Most pages one managed list read follows before it is treated as failed (the list itself is bounded daemon-side). */

@@ -169,12 +169,10 @@ daemon 会查找独立安装目录 `~/.opencode/bin`，以及 PATH 和包管理�
 cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
 ```
 
-本机单机跑（不走中继，开发用）：
+本机检查（不走中继、不起 daemon，开发用）：
 
 ```bash
 ./gradlew :protocol:check                         # 协议契约测试
-./gradlew :daemon:run --args="run"                # daemon —— 本地 WebSocket 127.0.0.1:8765
-./gradlew :daemon:run --args="test-client"        # 拿真实 agent CLI 驱一遍
 ```
 
 走中继（离开局域网，真实产品路径）：

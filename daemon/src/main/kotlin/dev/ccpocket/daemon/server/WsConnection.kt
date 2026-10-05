@@ -74,34 +74,25 @@ class LanE2E(
  * pump decodes envelopes and dispatches them without blocking. On disconnect, every conversation
  * this connection opened is reaped (no orphaned claude trees).
  *
- * Two transport flavors on the same routing core:
- *  - plaintext TEXT JSON — the legacy `--local` mode, loopback dev use only;
- *  - E2E ([e2e] != null) — relay-mode daemons expose this alongside the relay so paired devices on
- *    the same machine/LAN can skip the relay entirely. Sealed BINARY frames, identical Wire format
- *    to the relay data plane. A plaintext frame on a gated socket is simply never dispatched.
+ * The transport is E2E only: relay-mode daemons expose it alongside the relay so paired devices on the
+ * same machine/LAN can skip the relay entirely. [e2e] gates every socket; after it, frames are sealed
+ * BINARY, identical Wire format to the relay data plane. A plaintext frame is simply never dispatched.
  */
 class WsConnection(
     private val session: WebSocketSession,
     private val router: RequestRouter,
     private val registry: SessionRegistry,
-    private val e2e: LanE2E? = null,
+    private val e2e: LanE2E,
     /** The owner control planes (share #115 / bridge #91 / collaborator SESSION-HANDOFF §4.1) — served on
      *  the LAN transport too, because the desktop app on the daemon's own machine arrives HERE, not over
      *  the relay, and every LAN peer is a full-power owner by construction (restricted credentials can't
-     *  pass the LAN gate). Null while the relay link is still coming up, or forever on a LAN-only `serve`
-     *  (minting needs the relay). */
+     *  pass the LAN gate). Null while the relay link is still coming up. */
     private val ownerControls: (() -> Triple<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?, dev.ccpocket.daemon.handoff.CollaboratorControl?>)? = null,
     /** ReviewRequest fan-out (REVIEW-REQUEST.md §5.1), for the SAME reason [ownerControls] is served here:
      *  the desktop app on the daemon's own machine — and any phone on the LAN — arrives on this transport,
      *  not over the relay. Without it those clients answer commands but never see a live `ReviewUpdated`,
-     *  so a colleague's response only appears on a manual re-list.
-     *
-     *  [dev.ccpocket.daemon.server.DaemonServer] passes it on BOTH flavours, including the plaintext
-     *  `--local` one, and that is not an oversight: a `--local` socket already routes to the router as a
-     *  full-power owner (no origin, no guest/collab scope), so it can enumerate every row with
-     *  `ListReviewRequests` whether or not it is attached here. Push adds no authority it lacks — the
-     *  loopback-only default is what bounds that socket, not this parameter. Null only for a caller that
-     *  hasn't got the service (tests). */
+     *  so a colleague's response only appears on a manual re-list. Null only for a caller that hasn't got
+     *  the service (tests). */
     private val reviews: dev.ccpocket.daemon.review.ReviewService? = null,
 ) {
     private val outbox = Channel<Envelope>(Channel.BUFFERED)
@@ -121,11 +112,10 @@ class WsConnection(
     }
 
     /** #362: is this gated socket's device STILL allow-listed? Read through the gate's own lookup (re-read per
-     *  call, exactly like the handshake), so a revoke bites at the next pin frame even on an idle socket. False
-     *  for a socket that never authenticated a device (plaintext --local). */
+     *  call, exactly like the handshake), so a revoke bites at the next pin frame even on an idle socket. */
     private fun deviceStillAllowListed(): Boolean {
         val id = gatedDeviceId ?: return false
-        val lookup = e2e?.pairedDevices ?: return false
+        val lookup = e2e.pairedDevices
         return runCatching { lookup().containsKey(id) }.getOrDefault(false)
     }
 
@@ -149,19 +139,16 @@ class WsConnection(
     suspend fun serve() = coroutineScope {
         registry.onLanConnect() // while any LAN socket lives, the idle reaper holds off (like relay peerOnline)
         try {
-            val crypto: E2ESession? = if (e2e != null) {
-                // hard cap on concurrent UN-authenticated handshakes: a LAN scanner opening sockets and
-                // stalling would otherwise hold an FD + coroutine for the full timeout, times thousands
-                if (!e2e.gateSlots.tryAcquire()) { log.warn("direct connect rejected (handshake slots exhausted)"); return@coroutineScope }
-                val established = try {
-                    withTimeoutOrNull(HANDSHAKE_TIMEOUT_MS) { gateHandshake(e2e) }
-                } finally {
-                    e2e.gateSlots.release()
-                }
-                if (established == null) { log.info("direct connect rejected (bad/expired handshake)"); return@coroutineScope }
-                established
-            } else null
-            pump(crypto)
+            // hard cap on concurrent UN-authenticated handshakes: a LAN scanner opening sockets and
+            // stalling would otherwise hold an FD + coroutine for the full timeout, times thousands
+            if (!e2e.gateSlots.tryAcquire()) { log.warn("direct connect rejected (handshake slots exhausted)"); return@coroutineScope }
+            val established = try {
+                withTimeoutOrNull(HANDSHAKE_TIMEOUT_MS) { gateHandshake(e2e) }
+            } finally {
+                e2e.gateSlots.release()
+            }
+            if (established == null) { log.info("direct connect rejected (bad/expired handshake)"); return@coroutineScope }
+            pump(established)
         } finally {
             registry.onLanDisconnect()
         }
@@ -243,7 +230,7 @@ class WsConnection(
         return null // socket closed mid-handshake
     }
 
-    private suspend fun pump(crypto: E2ESession?) = coroutineScope {
+    private suspend fun pump(crypto: E2ESession) = coroutineScope {
         // handoff fan-out target (SESSION-HANDOFF.md): every LAN peer is a full-power owner by
         // construction (the gate refuses restricted credentials), so it may see HandoffUpdated pushes.
         // Instance-keyed (one sink per connection) — MUST detach on disconnect, see the finally below.
@@ -253,9 +240,9 @@ class WsConnection(
         // must agree about what an owner sees, or "did my colleague answer yet" depends on which one the
         // desktop app happened to connect over.
         reviews?.attach(sink)
-        // project-pin pushes (issue #362) — for a GATED socket only: the plaintext --local socket has no
-        // transport-authenticated device and never syncs. Resolved at emission, and re-checked by the writer.
-        val pins = if (crypto != null) router.projectPinService else null
+        // project-pin pushes (issue #362) for this gated socket's device. Resolved at emission, and re-checked
+        // by the writer.
+        val pins = router.projectPinService
         pins?.attach(sink) { snapshot ->
             val subscription = caps.pinSubscriptionId
             if (caps.supportsProjectPins && !caps.pinRetired && subscription != null && deviceStillAllowListed()) {
@@ -267,7 +254,7 @@ class WsConnection(
         // the sink's own allowedForCaps gate re-checks the frame type.
         // #360 security review M2: a GATED socket whose device was revoked while idle must not receive a push. The frame
         // is still handed to the writer, which re-checks the allow-list right before sealing, drops it and closes the
-        // socket (the #362 pin rule) — so an idle revoked link is cut by the push itself. `--local` has no device.
+        // socket (the #362 pin rule) — so an idle revoked link is cut by the push itself.
         val managed = router.managedSessionService
         managed?.attach(
             sink,
@@ -288,19 +275,17 @@ class WsConnection(
                 // may reach a connection whose fetch was never accepted — without that registering anything.
                 // #360 security review M2: the same rule for managed session frames (replies, pushes and the
                 // registration notice): a revoked device's socket never gets one sealed, and is closed.
-                if (crypto != null && (
-                        body is dev.ccpocket.protocol.ManagedSessionsState || body is dev.ccpocket.protocol.DiscoveredSessions ||
-                            (body is PocketError && body.code == dev.ccpocket.daemon.session.ManagedSessionService.REGISTER_FAILED)
-                        )
+                if (body is dev.ccpocket.protocol.ManagedSessionsState || body is dev.ccpocket.protocol.DiscoveredSessions ||
+                    (body is PocketError && body.code == dev.ccpocket.daemon.session.ManagedSessionService.REGISTER_FAILED)
                 ) {
                     if (!deviceStillAllowListed()) error("device revoked — closing live direct link")
                 }
                 // voice memo → tasks: a snapshot carries a transcript. The job may have been registered in the
                 // instant before its device was revoked; the socket that is still open must not be handed the result.
-                if (crypto != null && body is dev.ccpocket.protocol.VoiceMemoState) {
+                if (body is dev.ccpocket.protocol.VoiceMemoState) {
                     if (!deviceStillAllowListed()) error("device revoked — closing live direct link")
                 }
-                if (crypto != null && body is dev.ccpocket.protocol.ProjectPinsState) {
+                if (body is dev.ccpocket.protocol.ProjectPinsState) {
                     if (!deviceStillAllowListed()) error("device revoked — closing live direct link")
                     if (!caps.supportsProjectPins || caps.pinRetired) continue
                     val refusal = body.requestId != null && body.error != null
@@ -311,9 +296,7 @@ class WsConnection(
                 // connection's declared cap right before sealing — the writer is where the size is final.
                 val bytes = FrameFitter.encodeWithin(env, caps.maxFrameBytes) { log.warn("frame cap: $it") }
                 // the writer is the ONLY sealer — the GCM send counter advances strictly in order
-                val ws: WsFrame = if (crypto != null) {
-                    WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, crypto.seal(bytes)))
-                } else WsFrame.Text(bytes.decodeToString())
+                val ws: WsFrame = WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, crypto.seal(bytes)))
                 // bounded write: on a zombie phone socket a send stalls forever (TCP buffer fills, no error),
                 // wedging this writer and, once outbox fills, every pump feeding it. Stalled → tear down.
                 if (withTimeoutOrNull(WRITE_TIMEOUT_MS) { session.outgoing.send(ws) } == null) {
@@ -325,7 +308,7 @@ class WsConnection(
         // loop below only ran when THIS device sent a frame, so a silent revoked device kept receiving every
         // session stream, approval card and handoff/review row meanwhile. Throwing fails this scope — reader
         // and writer with it — exactly like the writer's own "device revoked" refusal.
-        val revokeWatch = if (crypto != null && gatedDeviceId != null) launch {
+        val revokeWatch = if (gatedDeviceId != null) launch {
             PairedDevices.epochChanges.collect { epoch ->
                 if (epoch != allowlistEpoch && !deviceStillAllowListed()) error("device revoked — closing live direct link")
             }
@@ -342,19 +325,17 @@ class WsConnection(
                 val text = when {
                     // isNotEmpty() before payloadType() for the same reason as in the gate above: a zero-byte
                     // BINARY frame has no type byte, and this loop is the whole connection
-                    crypto != null && frame is WsFrame.Binary && frame.data.isNotEmpty() &&
+                    frame is WsFrame.Binary && frame.data.isNotEmpty() &&
                         Wire.payloadType(frame.data) == Wire.TRANSPORT ->
                         crypto.open(Wire.payloadBody(frame.data))?.decodeToString()
                             ?: run { log.warn("decrypt failed on direct link"); null }
-                    crypto == null && frame is WsFrame.Text -> frame.readText()
-                    else -> null // plaintext on a gated socket / binary on a plaintext one — never dispatched
+                    else -> null // a TEXT or empty frame after the gate — never dispatched
                 }
                 if (text == null) continue
                 val env = runCatching { PocketJson.decodeFromString<Envelope>(text) }.getOrNull()
                 if (env != null) {
-                    // transport-layer frame: consumed by the E2E gate above; landing here means a plaintext
-                    // (--local) socket received a client mid-probe — drop rather than route (the client falls
-                    // back to the relay on its own). Keeps the router transport-agnostic.
+                    // transport-layer frame: the E2E gate above consumes the real one, so a LanHello arriving
+                    // sealed after it is never routed. Keeps the router transport-agnostic.
                     if (env.body is LanHello) continue
                     // Apply connection vocabulary in receive order before spawning business work.
                     if (env.body is dev.ccpocket.protocol.ClientCaps) {
@@ -363,12 +344,12 @@ class WsConnection(
                     }
                     // #362: pin requests run in receive order too, like the relay's inline route: this connection's
                     // fetch (which registers its subscription once accepted) and its operation batches commit in send
-                    // order. Only a gated socket hands over its pin context; the plaintext one can never sync.
+                    // order.
                     if (env.body is dev.ccpocket.protocol.SyncProjectPins) {
                         try {
                             router.handle(
                                 env.body, sink, caps = caps, deviceId = gatedDeviceId,
-                                pinConnection = pinConnection.takeIf { crypto != null },
+                                pinConnection = pinConnection,
                             )
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -399,8 +380,7 @@ class WsConnection(
                             val (sc, bc, cc) = ownerControls?.invoke() ?: Triple(null, null, null)
                             if (dispatchOwnerControl(env.body, sc, bc, cc) { sink.emit(it) }) return@launch
                             // gatedDeviceId = the LAN-gate-authenticated paired device (same identity space
-                            // as the relay's); null only on the plaintext --local dev socket, which the
-                            // router maps to its machine-local pseudo-device for the handoff gate
+                            // as the relay's)
                             router.handle(env.body, sink, caps = caps, deviceId = gatedDeviceId) { owned.add(it) }
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e

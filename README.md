@@ -169,12 +169,10 @@ Requires **JDK 17** (any distribution — the Gradle toolchain downloads one if 
 cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
 ```
 
-Local single-machine (no relay), for development:
+Local checks (no relay, no running daemon), for development:
 
 ```bash
 ./gradlew :protocol:check                         # protocol contract test
-./gradlew :daemon:run --args="run"                # daemon — local WebSocket on 127.0.0.1:8765
-./gradlew :daemon:run --args="test-client"        # drive it against a real agent CLI
 ```
 
 Through the relay (off-LAN), the real product path:

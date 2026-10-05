@@ -50,7 +50,6 @@ class ToolProcessLivePaneUiTest {
         override val streaming: Boolean get() = turnRunning
         override val toolProcessScope: ToolProcessScope? get() = scope
         override val ask: PermissionAsk? get() = null
-        override val watch: DkWatch? get() = null
         override val sidePanes: List<SidePane> get() = emptyList()
     }
 

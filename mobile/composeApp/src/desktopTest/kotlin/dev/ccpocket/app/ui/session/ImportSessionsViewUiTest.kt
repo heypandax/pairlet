@@ -2,6 +2,9 @@ package dev.ccpocket.app.ui.session
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
@@ -62,12 +65,19 @@ class ImportSessionsViewUiTest {
     private fun controller(gw: FakeGateway, onImported: (ImportSessionsEffect.Imported) -> Unit = {}) =
         ImportSessionsController(gw, scope, debounceMillis = 0, onImported = onImported)
 
+    /** Mounts the stateless view over [c]'s live state, the way the production host does. */
+    @Composable
+    private fun Mount(c: ImportSessionsController) {
+        val st by c.state.collectAsState()
+        ImportSessionsView(st, c::dispatch)
+    }
+
     @Test
     fun rows_show_title_first_prompt_and_import_while_already_managed_rows_are_marked() = runComposeUiTest {
         val gw = FakeGateway().apply { nextDiscover = { _, _, _ -> DiscoverResult.Page(listOf(row("s1"), row("s2", managed = true)), null, true) } }
         val c = controller(gw)
         c.dispatch(ImportSessionsEvent.Open(here))
-        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { ImportSessionsScreen(c) } } }
+        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { Mount(c) } } }
         waitForIdle()
         assertPresent("Title s1")
         assertPresent("first question s1")
@@ -85,7 +95,7 @@ class ImportSessionsViewUiTest {
         val located = mutableListOf<ImportSessionsEffect.Imported>()
         val c = controller(gw) { located += it }
         c.dispatch(ImportSessionsEvent.Open(here))
-        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { ImportSessionsScreen(c) } } }
+        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { Mount(c) } } }
         waitForIdle()
 
         onNodeWithText(str(Res.string.managed_sessions_import)).performClick()
@@ -109,7 +119,7 @@ class ImportSessionsViewUiTest {
         }
         val c = controller(gw)
         c.dispatch(ImportSessionsEvent.Open(here))
-        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { ImportSessionsScreen(c) } } }
+        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { Mount(c) } } }
         waitForIdle()
         onNodeWithText(str(Res.string.managed_sessions_import)).performClick()
         waitForIdle()
@@ -129,7 +139,7 @@ class ImportSessionsViewUiTest {
         }
         val c = controller(gw)
         c.dispatch(ImportSessionsEvent.Open(here))
-        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { ImportSessionsScreen(c) } } }
+        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { Mount(c) } } }
         waitForIdle()
         assertPresent(str(Res.string.managed_sessions_empty))
 
@@ -154,7 +164,7 @@ class ImportSessionsViewUiTest {
         }
         val c = controller(gw)
         c.dispatch(ImportSessionsEvent.Open(here))
-        setContent { PocketTheme { Box(Modifier.size(700.dp, 700.dp)) { ImportSessionsScreen(c) } } }
+        setContent { PocketTheme { Box(Modifier.size(700.dp, 700.dp)) { Mount(c) } } }
         waitForIdle()
         assertPresent(str(Res.string.managed_sessions_partial_scan_error))
         onNodeWithText(str(Res.string.managed_sessions_load_more)).performClick()
@@ -173,7 +183,7 @@ class ImportSessionsViewUiTest {
         }
         val c = controller(gw)
         c.dispatch(ImportSessionsEvent.Open(here))
-        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { ImportSessionsScreen(c) } } }
+        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { Mount(c) } } }
         waitForIdle()
         assertPresent(str(Res.string.managed_sessions_failed))
         assertPresent(str(Res.string.managed_sessions_error_disconnected))
@@ -194,7 +204,7 @@ class ImportSessionsViewUiTest {
         }
         val c = ImportSessionsController(gw, scope, debounceMillis = 0)
         c.dispatch(ImportSessionsEvent.Open(here))
-        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { ImportSessionsScreen(c) } } }
+        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { Mount(c) } } }
         waitForIdle()
         c.dispatch(ImportSessionsEvent.Open(ManagedScope("dev-b", "/w/app")))
         waitForIdle()
@@ -246,7 +256,7 @@ class ImportSessionsViewUiTest {
         }
         val c = ImportSessionsController(gw, scope, debounceMillis = 0)
         c.dispatch(ImportSessionsEvent.Open(here))
-        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { ImportSessionsScreen(c) } } }
+        setContent { PocketTheme { Box(Modifier.size(420.dp, 700.dp)) { Mount(c) } } }
         waitForIdle()
         assertPresent(str(Res.string.managed_sessions_error_internal))
         assertFalse(onAllNodes(hasText(str(Res.string.managed_sessions_loading))).fetchSemanticsNodes().isNotEmpty())

@@ -128,7 +128,6 @@ class RepoDesktopModel(
     override var palette by mutableStateOf<PaletteScope?>(null)
     override var showSettings by mutableStateOf(false)
     override var showAddComputer by mutableStateOf(false)
-    override var showPermissionModal by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
     override var showHandoff by mutableStateOf(false)
@@ -511,7 +510,6 @@ class RepoDesktopModel(
         repo.requestOpenSession(wd, sid)
     }
 
-    override val watch: DkWatch? get() = null // needs a second live stream — multi-connection repo work
 
     // ── split panes (issue #311) ──────────────────────────────────────────────────────────────────
     // The repository keeps the extra conversations (SidePanes); this maps them onto the shell's verbs.
@@ -1626,21 +1624,18 @@ class RepoDesktopModel(
     override val askQueuePosition: Pair<Int, Int>? get() = repo.askQueueProgress.value
     override val askRisk: String? get() = repo.pendingAsk.value?.let { repo.riskFor(it) }
     override fun resolveTaskGrant() {
-        showPermissionModal = false
         repo.resolve(Decision.ALLOW, grantScope = "task")
     }
     override fun retrySafer(constraints: List<String>) {
-        showPermissionModal = false
         repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints)
     }
     override fun tightenAutoRun(item: ChatItem.AutoRun) = repo.tightenAutoRun(item)
     override fun askHeartbeat() = repo.sendAskHeartbeat(visible = true)
     override fun askHeartbeatRelease() = repo.sendAskHeartbeat(visible = false)
     override fun resolve(allow: Boolean, remember: Boolean) {
-        showPermissionModal = false
         repo.resolve(if (allow) Decision.ALLOW else Decision.DENY, remember)
     }
-    override fun dismissAsk() { showPermissionModal = false; repo.dismissAsk() }
+    override fun dismissAsk() { repo.dismissAsk() }
     // AskUserQuestion: answers ride an ALLOW verdict (the daemon merges them into claude's updatedInput);
     // skip denies with a note so claude learns the user opted out rather than silently timing out (#57)
     override fun answerQuestions(answers: Map<String, String>?, response: String?) = repo.answerQuestions(answers, response)

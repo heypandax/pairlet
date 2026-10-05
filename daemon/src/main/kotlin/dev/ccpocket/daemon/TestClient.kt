@@ -46,41 +46,20 @@ import java.util.Base64
 import io.ktor.websocket.Frame as WsFrame
 
 /**
- * A minimal REPL that drives the daemon over a WebSocket. Two modes:
- *  - direct: plaintext [Envelope]s straight to a daemon's local `/v1/ws`.
- *  - relay: a full device simulator — generate a key, redeem a pairing ticket, then run the
- *    end-to-end Noise channel over the relay's opaque binary data plane.
+ * A minimal REPL that drives the daemon as a full device simulator over the relay: generate a key,
+ * redeem a pairing ticket, then run the end-to-end Noise channel over the relay's opaque binary data plane.
  */
 class TestClient private constructor(
-    private val directUrl: String?,
-    private val relayWs: String?,
-    private val daemonPubB64: String?,
-    private val ticket: String?,
+    private val relayWs: String,
+    private val daemonPubB64: String,
+    private val ticket: String,
 ) {
     @Volatile private var convoId: String? = null
     @Volatile private var askId: String? = null
     @Volatile private var mode: PermissionMode = PermissionMode.DEFAULT
     private var nextId = 0L
 
-    fun run() = runBlocking { if (relayWs != null) runRelay() else runDirect() }
-
-    // ---- direct mode (local daemon, plaintext) ----
-
-    private suspend fun runDirect() {
-        val client = HttpClient(CIO) { install(WebSockets) }
-        try {
-            client.webSocket(urlString = directUrl!!) {
-                val reader = launch {
-                    for (frame in incoming) if (frame is WsFrame.Text)
-                        runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull()?.let(::render)
-                }
-                commandLoop { body -> outgoing.send(WsFrame.Text(PocketJson.encodeToString(envelope(body)))) }
-                reader.cancel()
-            }
-        } finally {
-            client.close()
-        }
-    }
+    fun run() = runBlocking { runRelay() }
 
     // ---- relay mode (full device: redeem + E2E) ----
 
@@ -118,7 +97,7 @@ class TestClient private constructor(
     private suspend fun redeem(devicePub: ByteArray): Pair<String, String> {
         val http = HttpClient(CIO)
         try {
-            val httpBase = relayWs!!.replace("ws://", "http://").replace("wss://", "https://")
+            val httpBase = relayWs.replace("ws://", "http://").replace("wss://", "https://")
             val body = http.post("$httpBase/v1/pair/redeem") {
                 setBody("""{"ticket":"$ticket","devicePubKey":"${b64u(devicePub)}"}""")
             }.bodyAsText()
@@ -145,7 +124,7 @@ class TestClient private constructor(
 
     /** initiator handshake: send our ephemeral, await the daemon's, derive the session. */
     private suspend fun DefaultClientWebSocketSession.e2eHandshake(keys: E2ECrypto.KeyPair): E2ESession {
-        val init = E2ESession.initiator(keys.privateRaw, keys.publicRaw, b64uDec(daemonPubB64!!), psk = ticket!!.encodeToByteArray())
+        val init = E2ESession.initiator(keys.privateRaw, keys.publicRaw, b64uDec(daemonPubB64), psk = ticket.encodeToByteArray())
         outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.HANDSHAKE, init.ephPublic)))
         while (true) {
             val frame = incoming.receive() as? WsFrame.Binary ?: continue
@@ -213,8 +192,7 @@ class TestClient private constructor(
     }
 
     companion object {
-        fun direct(url: String) = TestClient(url, null, null, null)
-        fun relay(relayWs: String, daemonPubB64: String, ticket: String) = TestClient(null, relayWs, daemonPubB64, ticket)
+        fun relay(relayWs: String, daemonPubB64: String, ticket: String) = TestClient(relayWs, daemonPubB64, ticket)
 
         private val B64 = Base64.getUrlEncoder().withoutPadding()
         private val B64D = Base64.getUrlDecoder()

@@ -24,7 +24,6 @@ class ChangesPanelDockTest {
     @Test
     fun changesPanelDocksBesideChatAndIsNotAnOverlay() {
         val model = object : SeedDesktopModel() {
-            override val watch: DkWatch? = null
             override val messages = listOf(ChatItem.Assistant("改完了，看看 diff"))
             override val ask = null
             override val streaming = false

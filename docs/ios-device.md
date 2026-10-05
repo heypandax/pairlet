@@ -68,20 +68,16 @@ cp iosApp/iosApp/GoogleService-Info.plist.template iosApp/iosApp/GoogleService-I
 
 > 票据 120s 单次有效；过期就再 `pair` 一次。自托管 relay：把 `wss://pocket.ark-nexus.cc` 换成你自己的域名（`deploy/` 有 systemd + Caddyfile）。
 
-### 进阶：同局域网直连（不经 relay）
+### 同一网络下的直连
 
-真机不能用 `127.0.0.1`（那是手机自己）。同一 Wi-Fi 下可直连，省一跳：
-
-1. daemon 监听局域网：`... run --host 0.0.0.0 --claude-bin ~/.local/bin/claude`
-2. App 连接页点「Advanced · direct LAN」，URL 填 `ws://<电脑 en0 IP>:8765/v1/ws`（查 IP：`ipconfig getifaddr en0`）。
-3. 手机和电脑同一 Wi-Fi；连不上多半是 **macOS 防火墙**挡了入站 8765（系统设置 → 网络 → 防火墙放行该 java 进程）。
+配对后无需手动设置：daemon 在握手时下发自己的直连地址，App 会先尝试 E2E 直连，失败就回退 relay。daemon 默认只在本机开放这个入口（`--direct-bind 127.0.0.1`）；要让同一 Wi-Fi 的手机直连，`run` 时加 `--direct-bind 0.0.0.0`，仍须通过已配对设备的 Noise 握手。
 
 ---
 
 ## 常见问题
 
-- **首次连接弹「本地网络」授权**：iOS 14+ 首次访问局域网会弹系统授权框，授权未决时进行中的连接会被系统直接掐断。App 已做预检：点 Connect 先触发授权（状态行显示 `checking network access…`），你点「允许」后才真正发起连接；若误点「不允许」，去 **设置 → 隐私与安全性 → 本地网络** 打开 cc-pocket 再重试（App 内状态行也会提示）。
+- **首次连接弹「本地网络」授权**：iOS 14+ 首次访问局域网（例如 App 尝试 E2E 直连电脑的局域网地址）会弹系统授权框，授权未决时这次直连会失败并回退 relay。若误点「不允许」，去 **设置 → 隐私与安全性 → 本地网络** 打开 cc-pocket 再重试。
 - **「Compile Kotlin Framework」报找不到 java**：脚本已写 `export JAVA_HOME=/opt/homebrew/opt/openjdk@17`；若你的 JDK 在别处，改 `iosApp/project.yml` 里那行再 `xcodegen generate`。
 - **Bundle ID 冲突 / 无法注册**：bundle ID 跨 team 全局唯一，被任何账号（含自己的旧账号）注册过就不可用；免费账号没有 developer.apple.com 的 Identifiers 管理入口，删不掉旧注册。最快做法是换一个唯一 ID（如 `com.<你的名字>.ccpocket`），同步改 `iosApp/project.yml` 和 Xcode 里的值。
-- **真机能编不能连**：99% 是不同 Wi-Fi 或防火墙；先用电脑浏览器开 `http://<电脑局域网 IP>:8765`（应拒绝连接但说明端口可达），再排查。
-- **模拟器版**：URL 用默认 `ws://127.0.0.1:8765/v1/ws` 即可（模拟器和电脑共享网络），不用改 daemon。
+- **真机能编不能连**：经 relay 连接不要求手机和电脑同一 Wi-Fi；先看 daemon 日志是否已连上 relay、设备是否已配对，再排查。同一 Wi-Fi 下直连失败只会回退 relay，不会导致连不上。
+- **模拟器版**：和真机一样用配对码配对；模拟器和电脑共享网络，daemon 默认的 `--direct-bind 127.0.0.1` 就能让它走直连，不用改 daemon。

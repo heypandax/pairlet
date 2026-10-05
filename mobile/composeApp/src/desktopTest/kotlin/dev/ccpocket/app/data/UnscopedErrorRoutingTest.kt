@@ -1,6 +1,7 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.app.pairing.PairedDaemon
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PocketError
@@ -96,16 +97,19 @@ class UnscopedErrorRoutingTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val r = repo(scope, mutableListOf())
         try {
+            // fires exactly when the last outstanding quota request ends — the request's loading flag cleared
+            var quotaEnded = false
+            r.onClaudeQuotaReply = { quotaEnded = true }
             r.receiveForTest(SessionLive("c1", "/w", "sid-1", executing = false))
-            r.fetchClaudeQuota()
+            r.fetchQuota(AgentKind.CLAUDE)
             assertTrue(r.openSession("/w", "sid-2"))
-            assertTrue(r.opening.value && r.claudeQuotaLoading.value, "preconditions")
+            assertTrue(r.opening.value && !quotaEnded, "preconditions")
 
             r.receiveForTest(PocketError("share_forbidden", "not permitted for a folder-share guest: ClaudeQuotaGet"))
 
             assertTrue(r.opening.value, "the quota refusal must not end the open")
             assertTrue(sysRows(r).isEmpty(), "nor land in the chat: ${sysRows(r)}")
-            assertFalse(r.claudeQuotaLoading.value, "it ends the quota request it answers")
+            assertTrue(quotaEnded, "it ends the quota request it answers")
         } finally {
             scope.cancel()
         }

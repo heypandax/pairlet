@@ -55,7 +55,6 @@ import kotlin.math.roundToInt
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.dir_picker_choose_here
 import dev.ccpocket.app.resources.dir_picker_remote_title
-import dev.ccpocket.app.resources.your_computer
 import dev.ccpocket.app.data.paneIndexForSlot
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.app.secure.SecureStore
@@ -171,51 +170,39 @@ fun DesktopApp(
             ) {
             DesktopFilePreviewLayout(filePreview, Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxSize()) {
-            val watch = model.watch
             val split = model.sidePanes
-            when {
-                watch != null -> {
-                    // split: chat with the focused session while watching a second one read-only (Fleet ⑥).
-                    // No drop columns here — the watch pane is a read-only mirror, not a split target.
-                    ChatPane(model, Modifier.weight(1f), focused = true)
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-                    WatchPane(watch, model, Modifier.weight(1f))
-                }
-                // split panes (issue #311): the focused conversation keeps the full chat surface; every
-                // other open conversation gets an equal-width column of its own, each with its own stream,
-                // composer and approvals. Columns render in VISUAL slot order with the focused chat at
-                // [splitFocusedSlot] (issue #336) — a drop on a column's left half really does land the
-                // new column to its left, the chat included. Equal widths on purpose — still no
-                // drag-to-resize tiling; what dragging buys is where a NEW column appears (see
-                // [SplitDropColumn]/[SplitDropOverlay] and the sidebar row's drag gesture).
-                else -> {
-                    // one path for 1..N columns — the single-chat case is the loop's size-0 degenerate
-                    // form, and the focused accent only means anything once there is a second column
-                    val focusedAt = model.splitFocusedSlot.coerceIn(0, split.size)
-                    for (slot in 0..split.size) {
-                        if (slot > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
-                        // which column owns the window's chrome (desktop chrome v2): the re-homed control
-                        // cluster goes to the LEFTMOST sub-header, the connection dot and the Win/Linux
-                        // window buttons to the RIGHTMOST one — the dot appears once per window, because
-                        // that is what it describes. Provided per column so neither is a count of panes.
-                        val edge = PaneEdge(leftmost = slot == 0, rightmost = slot == split.size)
-                        SplitDropColumn(drag, slot, Modifier.weight(1f)) {
-                            CompositionLocalProvider(LocalPaneEdge provides edge) {
-                                if (slot == focusedAt) {
-                                    ChatPane(model, Modifier.fillMaxSize(), focused = split.isNotEmpty())
-                                } else {
-                                    SplitPane(model, split[paneIndexForSlot(slot, focusedAt)], Modifier.fillMaxSize())
-                                }
-                            }
+            // split panes (issue #311): the focused conversation keeps the full chat surface; every
+            // other open conversation gets an equal-width column of its own, each with its own stream,
+            // composer and approvals. Columns render in VISUAL slot order with the focused chat at
+            // [splitFocusedSlot] (issue #336) — a drop on a column's left half really does land the
+            // new column to its left, the chat included. Equal widths on purpose — still no
+            // drag-to-resize tiling; what dragging buys is where a NEW column appears (see
+            // [SplitDropColumn]/[SplitDropOverlay] and the sidebar row's drag gesture).
+            // one path for 1..N columns — the single-chat case is the loop's size-0 degenerate
+            // form, and the focused accent only means anything once there is a second column
+            val focusedAt = model.splitFocusedSlot.coerceIn(0, split.size)
+            for (slot in 0..split.size) {
+                if (slot > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
+                // which column owns the window's chrome (desktop chrome v2): the re-homed control
+                // cluster goes to the LEFTMOST sub-header, the connection dot and the Win/Linux
+                // window buttons to the RIGHTMOST one — the dot appears once per window, because
+                // that is what it describes. Provided per column so neither is a count of panes.
+                val edge = PaneEdge(leftmost = slot == 0, rightmost = slot == split.size)
+                SplitDropColumn(drag, slot, Modifier.weight(1f)) {
+                    CompositionLocalProvider(LocalPaneEdge provides edge) {
+                        if (slot == focusedAt) {
+                            ChatPane(model, Modifier.fillMaxSize(), focused = split.isNotEmpty())
+                        } else {
+                            SplitPane(model, split[paneIndexForSlot(slot, focusedAt)], Modifier.fillMaxSize())
                         }
                     }
                 }
             }
-            // Retract the bounds of columns that no longer render (a closed column, the watch branch):
+            // Retract the bounds of columns that no longer render (a closed column):
             // [SplitDragState.columnBounds] otherwise only ever grows, and a stale rect from a closed
             // third column kept catching drops over whatever now covers that area (the docked workflow
             // panel), where resolveDropTarget promises null.
-            SideEffect { drag.trimColumnBounds(if (watch != null) 0 else split.size + 1) }
+            SideEffect { drag.trimColumnBounds(split.size + 1) }
             // workflow orchestration (issue #106): a persistent ~360dp docked panel — the chat stays
             // fully usable beside it (docked beats overlay, per the workflow-view handoff)
             val dockedWf = model.dockedWorkflowRunId?.let { model.workflowRuns[it] }
@@ -391,28 +378,14 @@ fun DesktopApp(
                 HandoffInviteModal(model) { model.dismissHandoffInvite() }
             }
         }
-        if (model.showPermissionModal) {
-            // the focused modal is for permission gates only; an AskUserQuestion docks inline in ChatPane (#57)
-            model.ask?.takeIf { !it.isQuestion }?.let { ask ->
-                FocusedModal(
-                    computer = model.activeComputer?.name ?: stringResource(Res.string.your_computer),
-                    ask = ask, agent = model.chatAgent, workdir = model.chatWorkdir, branch = model.chatBranch,
-                    // bound to the ask this modal shows (audit M4): a stale click decides nothing
-                    onAllow = { rem -> if (model.isStillAsking(ask)) model.resolve(allow = true, remember = rem) },
-                    onDeny = { if (model.isStillAsking(ask)) model.resolve(allow = false, remember = false) },
-                    onDismiss = { if (model.isStillAsking(ask)) model.dismissAsk() },
-                )
-            }
-        }
     }
 }
 
 /**
  * Where a chat column sits in the row (desktop chrome v2) — which one carries the window's chrome.
  *
- * The default is BOTH: a single chat column is the leftmost and the rightmost one, which is also what the
- * watch split wants (its [WatchPane] half is a read-only mirror and grows no chrome) and what every test
- * and screenshot that composes a [ChatPane] directly should see. Only [DesktopApp]'s split loop narrows it.
+ * The default is BOTH: a single chat column is the leftmost and the rightmost one, which is also what every
+ * test and screenshot that composes a [ChatPane] directly should see. Only [DesktopApp]'s split loop narrows it.
  */
 @Immutable
 data class PaneEdge(val leftmost: Boolean = true, val rightmost: Boolean = true)

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -63,7 +62,6 @@ import dev.ccpocket.app.resources.auto_denied_body
 import dev.ccpocket.app.resources.auto_denied_no_response
 import dev.ccpocket.app.resources.deny
 import dev.ccpocket.app.resources.dismiss
-import dev.ccpocket.app.resources.perm_on_computer
 import dev.ccpocket.app.resources.perm_remember_session
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentBadge
@@ -442,49 +440,5 @@ private fun TimedOutBlock(onDismiss: () -> Unit) {
             style = tightCenter(13.sp),
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onDismiss).padding(horizontal = 10.dp, vertical = 6.dp),
         )
-    }
-}
-
-/**
- * Focused permission modal — shown over the live shell (scrim dims it) when an approval arrives from a
- * tray / notification deep-link with the window in the background. Names the computer at the top.
- */
-@Composable
-fun FocusedModal(computer: String, ask: PermissionAsk, agent: AgentKind, workdir: String, branch: String?, onAllow: (remember: Boolean) -> Unit, onDeny: () -> Unit, onDismiss: () -> Unit) {
-    val color = agentColor(agent)
-    var rememberRule by remember(ask.askId) { mutableStateOf(false) }
-    Box(
-        Modifier.fillMaxSize().background(Color(0xFF08090A).copy(alpha = 0.66f)).clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            Modifier.width(460.dp).clip(RoundedCornerShape(16.dp)).background(Tok.raised)
-                .border(1.dp, Tok.hair, RoundedCornerShape(16.dp)).clickable(enabled = false) {},
-        ) {
-            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(Res.string.perm_on_computer, computer), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp)
-            }
-            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-                    ShieldChip(color, box = 40.dp, glyph = 21.dp)
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(Res.string.agent_needs_permission, agentName(agent)), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp)
-                        Text("${ask.title} · ${ask.tool}".trim().removePrefix("· "), color = Tok.tx, fontFamily = Dk.ui, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    }
-                    WaitDial(ask, 34.dp, 2.6.dp, color)
-                }
-                Spacer(Modifier.size(14.dp))
-                CommandBox(ask.inputPreview, fontSize = 12.5f)
-                Spacer(Modifier.size(11.dp))
-                DirBranchLine(workdir, branch, 11f)
-                Spacer(Modifier.size(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (canRemember(ask)) RememberCheck(stringResource(Res.string.perm_remember_session), rememberRule) { rememberRule = !rememberRule }
-                    Spacer(Modifier.weight(1f))
-                    DenyButton(big = true, onClick = onDeny)
-                    AllowButton(big = true, onClick = { onAllow(rememberRule) })
-                }
-            }
-        }
     }
 }

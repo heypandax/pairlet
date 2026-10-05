@@ -94,7 +94,7 @@ Orca 参考版本：`stablyai/orca` 的 `da6d483a`（2026-09-26）。本地副�
 
 ### 5.1 进入条件
 
-仅对已配对的 `OWNER` 启用竞争。没有有效直连地址、地址处于冷却／错误公钥隔离状态时直接 relay。guest、collaborator、legacy `--local` 和 demo 保持各自现有路径。
+仅对已配对的 `OWNER` 启用竞争。没有有效直连地址、地址处于冷却／错误公钥隔离状态时直接 relay。guest、collaborator 和 demo 保持各自现有路径。
 
 新配对的首次接触继续串行走 relay，按现有规则每次尝试消费一次 `firstTicket`；收到经过认证的业务响应后才进入普通选择流程。重启后的首次接触恢复沿用现有机制和 daemon 的 `firstContactPending` 最终检查，不从“票据变量为空”推断已完成配对，也不把票据投给两条路径。
 
