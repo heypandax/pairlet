@@ -266,6 +266,15 @@ class Conversation(
     @Volatile
     private var model: String? = null
 
+    /** The user picked a model that no launched process has baked in yet (lifecycle design S3(d) / audit M7).
+     *  [model] holds two things: the user's request (what the next launch bakes) and, once a process reports
+     *  it, the CLI's resolved id. While a pick is pending, an init from a process launched BEFORE it still
+     *  names the OLD model; adopting that report would silently undo the pick (badge snaps back, the next
+     *  relaunch bakes the old model). So the report is adopted only when no pick is pending. Set by
+     *  [switchModel], cleared by every launch (it bakes the current [model]). */
+    @Volatile
+    private var modelPickPending = false
+
     /** Transcript/index truth for the chat header. Null only for a genuinely unnamed fresh session. */
     @Volatile
     private var sessionTitle: String? = null
@@ -1549,6 +1558,7 @@ class Conversation(
      *  effect on the next turn (Claude relaunches then, Codex applies it in that turn's params). */
     suspend fun switchModel(newModel: String?) {
         model = newModel
+        modelPickPending = true
         backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
         val normalizedEffort = backend.normalizeEffort(newModel, effort)
         val effortChanged = normalizedEffort != effort
@@ -1773,6 +1783,7 @@ class Conversation(
             ?: cleanSpec
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
+        modelPickPending = false // …including a model pick: this process's own init may now report the resolved id
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val launchGeneration = processGeneration
         val backendLabel = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name } ?: AgentBackendLabel.UNKNOWN
@@ -2201,7 +2212,9 @@ class Conversation(
                             }
                             sessionId = newSid
                         }
-                        ev.model?.let { model = it; backfilledModel = null } // the agent's resolved model beats the transcript guess
+                        // the agent's resolved model beats the transcript guess — but never a user pick this process
+                        // was launched before (it would report the OLD model; see [modelPickPending])
+                        ev.model?.let { if (!modelPickPending) model = it; backfilledModel = null }
                         if (firstTime && sessionId != null) {
                             reemitLive = false // this announce already carries the fresh sessionId + mode
                             log.info("$convoId session live: $sessionId")

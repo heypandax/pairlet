@@ -209,6 +209,42 @@ class ConversationLifecycleFixTest {
         }
     }
 
+    // ── S3(d): an old process's init no longer overwrites the user's pending model pick ─────────────────
+
+
+    /** T9 / audit M7 — the user switches model; before the next-turn relaunch can apply it, the still-running
+     *  process announces a (continuation / queued) turn with its OLD model. That init used to overwrite the
+     *  pick: the badge snapped back and the relaunch then baked the old model. */
+    @Test
+    fun an_old_init_does_not_undo_a_pending_model_switch() = runBlocking {
+        if (LifecycleHarness.isWindows()) return@runBlocking
+        val backend = LifecycleBackend { index, spec ->
+            val reported = if (index == 0) "old" else spec.model ?: "default"
+            "while IFS= read -r line; do printf 'initm:$reported\\nuser:%s\\nresult\\n' \"\$line\"; done"
+        }
+        val h = LifecycleHarness(backend, "cS3d")
+        try {
+            System.setProperty(Conversation.RELAUNCH_GRACE_PROP, "60000") // the next send rides the old process
+            h.convo.open(resumeId = null, model = null)
+            h.convo.sendPrompt("one", promptId = "one")
+            h.await(what = "turn one") { h.framesOf<TurnDone>().size == 1 }
+            assertEquals("old", h.convo.launchKnobs().model, "with no pick pending, the CLI's report is adopted as today")
+            h.convo.switchModel("new")
+            h.convo.sendPrompt("two", promptId = "two") // inside the relaunch grace → no relaunch; old init arrives
+            h.await(what = "turn two") { h.framesOf<TurnDone>().size == 2 }
+            assertEquals(1, backend.specs.size)
+            assertEquals("new", h.convo.launchKnobs().model, "the old process's init must not undo the pick")
+            System.setProperty(Conversation.RELAUNCH_GRACE_PROP, "0")
+            h.convo.sendPrompt("three", promptId = "three") // now the pending relaunch applies
+            h.await(what = "relaunch") { backend.specs.size == 2 }
+            assertEquals("new", backend.specs[1].model, backend.specs.toString())
+        } finally {
+            System.clearProperty(Conversation.RELAUNCH_GRACE_PROP)
+            h.close()
+        }
+    }
+
+
     private companion object {
         /** Keep a one-shot child alive (no further output) until its stdin closes. */
         const val SILENT_TAIL = "while IFS= read -r x; do :; done"
