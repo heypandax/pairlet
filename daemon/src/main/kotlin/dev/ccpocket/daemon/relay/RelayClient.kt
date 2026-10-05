@@ -341,7 +341,7 @@ class RelayClient(
         // the relay stamps onto the ticket (issue #91, §3.4) so a lying redeem can't dodge presence/push/replay
         controlOutbox.send(PairBegin(identity.e2ePubB64, headless = headless, collaborator = collaborator))
         return withTimeoutOrNull(10_000) { inboundControl.filterIsInstance<PairTicket>().first() }
-            ?.also { if (arm) sessions.onMintedTicket(it.ticket, headless) }
+            ?.also { if (arm) sessions.onMintedTicket(it.ticket, headless, it.expiresInSec) }
     }
 
     private suspend fun connectOnce() {

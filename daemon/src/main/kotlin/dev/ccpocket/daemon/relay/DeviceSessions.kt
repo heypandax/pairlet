@@ -66,6 +66,9 @@ class DeviceSessions(
     /** The restricted-credential authority (issue #91 bridges, #367 execution links, the retired kinds): classification, constraints,
      *  capability gates. */
     val bridges: BridgeRegistry = BridgeRegistry(),
+    /** Wall clock for the armed interactive tickets' local expiry ([onMintedTicket]); a parameter only so
+     *  tests can step past it without sleeping. */
+    private val clock: () -> Long = System::currentTimeMillis,
     private val send: suspend (deviceId: String, payload: ByteArray) -> Unit,
 ) {
     private val log = logger("DeviceSessions")
@@ -81,7 +84,7 @@ class DeviceSessions(
         set(v) { core.executionControl = v }
     private val mutex = Mutex()
     private val devicePubs = HashMap<String, ByteArray>(loadPersisted())
-    private val psks = ArrayDeque<ByteArray>()              // minted tickets, oldest first
+    private val psks = ArrayDeque<ArmedPsk>()               // minted tickets, oldest first
     private val pskFor = HashMap<String, ByteArray>()       // deviceId -> first-handshake PSK
     private val sessions = HashMap<String, DeviceLink>()    // deviceId -> its live E2E session(s); see DeviceLink (#146)
     private val owned = HashMap<String, MutableList<String>>()
@@ -94,11 +97,32 @@ class DeviceSessions(
     @Volatile
     private var lastInteractiveMintAt = 0L // serializes interactive vs headless pairing (issue #91)
 
+    /**
+     * One armed first-contact PSK. [expiresAt] is set for INTERACTIVE (owner) tickets only: past it the entry
+     * can neither anchor an announced device into the full-power allow-list nor be bound as its first-contact
+     * PSK. Restricted mints (bridge #91, execution #367) keep their existing lifetime rules — their intents
+     * carry their own TTL (see [BridgeRegistry.recordIntent]) — so they stay null here.
+     */
+    private class ArmedPsk(val bytes: ByteArray, val expiresAt: Long?)
+
     /** A freshly minted pairing ticket becomes a candidate PSK for the next device that pairs.
-     *  Only INTERACTIVE mints stamp the exclusion clock — see [interactivePairingPending]. */
-    fun onMintedTicket(ticket: String, headless: Boolean = false) {
-        if (!headless) lastInteractiveMintAt = System.currentTimeMillis()
-        synchronized(psks) { psks.addLast(ticket.encodeToByteArray()); while (psks.size > 8) psks.removeFirst() }
+     *  Only INTERACTIVE mints stamp the exclusion clock — see [interactivePairingPending] — and only they
+     *  expire locally, [armedTicketLifetimeMs] after arming ([ttlSec] = the relay's own ticket TTL). */
+    fun onMintedTicket(ticket: String, headless: Boolean = false, ttlSec: Int = RELAY_TICKET_TTL_SEC) {
+        val now = clock()
+        if (!headless) lastInteractiveMintAt = now
+        val armed = ArmedPsk(ticket.encodeToByteArray(), expiresAt = if (headless) null else now + armedTicketLifetimeMs(ttlSec))
+        synchronized(psks) {
+            dropExpiredArmed(now)
+            psks.addLast(armed)
+            while (psks.size > 8) psks.removeFirst()
+        }
+    }
+
+    /** Under `synchronized(psks)`: forget every interactive ticket whose local lifetime is over. An expired
+     *  owner ticket must not linger as the LIFO candidate a late (or relay-forged) announce could pop. */
+    private fun dropExpiredArmed(now: Long) {
+        psks.removeAll { it.expiresAt != null && it.expiresAt <= now }
     }
 
     /** True while an interactive pairing ticket could still be redeemed — a headless mint must wait.
@@ -106,12 +130,12 @@ class DeviceSessions(
      *  [onDevicePaired] could cross-bind them. Classification itself stays exact regardless (it hashes
      *  the CONFIRMED handshake PSK — [BridgeRegistry.finalize]), but a cross-armed PSK fails BOTH
      *  devices' first handshakes, a pointless outage; refusing the overlap removes the window. */
-    fun interactivePairingPending(now: Long = System.currentTimeMillis()): Boolean =
+    fun interactivePairingPending(now: Long = clock()): Boolean =
         interactivePairingRemainingMs(now) > 0
 
     /** How much longer an interactive pairing blocks a headless mint (0 = not blocking). Lets a refused
      *  caller be told when to retry rather than made to poll (#367). */
-    fun interactivePairingRemainingMs(now: Long = System.currentTimeMillis()): Long =
+    fun interactivePairingRemainingMs(now: Long = clock()): Long =
         (lastInteractiveMintAt + TICKET_EXCLUSION_MS - now).coerceAtLeast(0)
 
     /** The relay forwarded a newly-redeemed device's static key; allow-list + bind its PSK.
@@ -152,7 +176,10 @@ class DeviceSessions(
                 // already-known key must NOT re-arm a PSK (that would lock its next LAN connect out).
                 // `armed` is the ARMING FACT and is what decides authority below; the empty fallback is
                 // only the byte value the responder handshake needs.
-                val armed = synchronized(psks) { psks.removeLastOrNull() }?.takeIf { it.isNotEmpty() }
+                // An interactive ticket past its local lifetime is gone before the pop: a late announce —
+                // or one the relay forges long after the owner ran `pairlet pair` — finds nothing to anchor on.
+                val armed = synchronized(psks) { dropExpiredArmed(clock()); psks.removeLastOrNull() }
+                    ?.bytes?.takeIf { it.isNotEmpty() }
                 pskFor[deviceId] = armed ?: ByteArray(0)
                 provisionalBridge = armed != null && bridges.looksHeadless(armed)
                 // issue #207: an armed ticket that is NOT itself a pending restricted intent, while such
@@ -1051,6 +1078,24 @@ class DeviceSessions(
         // ticket TTL (120s at the relay) + slack: how long after an interactive mint a headless mint
         // is refused (and PairLoopback refuses the reverse via BridgeRegistry.intentPending)
         const val TICKET_EXCLUSION_MS = 130_000L
+
+        /** The relay's ticket TTL (relay `PairingService.TTL_MS`, and the 6-digit code's in `CodeStore`), the
+         *  default when a caller has no [dev.ccpocket.protocol.PairTicket.expiresInSec] at hand. */
+        const val RELAY_TICKET_TTL_SEC = 120
+
+        /** Local ceiling on the relay-announced TTL: a relay must not be able to stretch an armed owner
+         *  ticket's life by announcing a huge `expiresInSec` (same cap #367 applies to its own tickets). */
+        const val MAX_ARMED_TICKET_TTL_SEC = 120
+
+        /** Slack beyond the relay TTL. The relay refuses a redeem once its ticket expired and announces the
+         *  device inside that same redeem request, and this daemon starts its clock only when the ticket
+         *  REACHES it — after the relay started its own — so 10s covers delivery of the announce. Same
+         *  130s total as [TICKET_EXCLUSION_MS]. */
+        const val ARMED_TICKET_GRACE_MS = 10_000L
+
+        /** How long an INTERACTIVE ticket stays armed here after it arrived: min(relay TTL, 120s) + 10s. */
+        fun armedTicketLifetimeMs(ttlSec: Int): Long =
+            ttlSec.coerceIn(1, MAX_ARMED_TICKET_TTL_SEC) * 1000L + ARMED_TICKET_GRACE_MS
 
         /** #298: hard ceiling on the pre-handshake WARN rate-limit map. Known devices number in the tens;
          *  hitting this means something is minting identities and the honest answer is to start over. */
