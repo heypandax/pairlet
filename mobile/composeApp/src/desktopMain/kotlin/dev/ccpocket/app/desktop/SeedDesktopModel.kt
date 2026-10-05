@@ -223,10 +223,6 @@ open class SeedDesktopModel : DesktopModel {
             ),
         ),
     )
-    // the flag is real so a UI test can open the Center; [reviewRepo] stays null, so it renders its
-    // honest inert state rather than faked ledger data
-    override var showReviewCenter by mutableStateOf(false)
-
     override val appVersion = "2.3.0"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)

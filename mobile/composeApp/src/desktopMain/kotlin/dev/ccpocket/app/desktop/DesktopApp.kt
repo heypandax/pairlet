@@ -354,12 +354,6 @@ fun DesktopApp(
                 SkillsOverlay(model) { model.showSkills = false }
             }
         }
-        if (model.showReviewCenter) {
-            // the ReviewRequest centre (REVIEW-REQUEST.md §12) — same centered-scrim language as Skills
-            Overlay(onDismiss = { model.showReviewCenter = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
-                ReviewCenterOverlay(model) { model.showReviewCenter = false }
-            }
-        }
         if (model.showSettings) {
             Overlay(onDismiss = { model.showSettings = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
                 SettingsModal(model, settingsTab) { model.showSettings = false }

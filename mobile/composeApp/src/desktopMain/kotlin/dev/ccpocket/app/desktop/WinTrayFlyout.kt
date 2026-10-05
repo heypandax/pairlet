@@ -165,9 +165,6 @@ fun WinTrayFlyout(
                         )
                     }
                     // 溢出去的审批落到「审批中心」= 铃铛的全机群待办队列（model.showAttention）。
-                    // 稿子写的是「打开审批中心」，而 model.openReviewCenter() 是 ReviewRequest 代码评审
-                    // 中心（⌘⇧R，REVIEW-REQUEST.md §12）——名字像，语义不是一回事，路到那里等于把
-                    // 待审批的人送进一个完全无关的面板。
                     WinOverflowRow(hidden) { openMain(); model.showAttention = true }
                 }
 

@@ -90,10 +90,8 @@ class WinTrayFlyoutTest {
 
         onAllNodes(hasText(str(Res.string.win_tray_more_waiting, 2))).onFirst().performClick()
         waitForIdle()
-        // 稿子写「打开审批中心」= 铃铛的全机群待办队列。model.openReviewCenter() 是 ReviewRequest
-        // 代码评审中心（⌘⇧R），名字像但语义无关——路到那里等于把待审批的人送错房间
+        // 稿子写「打开审批中心」= 铃铛的全机群待办队列
         assertTrue(model.showAttention, "溢出行打开的是全机群审批队列")
-        assertTrue(!model.showReviewCenter, "不是 ReviewRequest 代码评审中心")
     }
 
     @Test
