@@ -60,6 +60,7 @@ import dev.ccpocket.app.resources.cfg_mode_full
 import dev.ccpocket.app.resources.cfg_mode_full_body
 import dev.ccpocket.app.resources.cfg_mode_plan
 import dev.ccpocket.app.resources.cfg_mode_plan_body
+import dev.ccpocket.app.resources.cfg_mode_plan_body_kimi
 import dev.ccpocket.app.resources.cfg_model_follow
 import dev.ccpocket.app.resources.cfg_model_none
 import dev.ccpocket.app.resources.cfg_model_reported
@@ -111,6 +112,7 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AgentModePreset
 import dev.ccpocket.protocol.AgentPresetInfo
 import dev.ccpocket.protocol.PermissionMode
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /** How much of the screen the bounded configuration surface may occupy — pinned zones + a scrolling body. */
@@ -633,23 +635,29 @@ fun modeChoiceLabel(agent: AgentKind, choice: ModeChoice): String = stringResour
 
 /** What the mode actually does, in one plain sentence. */
 @Composable
-private fun modeChoiceBody(agent: AgentKind, choice: ModeChoice): String = stringResource(
-    when {
-        choice.nativeMode != null -> Res.string.cfg_mode_auto_body
-        agent == AgentKind.CODEX -> when (choice.mode) {
-            PermissionMode.PLAN -> Res.string.cfg_codex_cautious_body
-            PermissionMode.DEFAULT -> Res.string.cfg_codex_balanced_body
-            PermissionMode.ACCEPT_EDITS -> Res.string.cfg_codex_autonomous_body
-            PermissionMode.BYPASS_PERMISSIONS -> Res.string.cfg_codex_full_body
-        }
-        else -> when (choice.mode) {
-            PermissionMode.DEFAULT -> Res.string.cfg_mode_default_body
-            PermissionMode.ACCEPT_EDITS -> Res.string.cfg_mode_accept_body
-            PermissionMode.PLAN -> Res.string.cfg_mode_plan_body
-            PermissionMode.BYPASS_PERMISSIONS -> Res.string.cfg_mode_full_body
-        }
-    },
-)
+private fun modeChoiceBody(agent: AgentKind, choice: ModeChoice): String = stringResource(modeChoiceBodyRes(agent, choice))
+
+/**
+ * The sentence [modeChoiceBody] shows. Kimi's Plan gets its own: kimi's plan mode is not read-only — a
+ * command still asks and runs once approved — so the shared "changes nothing until you leave Plan" would
+ * promise more than it does.
+ */
+internal fun modeChoiceBodyRes(agent: AgentKind, choice: ModeChoice): StringResource = when {
+    choice.nativeMode != null -> Res.string.cfg_mode_auto_body
+    agent == AgentKind.CODEX -> when (choice.mode) {
+        PermissionMode.PLAN -> Res.string.cfg_codex_cautious_body
+        PermissionMode.DEFAULT -> Res.string.cfg_codex_balanced_body
+        PermissionMode.ACCEPT_EDITS -> Res.string.cfg_codex_autonomous_body
+        PermissionMode.BYPASS_PERMISSIONS -> Res.string.cfg_codex_full_body
+    }
+    agent == AgentKind.KIMI && choice.mode == PermissionMode.PLAN -> Res.string.cfg_mode_plan_body_kimi
+    else -> when (choice.mode) {
+        PermissionMode.DEFAULT -> Res.string.cfg_mode_default_body
+        PermissionMode.ACCEPT_EDITS -> Res.string.cfg_mode_accept_body
+        PermissionMode.PLAN -> Res.string.cfg_mode_plan_body
+        PermissionMode.BYPASS_PERMISSIONS -> Res.string.cfg_mode_full_body
+    }
+}
 
 /** The one thing worth saying about an agent's ladder that the rows themselves cannot say. */
 @Composable

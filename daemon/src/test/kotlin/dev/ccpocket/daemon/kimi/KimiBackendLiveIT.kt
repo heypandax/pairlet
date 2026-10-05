@@ -245,6 +245,42 @@ class KimiBackendLiveIT {
         }
     }
 
+    /**
+     * What PLAN means on kimi once `plan` is really written: the model asks for one read, one file write and one
+     * plain command; every ask is approved and the disk says what happened (2.1.1, 2026-10-04): the read runs
+     * without asking, the file write is refused by kimi itself ("You may only write to the current plan file"),
+     * and the command ASKS and then RUNS — so kimi's plan is not read-only, which is what the app's Kimi plan
+     * description has to say. Account-free with `scripts/acp-mock-model.py` (READFILE / WRITEFILE / RUNCMD).
+     */
+    @Test
+    fun plan_mode_reads_refuses_edits_and_asks_before_commands() = runBlocking {
+        val note = workdir.resolve("note.txt").also { it.writeText("the secret word is mango\n") }
+        val written = workdir.resolve("plan-written.txt")
+        val ran = workdir.resolve("plan-cmd.txt")
+        val h = launch("plan", mode = PermissionMode.PLAN)
+        h.opened()
+        assertTrue(h.lines.any { !it.outbound && "\"current_mode_update\"" in it.text && "\"plan\"" in it.text }, "not in plan")
+        val asked = LinkedHashMap<String, List<String>>()
+        for ((label, prompt) in listOf(
+            "read" to "READFILE $note then say done.",
+            "write" to "WRITEFILE $written then say done.",
+            "command" to "RUNCMD $ran then say done.",
+        )) {
+            val asks = ArrayList<String>()
+            h.backend.sendPrompt(prompt, emptyList())
+            val turn = h.turn { asks += it.toolName; h.backend.respondPermission(it.requestId, true, false, it.input, null, null) }
+            asked[label] = asks
+            val results = turn.events.filterIsInstance<AgentEvent.ToolResult>().map { it.isError to it.content?.take(120) }
+            println("[kimi-live] plan $label: asks=$asks results=$results")
+        }
+        h.dump("plan"); report(h, "plan")
+        println("[kimi-live] plan: written exists=${written.toFile().exists()} command ran=${ran.toFile().exists()}")
+        assertTrue(asked.getValue("read").isEmpty(), "a read asked: $asked")
+        assertTrue(asked.getValue("write").isEmpty() && !written.toFile().exists(), "plan let kimi edit a file: $asked")
+        assertEquals(listOf("Bash"), asked.getValue("command"), "a command under plan must ask")
+        assertTrue(ran.toFile().exists(), "the approved command did not run — plan would then be read-only after all")
+    }
+
     /** The case 547f7651 (drop `session/update`s stamped with another session's id) has to get right. */
     @Test
     fun sub_agent_traffic_carries_the_main_session_id() = runBlocking {
