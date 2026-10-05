@@ -2450,8 +2450,9 @@ data class PairTicket(val ticket: String, val expiresInSec: Int, val code: Strin
 
 /** relay -> daemon: a device redeemed a ticket. [devicePubKey] is the daemon's only source for that key:
  *  it allow-lists the key on this announce when one of its own (unexpired) interactive tickets is still
- *  armed, and the first handshake then mixes that ticket in as a PSK. Since the relay minted the ticket,
- *  this trusts the relay; owners verify afterwards by comparing pairing fingerprints. */
+ *  armed (the first handshake also tries that ticket as a PSK, though an owner device may complete it
+ *  without, #161). The relay minted the ticket and supplies the key, so this trusts the relay; owners
+ *  verify afterwards by comparing pairing fingerprints. */
 @Serializable
 @SerialName("pocket/device.paired")
 data class DevicePaired(val deviceId: String, val devicePubKey: String) : ToRelay
