@@ -2938,6 +2938,17 @@ class PocketRepository(
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
         clearReviewState() // a review ledger belongs to one machine — never show the last daemon's inbox
+        // The frozen features' cached LISTINGS of this daemon's truth (their logic is not touched here). Each is
+        // re-pulled from the next daemon when its surface opens (chat → ListHandoffs, contacts → ListCollaborators,
+        // bridges page → ListBridges, shares page → ListShares). Kept, they crossed machines — and activeHandoff,
+        // which is not scoped to the chat on screen, locked the composer of a new session on the next computer
+        // (one with no session id yet never sends the scoped ListHandoffs that would replace it). Request
+        // results, one-shot artefacts and this device's own invites/links are not listings and stay.
+        handoffs.clear(); activeHandoff.value = null
+        collaborators.clear(); collaboratorsLoaded.value = false
+        bridgesDeadline?.cancel(); bridgesDeadline = null
+        bridges.clear(); bridgesLoaded.value = false; bridgesUnavailable.value = false
+        shares.clear(); sharesLoaded.value = false
         // the link is down: the coordinator must stop submitting into nothing (its round parks on
         // `connected` instead of burning attempts). The per-pairing CONFIRMATION deliberately survives —
         // a reconnect is not evidence that the relay forgot the token — while a machine SWITCH retargets

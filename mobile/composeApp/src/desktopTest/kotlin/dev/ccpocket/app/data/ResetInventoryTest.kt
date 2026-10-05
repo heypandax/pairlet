@@ -364,10 +364,15 @@ class ResetInventoryTest {
         //
         // GAP-* = 疑似缺陷，待单独决定 — the cells marked K are the "should probably clear but doesn't" points of the
         // proposal's §4.4, confirmed by this run. Do NOT fix them here; a fix is its own commit and edits these rows.
-        //   GAP-桥接   DSC/SWC keep the bridge admin state (while bridgeControl IS cleared)
-        //   GAP-共享   DSC/SWC keep the folder-share state (shareEnded: DSC only — the cold switch reloads it per account)
-        //   GAP-交接   DSC/SWC keep handoff + collaborator state (only handoffsLoaded is cleared)
+        //   GAP-桥接   DSC/SWC keep the bridge request state (busy/error/credential/merge check) — frozen feature
+        //   GAP-共享   DSC/SWC keep share request state + the pending invite (shareEnded: DSC only — the cold switch
+        //              reloads it per account) — frozen feature
+        //   GAP-交接   DSC/SWC keep handoff/collaborator request state, one-shot artefacts and this device's own
+        //              links/invites (only handoffsLoaded is cleared) — frozen feature
         //   GAP-会话视图 DSC/SWC keep allow rules (DEM clears them) — verified harmless, deliberately untouched
+        //   FIX-桥接 / FIX-共享 / FIX-交接: DSC/SWC drop only the frozen features' cached LISTINGS (+ their loaded
+        //              flags / list deadline), which each surface re-pulls from the next daemon on open. activeHandoff
+        //              is not scoped to the chat on screen: a WAITING handoff on A locked a new session's composer on B
         // FIX-* = a former GAP that disconnect() now clears (the cold switch inherits it); OK-* = a former GAP judged
         // harmless after reading every reader, kept on purpose:
         //   FIX-偏好   push / approval prefs are daemon truth whose null means "not answered" — a next daemon too old
@@ -706,15 +711,15 @@ class ResetInventoryTest {
             skillCatalogLoading          R R K K K K K K
             skillCatalogUnavailable      R R K K K K K K
             skillCatalogDeadline         R R K K K K K K
-            bridges                      K K K K K K K K  # GAP-桥接
-            bridgesLoaded                K K K K K K K K  # GAP-桥接
-            bridgesUnavailable           K K K K K K K K  # GAP-桥接
+            bridges                      R R K K K K K K  # FIX-桥接
+            bridgesLoaded                R R K K K K K K  # FIX-桥接
+            bridgesUnavailable           R R K K K K K K  # FIX-桥接
             bridgeError                  K K K K K K K K  # GAP-桥接
             bridgeCredential             K K K K K K K K  # GAP-桥接
             bridgeBusy                   K K K K K K K K  # GAP-桥接
             bridgeMergeLost              K K K K K K K K  # GAP-桥接
             pendingMergeCheck            K K K K K K K K  # GAP-桥接
-            bridgesDeadline              K K K K K K K K  # GAP-桥接
+            bridgesDeadline              R R K K K K K K  # FIX-桥接
             bridgeBusyDeadline           K K K K K K K K  # GAP-桥接
             schedules                    R R K K K K K K
             schedulesLoaded              R R K K K K K K
@@ -725,13 +730,13 @@ class ResetInventoryTest {
             limitConfirmed               R R K R K K K K  # OK-降级
             repairOffer                  R R K R K K K K  # OK-降级
             repairProgress               R R K R K K K K  # OK-降级
-            shares                       K K K K K K K K  # GAP-共享
-            sharesLoaded                 K K K K K K K K  # GAP-共享
+            shares                       R R K K K K K K  # FIX-共享
+            sharesLoaded                 R R K K K K K K  # FIX-共享
             sharesRefreshing             K K K K K K K K  # GAP-共享
             lastShareCreated             K K K K K K K K  # GAP-共享
             shareEnded                   K R K K K K K K  # GAP-共享（只在 DSC；冷换机按目标账户重载）
-            handoffs                     K K K K K K K K  # GAP-交接
-            activeHandoff                K K K K K K K K  # GAP-交接
+            handoffs                     R R K K K K K K  # FIX-交接
+            activeHandoff                R R K K K K K K  # FIX-交接
             handoffCreating              K K K K K K K K  # GAP-交接
             handoffError                 K K K K K K K K  # GAP-交接
             handoffUnsupported           K K K K K K K K  # GAP-交接
@@ -740,12 +745,12 @@ class ResetInventoryTest {
             handoffAcceptError           K K K K K K K K  # GAP-交接
             autoOpenedHandoffs           K K K K K K K K  # GAP-交接
             acceptedHere                 K K K K K K K K  # GAP-交接
-            collaborators                K K K K K K K K  # GAP-交接
+            collaborators                R R K K K K K K  # FIX-交接
             collaboratorTicket           K K K K K K K K  # GAP-交接
             collaboratorTicketCreating   K K K K K K K K  # GAP-交接
             collaboratorError            K K K K K K K K  # GAP-交接
             lastCollaboratorConnected    K K K K K K K K  # GAP-交接
-            collaboratorsLoaded          K K K K K K K K  # GAP-交接
+            collaboratorsLoaded          R R K K K K K K  # FIX-交接
             reviewsSent                  R R K K K K K K
             reviewsReceived              R R K K K K K K
             reviewContacts               R R K K K K K K
