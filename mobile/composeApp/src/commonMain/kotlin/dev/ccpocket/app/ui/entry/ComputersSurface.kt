@@ -19,7 +19,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,7 +33,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
-import dev.ccpocket.app.defaultDaemonUrl
 import dev.ccpocket.app.pairing.BindingRole
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.displayName
@@ -57,12 +55,9 @@ import dev.ccpocket.app.resources.conn_relay_body
 import dev.ccpocket.app.resources.conn_relay_title
 import dev.ccpocket.app.resources.conn_repair
 import dev.ccpocket.app.resources.conn_retry
-import dev.ccpocket.app.resources.connect_direct
-import dev.ccpocket.app.resources.daemon_ws_url
 import dev.ccpocket.app.resources.device_remove
 import dev.ccpocket.app.resources.device_rename
 import dev.ccpocket.app.resources.exit
-import dev.ccpocket.app.resources.pair_route_lan
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
@@ -91,8 +86,6 @@ fun ComputersSurface(
     onSwitch: (PairedDaemon) -> Unit,
     onAdd: () -> Unit,
 ) {
-    var showLan by remember { mutableStateOf(false) }
-    var url by remember { mutableStateOf(defaultDaemonUrl()) }
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Metric.gutter),
     ) {
@@ -112,14 +105,6 @@ fun ComputersSurface(
 
         Spacer(Modifier.height(20.dp))
         EntryRouteRow(stringResource(Res.string.computers_add), onClick = onAdd)
-        EntryRouteRow(stringResource(Res.string.pair_route_lan), expanded = showLan) { showLan = !showLan }
-        if (showLan) {
-            OutlinedTextField(
-                url, { url = it }, placeholder = { Text(stringResource(Res.string.daemon_ws_url)) },
-                singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = Metric.gapS),
-            )
-            EntrySecondaryButton(stringResource(Res.string.connect_direct)) { repo.startDirect(url) }
-        }
         Hairline()
         Spacer(Modifier.height(28.dp))
     }

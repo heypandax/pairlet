@@ -52,7 +52,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
-import dev.ccpocket.app.defaultDaemonUrl
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Metric
@@ -89,7 +88,7 @@ internal const val PAIR_COMMAND = "pairlet pair"
  * permission the flow does not need — and pairing stays completable if that permission is never granted.
  *
  * Every previously reachable route survives at a lower weight, below one hairline, in expected order: scan,
- * paste-link, direct LAN — then the desktop command, the install guide and Demo. Pairing validation, URI
+ * paste-link — then the desktop command, the install guide and Demo. Pairing validation, URI
  * parsing and every repository effect are untouched.
  *
  * [firstRun] opens on the install guide instead (issue #278 batch 2): with no binding on the device, the code
@@ -133,8 +132,6 @@ fun PairingScreen(repo: PocketRepository, firstRun: Boolean = false) {
     }
 
     var link by remember { mutableStateOf("") }
-    var showLan by remember { mutableStateOf(false) }
-    var url by remember { mutableStateOf(defaultDaemonUrl()) }
     val verifying = repo.pairVerifying.value
     val failure = repo.pairFailure.value?.takeIf { repo.pairFailureSeq.value > enteredAtSeq }
     val complete = code.length == 6
@@ -223,15 +220,6 @@ fun PairingScreen(repo: PocketRepository, firstRun: Boolean = false) {
                 stringResource(Res.string.pair_from_link), Modifier.padding(bottom = Metric.gap),
                 enabled = link.isNotBlank(),
             ) { repo.pair(link) }
-        }
-        EntryRouteRow(stringResource(Res.string.pair_route_lan), expanded = showLan) { showLan = !showLan }
-        if (showLan) {
-            OutlinedTextField(
-                url, { url = it }, placeholder = { Text(stringResource(Res.string.daemon_ws_url)) },
-                singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = Metric.gapS),
-            )
-            EntrySecondaryButton(stringResource(Res.string.connect_direct)) { repo.startDirect(url) }
-            EntryNote(stringResource(Res.string.pair_lan_note), Modifier.padding(top = Metric.gapS, bottom = Metric.gap))
         }
         Hairline()
 

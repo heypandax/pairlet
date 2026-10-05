@@ -104,7 +104,7 @@ sealed class PinScopeKey(val storageName: String?, val synced: Boolean) {
     /** A folder-share guest binding: pins stay local and never reach, or come from, the owner's list. */
     data class Guest(val accountId: String) : PinScopeKey("guest-" + safePinName(accountId), synced = false)
 
-    /** No binding at all (the plaintext dev connection): local only. */
+    /** No binding at all: local only. */
     data object Unpaired : PinScopeKey("local", synced = false)
 
     /** The no-pairing demo: in memory only, never written anywhere. */

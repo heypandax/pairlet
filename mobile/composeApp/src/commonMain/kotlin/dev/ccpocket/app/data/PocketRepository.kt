@@ -23,13 +23,11 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
-import dev.ccpocket.app.ensureLocalNetworkAccess
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.update.VersionStatus
 import dev.ccpocket.app.net.DirectE2EConnection
 import dev.ccpocket.app.net.DirectUnreachableException
 import dev.ccpocket.app.net.RelayAuthException
-import dev.ccpocket.app.net.RelayConnection
 import dev.ccpocket.app.net.DeadLinkException
 import dev.ccpocket.app.net.DepositOutcome
 import dev.ccpocket.app.net.RelayControlDial
@@ -324,14 +322,12 @@ import dev.ccpocket.app.resources.ho_accept_withdrawn
 import dev.ccpocket.app.resources.ho_daemon_too_old
 import dev.ccpocket.app.resources.preview_cmd_title
 import dev.ccpocket.app.resources.preview_cmd_note
-import dev.ccpocket.app.resources.status_checking_network
 import dev.ccpocket.app.resources.status_conn_lost
 import dev.ccpocket.app.resources.status_connecting
 import dev.ccpocket.app.resources.status_disconnected
 import dev.ccpocket.app.resources.status_failed
 import dev.ccpocket.app.resources.status_invalid_link
 import dev.ccpocket.app.resources.status_review_invite_wrong_door
-import dev.ccpocket.app.resources.status_local_denied
 import dev.ccpocket.app.resources.status_pair_failed
 import dev.ccpocket.app.resources.status_pairing
 import dev.ccpocket.app.resources.status_reconnecting
@@ -624,7 +620,6 @@ class PocketRepository(
     /** Where project pins live (issue #362). Tests hand in a registry over a temp directory. */
     internal val projectPinRegistry: dev.ccpocket.app.pins.ProjectPinRegistry = dev.ccpocket.app.pins.ProjectPinRegistry.shared,
 ) {
-    private val direct = RelayConnection()
     private val relay = RelayE2EConnection()
     private val directE2E = DirectE2EConnection()
     internal var useRelay = false // internal for tests (mirrors promptReceiptTimeoutMs)
@@ -638,7 +633,6 @@ class PocketRepository(
     private val badDirectUrl = HashMap<String, String>()
     private var directAttemptInFlight = false
     private var firstTicket: String? = null // pairing ticket, used as PSK on the first relay connect only
-    private var lastDirectUrl: String? = null
     private var inboundJob: Job? = null     // persistent collector over the transport's inbound flow
     private var connectJob: Job? = null     // the socket loop; returns/throws when the link dies
     private var retryJob: Job? = null       // scheduled auto-reconnect
@@ -2089,23 +2083,6 @@ class PocketRepository(
         launchTransport(reconnect = false)
     }
 
-    /** Advanced: connect directly to a daemon on the LAN (no relay), still over WebSocket. */
-    fun startDirect(url: String) {
-        bindProjectPins() // #362: the plaintext dev connection keeps local-only pins
-        useRelay = false
-        lastDirectUrl = url
-        status.value = StatusMsg(Res.string.status_checking_network)
-        scope.launch {
-            if (!ensureLocalNetworkAccess(url)) {
-                status.value = StatusMsg(Res.string.status_local_denied)
-                return@launch
-            }
-            sessionActive.value = true
-            retryAttempts = 0
-            launchTransport(reconnect = false)
-        }
-    }
-
     /** Recompute the observable [phase] from the per-session flags. Call after every relevant event. */
     private fun recomputePhase() {
         // inbox mode has its own readiness proof: a collaborator credential is REFUSED directory discovery,
@@ -2635,12 +2612,12 @@ class PocketRepository(
         if (inboundJob == null) {
             inboundJob = scope.launch {
                 // only the transport that's actually connected emits — merging idle flows is free
-                collectInbound(merge(relay.inbound, direct.inbound, directE2E.inbound), ::handle)
+                collectInbound(merge(relay.inbound, directE2E.inbound), ::handle)
             }
         }
         if (controlJob == null) {
             controlJob = scope.launch {
-                collectInbound(merge(relay.control, direct.control, directE2E.control), ::handleControl)
+                collectInbound(merge(relay.control, directE2E.control), ::handleControl)
             }
         }
         if (deafJob == null) {
@@ -2697,7 +2674,8 @@ class PocketRepository(
                     firstTicket = null
                     relay.connect(p, Pairing.deviceKeys(), t)
                 } else {
-                    direct.connect(lastDirectUrl ?: error("no direct url"))
+                    // only startRelay starts a transport; without it there is nothing to dial
+                    error("no transport started")
                 }
             }
             val err = result.exceptionOrNull()
@@ -3467,7 +3445,9 @@ class PocketRepository(
                 useRelay && (directAttemptInFlight || (directE2E.connected && directE2E.account == paired.value?.accountId)) ->
                     directE2E.send(frame)
                 useRelay -> relay.send(frame)
-                else -> direct.send(frame)
+                // no transport started (demo is answered above, or nothing connected yet): there is no
+                // link to queue for, so the frame is dropped
+                else -> Unit
             }
         } catch (e: CancellationException) {
             throw e

@@ -3,8 +3,6 @@
     <!-- ── connect / pairing ─────────────────────────────────────── -->
     <string name="connect">Connect</string>
     <string name="paste_pair_link">paste ccpocket://pair link</string>
-    <string name="daemon_ws_url">daemon ws url</string>
-    <string name="connect_direct">Connect direct</string>
     <string name="pairing_title">Connect your computer</string>
     <string name="pairing_subtitle">Pair this phone with the Pairlet daemon on your computer.</string>
     <string name="scanning">scanning…</string>
@@ -25,8 +23,6 @@
     <string name="status_review_invite_wrong_door">That\'s a review invite — add it under Review · Contacts, on the computer that should receive the reviews.</string>
     <string name="status_pairing">pairing…</string>
     <string name="status_pair_failed">pairing failed: %1$s</string>
-    <string name="status_checking_network">checking network access…</string>
-    <string name="status_local_denied">local network denied — allow Pairlet in Settings → Privacy → Local Network</string>
     <string name="status_connecting">connecting…</string>
     <string name="status_reconnecting">reconnecting…</string>
     <string name="status_connected">connected</string>
@@ -1714,8 +1710,6 @@
     <string name="pair_helper_complete">The code stays valid only while the computer is still showing it.</string>
     <string name="pair_route_scan">Scan QR code</string>
     <string name="pair_route_paste">Paste pairing link</string>
-    <string name="pair_route_lan">Direct LAN address</string>
-    <string name="pair_lan_note">A direct address does not mean the computer is online. It is tried before the relay.</string>
     <string name="pair_on_computer">On the computer</string>
     <string name="pair_copied">Copied</string>
     <string name="pair_demo">Explore the demo instead</string>
@@ -1812,7 +1806,6 @@
     <string name="settings_connected_to">Connected to %1$s</string>
     <!-- UI 2.1: the written label over the five-category container -->
     <string name="settings_categories">Categories</string>
-    <string name="about_direct_lan">direct LAN</string>
     <string name="rv_invite_qr_a11y">Review invite QR code</string>
 
     <!-- ── the six connection phases: six sentences, six action sets ─────────── -->

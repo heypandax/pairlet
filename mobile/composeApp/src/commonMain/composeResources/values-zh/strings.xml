@@ -3,8 +3,6 @@
     <!-- ── 连接 / 配对 ───────────────────────────────────────────── -->
     <string name="connect">连接</string>
     <string name="paste_pair_link">粘贴 ccpocket://pair 链接</string>
-    <string name="daemon_ws_url">daemon WebSocket 地址</string>
-    <string name="connect_direct">直连</string>
     <string name="pairing_title">连接你的电脑</string>
     <string name="pairing_subtitle">将这台手机与电脑上的 Pairlet 守护进程配对。</string>
     <string name="scanning">扫描中…</string>
@@ -25,8 +23,6 @@
     <string name="status_review_invite_wrong_door">这是评审邀请——请在「评审 · 联系人」里添加，且要在负责收评审的那台电脑上。</string>
     <string name="status_pairing">配对中…</string>
     <string name="status_pair_failed">配对失败：%1$s</string>
-    <string name="status_checking_network">正在检查网络权限…</string>
-    <string name="status_local_denied">本地网络访问被拒绝，请在 设置 → 隐私 → 本地网络 中允许 Pairlet</string>
     <string name="status_connecting">连接中…</string>
     <string name="status_reconnecting">重连中…</string>
     <string name="status_connected">已连接</string>
@@ -1711,8 +1707,6 @@
     <string name="pair_helper_complete">验证码只在电脑还显示着它的时候有效。</string>
     <string name="pair_route_scan">扫描二维码</string>
     <string name="pair_route_paste">粘贴配对链接</string>
-    <string name="pair_route_lan">局域网直连地址</string>
-    <string name="pair_lan_note">填了直连地址不代表电脑在线，它只是会比中转优先尝试。</string>
     <string name="pair_on_computer">在电脑上</string>
     <string name="pair_copied">已复制</string>
     <string name="pair_demo">先看看演示</string>
@@ -1809,7 +1803,6 @@
     <string name="settings_connected_to">已连接 %1$s</string>
     <!-- UI 2.1：五个分类容器上方的文字标签 -->
     <string name="settings_categories">设置分类</string>
-    <string name="about_direct_lan">局域网直连</string>
     <string name="rv_invite_qr_a11y">评审邀请二维码</string>
 
     <!-- ── 六种连接状态：六句话，六组动作 ─────────── -->

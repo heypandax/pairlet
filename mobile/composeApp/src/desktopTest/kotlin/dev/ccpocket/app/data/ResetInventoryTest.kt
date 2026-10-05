@@ -327,7 +327,7 @@ class ResetInventoryTest {
 
         /** Fields outside the inventory, each with the reason. Not state, or state owned by a helper. */
         val IGNORED: Map<String, String> = buildMap {
-            listOf("scope", "pinnedTo", "projectPinRegistry", "direct", "relay", "directE2E")
+            listOf("scope", "pinnedTo", "projectPinRegistry", "relay", "directE2E")
                 .forEach { put(it, "constructor dependency / transport instance") }
             listOf("directLinkUp", "pushDial", "registrarOverride", "linkHealthOverride", "onSendForTest", "pinWriterForTest",
                 "memoWriterForTest", "memoStoreForTest", "redeemForTest", "dialForTest")
@@ -352,7 +352,7 @@ class ResetInventoryTest {
         /** Tabled fields the dirtying deliberately leaves at their initial value. */
         val NO_DIRTY: Map<String, String> = mapOf(
             "demoMode" to "true would route send() into the demo loopback and change every exit's path; leaving demo is not one of the eight exits",
-            "useRelay" to "true would route send() to the (unconnected) relay transport instead of the inert direct outbox",
+            "useRelay" to "true would route send() to the (unconnected) relay transport instead of the inert no-transport sink",
             "connectionDiagnostic" to "an OperationTrace needs an installed diagnostics reporter (Diagnostics.begin is null in tests)",
             "openDiagnostic" to "an OperationTrace needs an installed diagnostics reporter (Diagnostics.begin is null in tests)",
         )
@@ -408,7 +408,6 @@ class ResetInventoryTest {
             badDirectUrl                 K K K K K K K K
             directAttemptInFlight        R R K K K K K K
             firstTicket                  K R K K K K K K
-            lastDirectUrl                K K K K K K K K
             inboundJob                   R K K K K K K K
             connectJob                   R K K K K K K K
             retryJob                     R R K K K K K K
