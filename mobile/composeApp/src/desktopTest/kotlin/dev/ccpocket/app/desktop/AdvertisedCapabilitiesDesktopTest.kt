@@ -22,12 +22,12 @@ class AdvertisedCapabilitiesDesktopTest {
     private fun daemons(): List<Pair<String, (AgentKind) -> ModelsList>> =
         listOf("current daemon" to ::currentDaemonModels, "old daemon" to ::oldDaemonModels)
 
-    private fun withModel(lists: (AgentKind) -> ModelsList, body: (RepoDesktopModel) -> Unit) {
+    private fun withModel(lists: (AgentKind) -> ModelsList, body: (RepoDesktopModel, PocketRepository) -> Unit) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val repo = PocketRepository(scope).apply { onSendForTest = {} }
         try {
             AgentKind.entries.forEach { repo.receiveForTest(lists(it)) }
-            body(RepoDesktopModel(repo, scope, store = FakeDesktopStore()))
+            body(RepoDesktopModel(repo, scope, store = FakeDesktopStore()), repo)
         } finally {
             scope.cancel()
         }
@@ -36,7 +36,7 @@ class AdvertisedCapabilitiesDesktopTest {
     @Test
     fun mode_ladders_match_the_name_checked_ladders_for_every_backend() {
         for ((label, lists) in daemons()) {
-            withModel(lists) { model ->
+            withModel(lists) { model, _ ->
                 for (agent in AgentKind.entries) {
                     // pre-move Popovers.kt / SettingsModal.kt:
                     // `agent == CLAUDE && model.permissionModeAvailable(AUTO)` (which read Claude's list)
@@ -51,6 +51,34 @@ class AdvertisedCapabilitiesDesktopTest {
                         now.any { it.nativeMode == CLAUDE_PERMISSION_MODE_AUTO },
                         "$agent / $label: only Claude on an advertising daemon offers Auto",
                     )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun default_fast_switch_shows_exactly_where_the_codex_name_check_showed_it() {
+        val savedModels = mutableMapOf<AgentKind, String?>()
+        for ((label, lists) in daemons()) {
+            withModel(lists) { model, repo ->
+                AgentKind.entries.forEach { savedModels[it] = repo.defaultModelFor(it) }
+                try {
+                    for (agent in AgentKind.entries) {
+                        // the default model is the one the daemon listed, so a per-model row can match
+                        repo.setDefaultModelFor(agent, currentDaemonModels(agent).models.first())
+                        val tiers = model.serviceTierOptionsFor(agent, repo.defaultModelFor(agent))
+                        // pre-move Settings.kt / SettingsModal.kt: `agent == CODEX && tiers.any { priority }`
+                        val legacy = agent == AgentKind.CODEX && tiers.any { it.id == "priority" }
+                        assertEquals(legacy, dev.ccpocket.app.ui.fastModeAvailable(repo, agent), "mobile $agent / $label")
+                        assertEquals(legacy, dev.ccpocket.app.data.advertisesFastTier(tiers), "desktop $agent / $label")
+                        assertEquals(
+                            agent == AgentKind.CODEX && label == "current daemon",
+                            legacy,
+                            "$agent / $label: only Codex on an advertising daemon shows Fast",
+                        )
+                    }
+                } finally {
+                    savedModels.forEach { (a, m) -> repo.setDefaultModelFor(a, m) }
                 }
             }
         }

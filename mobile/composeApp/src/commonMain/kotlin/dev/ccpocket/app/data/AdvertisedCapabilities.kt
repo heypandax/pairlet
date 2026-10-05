@@ -1,6 +1,7 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.ModelServiceTier
 import dev.ccpocket.protocol.ModelsList
 
 /**
@@ -20,3 +21,14 @@ import dev.ccpocket.protocol.ModelsList
  */
 internal fun thinkingChoiceCarries(agent: AgentKind, listed: ModelsList?): Boolean =
     listed?.supportsThinkingToggle ?: (agent == AgentKind.CLAUDE)
+
+/** The service-tier id the App's Fast switch rides on (Codex names it `priority`). */
+const val FAST_SERVICE_TIER = "priority"
+
+/**
+ * Whether a model's advertised service tiers include Fast. Only the daemon's per-model
+ * [dev.ccpocket.protocol.ModelCapabilities.serviceTiers] decide — an older daemon (no capabilities) or a
+ * backend without tiers yields an empty list, so the switch stays hidden, as the former `agent == CODEX`
+ * prefix kept it.
+ */
+fun advertisesFastTier(tiers: List<ModelServiceTier>): Boolean = tiers.any { it.id == FAST_SERVICE_TIER }

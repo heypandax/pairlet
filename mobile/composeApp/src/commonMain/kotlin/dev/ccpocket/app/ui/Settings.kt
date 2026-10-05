@@ -70,6 +70,7 @@ import dev.ccpocket.app.USER_MANUAL_TROUBLESHOOTING_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.appUpdateRoute
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.data.advertisesFastTier
 import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.data.toggleAgentFilter
 import dev.ccpocket.app.update.VersionStatus
@@ -595,13 +596,14 @@ private fun AgentFilterChoice(label: String, dot: Color?, sel: Boolean, onClick:
 
 /**
  * The ONE owner of "does the selected agent's default model advertise the `priority` tier Fast rides on".
+ * Reads the daemon's per-model `serviceTiers` alone — the same gate as the in-session Fast row; an older
+ * daemon that sends no capabilities hides it, exactly as the former `agent == CODEX &&` prefix did.
  *
  * Read by the Fast switch and by the summary above it. Two copies of this predicate is how a summary
  * starts claiming a control the page is not actually showing.
  */
-private fun fastModeAvailable(repo: PocketRepository, agent: AgentKind): Boolean =
-    agent == AgentKind.CODEX &&
-        repo.serviceTierOptions(agent, repo.defaultModelFor(agent)).any { it.id == "priority" }
+internal fun fastModeAvailable(repo: PocketRepository, agent: AgentKind): Boolean =
+    advertisesFastTier(repo.serviceTierOptions(agent, repo.defaultModelFor(agent)))
 
 /**
  * What a new session would launch with, printed once above the controls that own it (#237 · S3).

@@ -405,10 +405,8 @@ private fun GeneralPane(model: DesktopModel) {
                 }
             }
         }
-        if (
-            defaultAgent == AgentKind.CODEX &&
-            model.serviceTierOptionsFor(defaultAgent, defaultModel).any { it.id == "priority" }
-        ) {
+        // the daemon's per-model service tiers alone decide (an older daemon sends none → hidden)
+        if (dev.ccpocket.app.data.advertisesFastTier(model.serviceTierOptionsFor(defaultAgent, defaultModel))) {
             Group(stringResource(Res.string.fast_mode), stringResource(Res.string.fast_mode_detail)) {
                 PrefRow(
                     stringResource(Res.string.value_off),
