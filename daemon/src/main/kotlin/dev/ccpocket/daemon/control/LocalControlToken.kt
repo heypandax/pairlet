@@ -12,20 +12,19 @@ import java.security.SecureRandom
 import java.util.Base64
 
 /**
- * The shared secret that gates the daemon's LOCAL CONTROL API (`/v1/local/…`, today the #367
- * remote-execution routes).
+ * The shared secret that gates the daemon's whole loopback API: the LOCAL CONTROL routes (`/v1/local/…` —
+ * #367 remote execution, owner devices, pairing results) and, since pairing security phase 0, the legacy
+ * routes too (`/pair`, `/pair/headless`, `/bridges`, `/bridge/revoke`, `/status`; see
+ * [dev.ccpocket.daemon.relay.LegacyLoopbackGuard]).
  *
- * The existing loopback surface (`/pair`, `/share`, `/bridges`) treats "can reach 127.0.0.1" as
- * local-user authority. That is defensible for minting a QR the user is standing in front of. It is
- * NOT defensible for a surface that creates permissions or runs tasks: any process on the machine —
- * including a browser tab executing someone else's JavaScript — can reach loopback, and a
- * same-origin-policy exemption for a plain-JSON POST is a well-trodden path.
+ * "Can reach 127.0.0.1" is not local-user authority: any process on the machine — another OS user's, a
+ * sandboxed one, a browser tab executing someone else's JavaScript — can reach loopback, and `/pair` alone
+ * hands out a full-power pairing ticket. So every route requires this token, stored in a file only the OS
+ * user can read. A browser or another user can send the request; they cannot read
+ * `~/.cc-pocket/local-control-token` to sign it.
  *
- * So the local control routes require this token, stored in a file only the OS user can read.
- * A browser can send the request; it cannot read `~/.cc-pocket/local-control-token` to sign it.
- *
- * The legacy routes are deliberately left as they are: bolting a token onto them would break every
- * existing `pairlet pair` in the wild for no gain those routes actually need.
+ * The cost: a `pairlet` CLI older than the running daemon sends no token and is refused, with a reply that
+ * tells it to use the CLI that came with the daemon.
  */
 object LocalControlToken {
 

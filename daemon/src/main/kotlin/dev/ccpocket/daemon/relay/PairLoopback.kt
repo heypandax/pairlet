@@ -92,16 +92,17 @@ data class LoopbackHeadlessErr(val message: String, val error: String = "headles
  * A loopback-only helper so the `pair` CLI can ask the ALREADY-RUNNING daemon to mint a pairing
  * ticket over its single authenticated relay connection — instead of opening a second daemon
  * connection (which would supersede the live one). Binds 127.0.0.1 only; never exposed off-host.
- * Also serves the headless-bridge management surface (issue #91): mint / list / revoke. Loopback
- * reachability == local-user authority, the same trust the interactive `pair` already rides.
+ * Also serves the headless-bridge management surface (issue #91): mint / list / revoke. Every route
+ * requires the local control token ([LocalControlToken], readable only by this OS user): reaching
+ * loopback alone is NOT local-user authority — other users and sandboxed processes can do that too.
  */
 class PairLoopback(
     private val relay: RelayClient,
     private val relayWsBase: String,
     private val daemonPubB64: String,
     private val port: Int,
-    /** The daemon's services, for the TOKEN-AUTHENTICATED local control API. Null keeps only the legacy
-     *  unauthenticated routes — what unit tests of the pairing routes construct. */
+    /** The daemon's services, for the #367 execution half of the local control API. Null leaves those
+     *  routes out (the legacy routes and the owner-device routes need only [relay]). */
     private val core: dev.ccpocket.daemon.DaemonCore? = null,
 ) {
     private val log = logger("PairLoopback")
@@ -114,21 +115,20 @@ class PairLoopback(
     }
 
     fun start() {
-        val localControlToken = core?.let {
-            runCatching { LocalControlToken.loadOrCreate() }.getOrElse { failure ->
-                // Keep the legacy loopback API available. Starting the new routes without a token would
-                // turn a disk-permission problem into an unauthenticated control plane, so disable only
-                // that plane and make the reason visible in the daemon log.
-                log.warn("local control API disabled: token setup failed (${failure::class.simpleName})")
-                null
-            }
+        val localControlToken = runCatching { LocalControlToken.loadOrCreate() }.getOrElse { failure ->
+            // Serving anything without a token would turn a disk-permission problem into an unauthenticated
+            // control plane (and a free pairing ticket for every local process), so every route — legacy and
+            // `/v1/local` alike — stays shut, and the reason is visible in the daemon log.
+            log.warn("loopback API disabled: local control token setup failed (${failure::class.simpleName})")
+            null
         }
         embeddedServer(CIO, host = "127.0.0.1", port = port) {
             routing {
                 // audit 2026-10-04 H2: every legacy route hangs off this guarded child — a request with an
-                // Origin (a browser) or a non-loopback Host (DNS rebinding) is refused before any handler.
-                // No token / Content-Type demand: the shipped CLI sends neither (see LegacyLoopbackGuard).
-                val legacy = LegacyLoopbackGuard.routes(this)
+                // Origin (a browser) or a non-loopback Host (DNS rebinding) is refused before any handler, and
+                // (pairing security phase 0) so is one without the local control token: other OS users and
+                // processes can reach 127.0.0.1 too, and `/pair` mints a full-power pairing ticket.
+                val legacy = LegacyLoopbackGuard.routes(this, localControlToken)
                 legacy.post("/pair") {
                     // mint serialization (issue #91): while a headless pairing is pending, an interactive
                     // mint could LIFO-cross the PSK binding — refuse for the ticket's short TTL instead
@@ -255,11 +255,9 @@ class PairLoopback(
                 }
 
                 // ---- the TOKEN-AUTHENTICATED local control API ----
-                // Deliberately NOT folded into the routes above: those trade on "reaching loopback ==
-                // local-user authority", which is fine for minting a QR the user is looking at and is
-                // NOT fine for a surface that grants permissions and runs tasks. Own prefix, own rules
-                // (token + Content-Type + no browser Origin); the legacy routes keep working
-                // byte-for-byte so no shipped `pairlet pair` breaks.
+                // Own prefix, own rules (token + JSON Content-Type + no browser Origin + body cap — the shared
+                // gate in LocalControlGate.kt). The legacy routes above keep their request shape (no JSON
+                // Content-Type demand) and share only the token.
                 core?.let { c -> localControlToken?.let { token ->
                     // #367: the remote-execution surface, behind the shared gate (installExecutionControl
                     // calls `authorize` in LocalControlGate.kt) — creating an execution grant is a new
@@ -270,7 +268,7 @@ class PairLoopback(
                 } }
             }
         }.start(wait = false)
-        log.info("pair loopback on http://127.0.0.1:$port (POST /pair, POST /pair/headless, GET /bridges, POST /bridge/revoke, GET /status)")
+        log.info("pair loopback on http://127.0.0.1:$port (POST /pair, POST /pair/headless, GET /bridges, POST /bridge/revoke, GET /status; token-authenticated)")
         if (localControlToken != null) log.info("local control API on http://127.0.0.1:$port$LOCAL_CONTROL_PREFIX (token-authenticated)")
     }
 }

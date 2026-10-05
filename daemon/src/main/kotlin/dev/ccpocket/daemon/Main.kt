@@ -16,6 +16,7 @@ import dev.ccpocket.daemon.claude.ClaudeBackend
 import dev.ccpocket.daemon.claude.ClaudeLauncher
 import dev.ccpocket.daemon.codex.CodexBackend
 import dev.ccpocket.daemon.codex.CodexLauncher
+import dev.ccpocket.daemon.LoopbackCli.withToken
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
@@ -378,10 +379,14 @@ private class PairCmd : CliktCommand(name = "pair") {
     override fun run() = runBlocking {
         val client = HttpClient(CIO)
         try {
+            // pairing security phase 0: every loopback route needs the local control token (see LoopbackCli)
+            val token = LoopbackCli.token()
             if (headless) {
-                pairHeadless(client)
+                if (token == null) { echo("✗ ${LoopbackCli.missingTokenMessage()}"); return@runBlocking }
+                pairHeadless(client, token)
                 return@runBlocking
             }
+            if (token == null) fail(LoopbackCli.missingTokenMessage())
             // The daemon's relay link may legitimately be mid-reconnect (backoff reaches 30s) while the mint
             // window is only 10s — a one-shot pair failed spuriously on a HEALTHY daemon. Ride it out: retry
             // until the link comes back or the window closes, and only then diagnose.
@@ -389,10 +394,11 @@ private class PairCmd : CliktCommand(name = "pair") {
             var lastBody = ""
             var waiting = false
             while (true) {
-                val body = runCatching { client.post("http://127.0.0.1:$pairPort/pair").bodyAsText() }.getOrElse {
-                    echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}")
-                    return@runBlocking
-                }
+                val reply = runCatching {
+                    LoopbackCli.reply(client.post("http://127.0.0.1:$pairPort/pair") { withToken(token) })
+                }.getOrElse { fail("no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}") }
+                LoopbackCli.refusal(reply)?.let { fail(it) }
+                val body = reply.body
                 val info = runCatching { PocketJson.decodeFromString<LoopbackPair>(body) }.getOrNull()
                 if (info != null) {
                     echo("")
@@ -414,13 +420,20 @@ private class PairCmd : CliktCommand(name = "pair") {
             echo("✗ pairing failed — the daemon can't reach the relay ($lastBody)")
             echo("  likely: no internet, or a proxy/firewall blocking $DEFAULT_RELAY, or the relay is down.")
             echo("  inspect: pairlet status")
+            throw com.github.ajalt.clikt.core.ProgramResult(1)
         } finally {
             client.close()
         }
     }
 
+    /** Print a `✗` line and exit non-zero — the interactive pair's failures (headless keeps its own style). */
+    private fun fail(message: String): Nothing {
+        echo("✗ $message")
+        throw com.github.ajalt.clikt.core.ProgramResult(1)
+    }
+
     /** Mint a headless bridge credential and hand it to the adapter — written to [out] (0600) or printed. */
-    private suspend fun pairHeadless(client: HttpClient) {
+    private suspend fun pairHeadless(client: HttpClient, token: String) {
         val n = name?.trim().orEmpty()
         if (n.isEmpty()) { echo("✗ --headless requires --name <bridge-name> (e.g. --name feishu-bot)"); return }
         if (workdir.isEmpty()) {
@@ -435,12 +448,16 @@ private class PairCmd : CliktCommand(name = "pair") {
             else -> AccessTier.REVIEW
         }
         val req = LoopbackHeadlessReq(n, workdir.toList(), maxSessions, opensPerMin, promptsPerMin, grantedTier)
-        val body = runCatching {
-            client.post("http://127.0.0.1:$pairPort/pair/headless") { setBody(PocketJson.encodeToString(req)) }.bodyAsText()
+        val reply = runCatching {
+            LoopbackCli.reply(
+                client.post("http://127.0.0.1:$pairPort/pair/headless") { withToken(token); setBody(PocketJson.encodeToString(req)) },
+            )
         }.getOrElse {
             echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}")
             return
         }
+        LoopbackCli.refusal(reply)?.let { echo("✗ headless pairing failed: $it"); return }
+        val body = reply.body
         val cred = runCatching { PocketJson.decodeFromString<LoopbackHeadlessCred>(body) }.getOrNull()
         if (cred == null) {
             echo("✗ headless pairing failed: $body")
@@ -503,16 +520,22 @@ private class BridgesCmd : CliktCommand(name = "bridges") {
     override fun run() = runBlocking {
         val client = HttpClient(CIO)
         try {
+            val token = LoopbackCli.token()
+                ?: run { echo("✗ ${LoopbackCli.missingTokenMessage()}"); return@runBlocking }
             val toRevoke = revoke
             if (toRevoke != null) {
-                val body = runCatching {
-                    client.post("http://127.0.0.1:$pairPort/bridge/revoke") { setBody("""{"idOrName":"$toRevoke"}""") }.bodyAsText()
+                val reply = runCatching {
+                    LoopbackCli.reply(client.post("http://127.0.0.1:$pairPort/bridge/revoke") { withToken(token); setBody("""{"idOrName":"$toRevoke"}""") })
                 }.getOrElse { echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}"); return@runBlocking }
+                LoopbackCli.refusal(reply)?.let { echo("✗ revoke failed: $it"); return@runBlocking }
+                val body = reply.body
                 if ("\"revoked\"" in body) echo("✓ revoked: $body") else echo("✗ revoke failed: $body")
                 return@runBlocking
             }
-            val body = runCatching { client.get("http://127.0.0.1:$pairPort/bridges").bodyAsText() }
+            val reply = runCatching { LoopbackCli.reply(client.get("http://127.0.0.1:$pairPort/bridges") { withToken(token) }) }
                 .getOrElse { echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}"); return@runBlocking }
+            LoopbackCli.refusal(reply)?.let { echo("✗ $it"); return@runBlocking }
+            val body = reply.body
             val rows = runCatching { PocketJson.decodeFromString<List<LoopbackBridge>>(body) }.getOrNull()
             when {
                 rows == null -> echo("✗ unexpected reply: $body")
@@ -577,10 +600,18 @@ private class StatusCmd : CliktCommand(name = "status") {
         echo("  version:  ${dev.ccpocket.daemon.update.UpdateState.current} (${installLabel(installKind)})")
         echo("  update:   ${dev.ccpocket.daemon.update.UpdateService.updateCommand(installKind)}")
         try {
-            // 1. daemon process + relay link (via the loopback /status the running daemon serves)
-            val body = runCatching { client.get("http://127.0.0.1:$pairPort/status").bodyAsText() }.getOrNull()
-            val st = body?.let { runCatching { PocketJson.decodeFromString<LoopbackStatus>(it) }.getOrNull() }
-            if (st == null) {
+            // 1. daemon process + relay link (via the loopback /status the running daemon serves; it needs the
+            // local control token — sent when this user has one, and a refusal is reported as such)
+            val token = LoopbackCli.token()
+            val reply = runCatching {
+                LoopbackCli.reply(client.get("http://127.0.0.1:$pairPort/status") { token?.let { withToken(it) } })
+            }.getOrNull()
+            val st = reply?.body?.let { runCatching { PocketJson.decodeFromString<LoopbackStatus>(it) }.getOrNull() }
+            val refused = reply?.let { LoopbackCli.refusal(it) }
+            if (st == null && refused != null) {
+                healthy = false
+                echo("  daemon:   ✓ running, but it refused this CLI — $refused")
+            } else if (st == null) {
                 healthy = false
                 echo("  daemon:   ✗ not reachable on 127.0.0.1:$pairPort — ${daemonStartHint()}")
             } else {
