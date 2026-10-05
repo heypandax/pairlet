@@ -228,7 +228,6 @@ import dev.ccpocket.app.ui.session.stateColor
 import dev.ccpocket.app.ui.session.sessionRows
 import dev.ccpocket.app.ui.session.splitSessions
 import dev.ccpocket.app.resources.*
-import dev.ccpocket.protocol.HandoffStatus
 import dev.ccpocket.app.ui.share.GuestEnding
 import dev.ccpocket.app.ui.share.ShareFolderScreen
 import dev.ccpocket.app.ui.share.SharedPill
@@ -491,12 +490,6 @@ fun App(scope: CoroutineScope) {
                     workdir = repo.workdir.value,
                     risk = repo.riskDetailFor(ask), // M3: the FULL event (level + reason + codes + assessed)
                     queueProgress = repo.askQueueProgress.value, // "n of m" while a burst is queued (design M1)
-                    // §2.2/§4.3: during a REVIEW handoff a shell command is the one way a "read-only"
-                    // review can still touch files — so it's confirmed each time (no standing rule) and
-                    // the card says it leaves a record
-                    handoffReview = repo.activeHandoff.value?.let {
-                        it.status == HandoffStatus.IN_PROGRESS && repo.isHandoffRecipient(it)
-                    } == true,
                     timedOutSignal = repo.askTimedOut(ask), // issue #100 (composite-matched, P1-3)
                 )
                 // every verdict names the ask THIS sheet was composed with: in a burst the next card appears

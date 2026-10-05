@@ -1,6 +1,5 @@
 package dev.ccpocket.app.ui.approval
 
-import dev.ccpocket.app.ui.isShellTool
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionRiskUpdated
 import dev.ccpocket.protocol.isQuestion
@@ -16,8 +15,7 @@ import dev.ccpocket.protocol.oneOff
 
 /** Which decision set a request can honor. Modifiers (danger, noAutoDeny, queue, risk) never change it. */
 enum class ApprovalFamily {
-    /** A human decision that must not become a standing rule: `ask.oneOff`, or a shell command under a
-     *  REVIEW handoff (the one way a "read-only" review can still write). Deny + Allow once, nothing else. */
+    /** A human decision that must not become a standing rule (`ask.oneOff`). Deny + Allow once, nothing else. */
     ONE_OFF,
 
     /** A grant-aware daemon (`grantOptions != null`, INCLUDING an empty list): Deny + Allow once + Retry
@@ -81,8 +79,6 @@ data class ApprovalUi(
     val actions: List<ApprovalAction>,
     /** The session grant, when offered: one deliberate tap behind More options, never on the main grid. */
     val sessionAction: ApprovalAction?,
-    /** A shell command inside a REVIEW handoff — the body carries the "recorded, never remembered" band. */
-    val recordedShell: Boolean,
     val timer: ApprovalTimer,
     /** The daemon's authoritative `AskWithdrawn(TIMED_OUT)`. The only remote path into the terminal state. */
     val timedOutSignal: Boolean,
@@ -99,25 +95,17 @@ data class ApprovalUi(
         timedOutSignal || (secondsLeft <= 0 && ask.grantOptions == null && !ask.noAutoDeny)
 }
 
-/**
- * Classify one pending ask into everything the sheet may render.
- *
- * [handoffReview] is "a REVIEW handoff is in progress on this device"; combined with a shell tool it forces
- * [ApprovalFamily.ONE_OFF] regardless of what the daemon offered — the client half of "confirmed one command
- * at a time" (implementation review §2.2/§4.3).
- */
+/** Classify one pending ask into everything the sheet may render. */
 fun approvalUi(
     ask: PermissionAsk,
     workdir: String? = null,
     risk: PermissionRiskUpdated? = null,
     queueProgress: Pair<Int, Int>? = null,
-    handoffReview: Boolean = false,
     timedOutSignal: Boolean = false,
 ): ApprovalUi {
     require(!ask.isQuestion) { "AskUserQuestion belongs in the conversation card, not Secure Approval" }
-    val recordedShell = handoffReview && isShellTool(ask.tool)
     val family = when {
-        ask.oneOff || recordedShell -> ApprovalFamily.ONE_OFF
+        ask.oneOff -> ApprovalFamily.ONE_OFF
         // non-null is the capability signal — an EMPTY list is still a grant-aware daemon that happens to
         // offer no standing scope, so it must not fall back to legacy and hand out "Always allow"
         ask.grantOptions != null -> ApprovalFamily.V2
@@ -154,7 +142,6 @@ fun approvalUi(
         } else {
             null
         },
-        recordedShell = recordedShell,
         timer = if (ask.noAutoDeny) ApprovalTimer.Waiting else {
             ApprovalTimer.Countdown((ask.timeoutSec ?: LEGACY_TIMEOUT_SEC).coerceAtLeast(0))
         },
