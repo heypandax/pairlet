@@ -60,8 +60,8 @@ Six backends, four promoted capability columns. They are **not** equivalent.
 ## Security model and honest limits
 
 - **End-to-end encryption** between client and daemon: P-256 ECDH + HKDF + AES-256-GCM, X3DH / Noise-style handshake.
-- **Zero-knowledge relay:** forwards ciphertext only; cannot read messages, never holds private keys, no content logging.
-- **No account:** pairing is device-to-device. The daemon's key travels out-of-band via QR, so even a malicious relay cannot MITM that path. Pairings expire and can be revoked.
+- **Zero-knowledge relay:** forwards ciphertext only; cannot read session content, never holds private keys, no content logging.
+- **No account:** a device pairs with the daemon through a one-time 6-digit code (or its QR). The pairing keys are exchanged through the relay, so first-time pairing currently relies on the relay not being compromised; once paired, the relay cannot read or forge the session, and device fingerprints (`pairlet devices` vs. the app's About screen) reveal a swapped key. Pairings expire and can be revoked.
 - **Limits, stated plainly:** the agent still executes with the user's own operating-system permissions — encryption is not a sandbox. OpenCode sessions have no enforceable interactive approval. The custom Noise-style channel has not had an independent third-party audit.
 
 ## Product media

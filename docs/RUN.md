@@ -69,20 +69,21 @@ $R --port 9000 --in-memory
 $D run --relay ws://127.0.0.1:9000 --claude-bin ~/.local/bin/claude
 ```
 
-**配对**：让正在运行的 daemon mint 一张一次性票据，打印 `ccpocket://pair?...` 链接（内含 relay 地址 / account / daemon E2E 公钥 / 票据）。
+**配对**：让正在运行的 daemon 向 relay 申请一张一次性票据，终端打印一个 6 位配对码和只编码这个码的二维码（`ccpocket://pair?code=…`），然后停在原处等待配对结果；有设备配对成功时显示该设备与这台电脑的指纹，码过期或设备被拒则以非零状态退出。
 
 ```bash
-$D pair        # 另开一个终端；输出 ccpocket://pair?relay=...&acct=...&dpk=...&ticket=...
+$D pair        # 另开一个终端；输出二维码与 "code:  123 456"，随后等待配对结果
 ```
 
-**终端 3 —— 设备 test-client（自带 redeem + E2E）**：从上面的链接里取 `dpk` 和 `ticket`。
+**终端 3 —— 设备 test-client（自带 redeem + E2E）**：`test-client` 需要 daemon 公钥和票据。用配对码向 relay 换取（码单次有效，换取后手机就不能再用这个码）：
 
 ```bash
-$D test-client --relay ws://127.0.0.1:9000 --daemon-pub "<dpk>" --ticket "<ticket>"
+curl -s -X POST http://127.0.0.1:9000/v1/pair/code -d '{"code":"123456"}'   # → {"accountId":…,"daemonPub":…,"ticket":…}
+$D test-client --relay ws://127.0.0.1:9000 --daemon-pub "<daemonPub>" --ticket "<ticket>"
 ```
 
 之后 `dirs / open / say …` 按 §2 的用法输入，流量走 device ↔ relay ↔ daemon、全程加密（relay 看不到内容）。
-手机端：把 `ccpocket://pair?...` 链接粘进 App 的「Pair」框即可（见 `docs/ios-device.md`）。
+手机端：用 App 扫终端里的二维码，或手输 6 位码（见 `docs/ios-device.md`）。
 
 ---
 
