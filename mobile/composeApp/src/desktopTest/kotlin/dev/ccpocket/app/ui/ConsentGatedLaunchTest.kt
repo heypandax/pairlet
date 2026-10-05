@@ -60,7 +60,11 @@ class ConsentGatedLaunchTest {
         dialForTest = { p, _ -> dials += p.accountId; awaitCancellation() }
     }
 
-    private fun events() = synchronized(seen) { seen.toList() }
+    /** [telemetryTap] is process-wide, so a straggling coroutine of an earlier test class can still emit into it
+     *  (seen in a full-suite run: an `ApprovalShown` landed ahead of this test's `AppLaunch`). Only the events the
+     *  launch effects themselves can produce are this test's business. */
+    private val launchEvents = setOf(TelEvent.AppLaunch, TelEvent.PairStarted, TelEvent.Paired, TelEvent.PairFailed)
+    private fun events() = synchronized(seen) { seen.filter { it in launchEvents } }
 
     @Test
     fun beforeConsentNothingIsTrackedAndTheLinkWaitsThenRunsOnConsent() = runComposeUiTest {
