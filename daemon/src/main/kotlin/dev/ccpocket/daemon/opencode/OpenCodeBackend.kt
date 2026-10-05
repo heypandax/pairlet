@@ -26,7 +26,6 @@ import java.util.concurrent.ConcurrentHashMap
 class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
     private val log = logger("OpenCodeBackend")
 
-    @Volatile private var io: AgentIo? = null
     @Volatile private var resolvedExe: Path? = null
     @Volatile private var workdir: String = ""
     @Volatile private var resumeId: String? = null
@@ -54,7 +53,6 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
     private fun exe(): Path = resolvedExe ?: OpenCodeLauncher.resolveExecutable(opencodeBin).also { resolvedExe = it }
 
     override suspend fun attach(io: AgentIo, spec: AgentSpec) {
-        this.io = io
         this.workdir = spec.workdir.toString()
         this.resumeId = spec.resumeId
         this.mode = spec.mode
@@ -114,15 +112,6 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
         // Follow-up turns rely on Conversation's relaunch mechanism: when the process exits,
         // proc becomes null, and the next sendPrompt() triggers a fresh launch with --session <id>.
         // This method is a no-op — the initial prompt is in argv, follow-ups trigger relaunches.
-    }
-
-    private suspend fun sendPromptDirect(text: String, images: List<ImageData>) {
-        // OpenCode run mode: write the prompt directly as a command-line argument (already in processBuilder).
-        // For interactive follow-up prompts, we'd need stdin writing, but `opencode run` is one-shot.
-        // The prompt is passed via CLI args in the initial launch.
-        // For subsequent prompts in a session, we'd need to use `--session <id>` with a new `opencode run`.
-        // For MVP: single-turn per process. Multi-turn requires re-launch with --session.
-        io?.writeLine(text)
     }
 
     override suspend fun interrupt() {
