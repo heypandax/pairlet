@@ -84,4 +84,111 @@ class UnscopedErrorRoutingTest {
             scope.cancel()
         }
     }
+
+    // ── refusals that NAME the request they answer (the daemon's guard / unhandled-frame messages) ──
+
+    private fun sysRows(r: PocketRepository) = r.messages.filterIsInstance<ChatItem.Sys>()
+
+    /** A folder-share guest's quota refresh is refused by the daemon's guard — the message names the frame. It
+     *  answered the allowance pill, not the session the user just tapped. */
+    @Test
+    fun aGuardRefusalNamingAQuotaRequestLeavesTheOpenAndTheChatAlone() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val r = repo(scope, mutableListOf())
+        try {
+            r.receiveForTest(SessionLive("c1", "/w", "sid-1", executing = false))
+            r.fetchClaudeQuota()
+            assertTrue(r.openSession("/w", "sid-2"))
+            assertTrue(r.opening.value && r.claudeQuotaLoading.value, "preconditions")
+
+            r.receiveForTest(PocketError("share_forbidden", "not permitted for a folder-share guest: ClaudeQuotaGet"))
+
+            assertTrue(r.opening.value, "the quota refusal must not end the open")
+            assertTrue(sysRows(r).isEmpty(), "nor land in the chat: ${sysRows(r)}")
+            assertFalse(r.claudeQuotaLoading.value, "it ends the quota request it answers")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun anUnhandledFrameRefusalNamingUsageEndsTheUsageRequestNotTheChat() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val r = repo(scope, mutableListOf())
+        try {
+            r.receiveForTest(SessionLive("c1", "/w", "sid-1", executing = false))
+            r.fetchUsage()
+            r.receiveForTest(PocketError("unsupported", "frame not handled by daemon: FetchUsage"))
+            assertTrue(sysRows(r).isEmpty(), "${sysRows(r)}")
+            assertFalse(r.usageLoading.value, "the usage page stops spinning")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** A request whose handler threw answers with a bare `internal`. With exactly one non-session request
+     *  outstanding and nothing session-side in flight, that request is the only thing it can answer. */
+    @Test
+    fun anInternalErrorDuringTheOnlyPendingPanelRequestFailsThatPanel() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val r = repo(scope, mutableListOf())
+        try {
+            r.receiveForTest(SessionLive("c1", "/w", "sid-1", executing = false))
+            r.fetchGitStatus()
+            assertTrue(r.gitStatusLoading.value)
+            r.receiveForTest(PocketError("internal", "git exited 128"))
+            assertTrue(sysRows(r).isEmpty(), "${sysRows(r)}")
+            assertFalse(r.gitStatusLoading.value)
+            assertTrue(r.gitStatusUnavailable.value, "the panel settles into its own failure state")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    // ── what cannot be attributed keeps the old behaviour ──
+
+    @Test
+    fun anInternalErrorWhileAnOpenIsInFlightStillEndsTheOpen() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val r = repo(scope, mutableListOf())
+        try {
+            r.fetchUsage()
+            assertTrue(r.openSession("/w", "sid-2"))
+            r.receiveForTest(PocketError("internal", "request failed"))
+            assertFalse(r.opening.value, "ambiguous: the open is as likely as the usage fetch — keep failing the open")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun aRefusalNamingOpenSessionStillEndsTheOpen() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val r = repo(scope, mutableListOf())
+        try {
+            r.fetchUsage()
+            assertTrue(r.openSession("/w", "sid-2"))
+            r.receiveForTest(PocketError("share_forbidden", "not permitted for a folder-share guest: OpenSession"))
+            assertFalse(r.opening.value)
+            assertTrue(r.usageLoading.value, "the usage request is still waiting for its own answer")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun anInternalErrorWithTwoPanelRequestsPendingIsNotGuessed() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val r = repo(scope, mutableListOf())
+        try {
+            r.receiveForTest(SessionLive("c1", "/w", "sid-1", executing = false))
+            r.fetchGitStatus()
+            r.fetchUsage()
+            r.receiveForTest(PocketError("internal", "request failed"))
+            assertTrue(r.gitStatusLoading.value && r.usageLoading.value, "neither request is failed on a guess")
+            assertTrue(sysRows(r).isNotEmpty(), "unattributable: the old behaviour (a row in the chat)")
+        } finally {
+            scope.cancel()
+        }
+    }
 }
