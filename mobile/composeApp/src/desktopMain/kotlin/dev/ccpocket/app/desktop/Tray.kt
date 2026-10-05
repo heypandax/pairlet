@@ -54,6 +54,7 @@ import dev.ccpocket.app.resources.tray_open_app
 import dev.ccpocket.app.resources.tray_sessions_many
 import dev.ccpocket.app.resources.tray_sessions_one
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.approval.rememberApprovalArmed
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.protocol.AgentKind
 import org.jetbrains.compose.resources.stringResource
@@ -87,6 +88,8 @@ fun TrayPopover(
     showPointer: Boolean = true,
     elevated: Boolean = false,
     keyHint: Boolean = false,
+    // the double-tap guard's slot prefix: the in-window popover and the menu-bar window are separate places
+    arrivalSurface: String = "tray",
 ) {
     val approvals = model.attention
     val running = model.running
@@ -136,9 +139,11 @@ fun TrayPopover(
                     TrayEmpty(Icons.Rounded.Check, Tok.ok, stringResource(Res.string.tray_all_clear))
                 } else {
                     val (shown, hidden) = trayVisible(approvals, TRAY_MAX_APPROVALS)
-                    shown.forEach { a ->
+                    shown.forEachIndexed { i, a ->
                         TrayApprovalRow(
                             a,
+                            // deciding a row slides the next one into its place: guarded per row slot
+                            armed = rememberApprovalArmed("$arrivalSurface:$i", a.arrivalKey()),
                             onDeny = { model.resolveAttention(a, allow = false) },
                             onAllow = { model.resolveAttention(a, allow = true) },
                             onOpen = { openMain(); model.openAttention(a) },
@@ -290,7 +295,7 @@ private fun TrayEmpty(icon: androidx.compose.ui.graphics.vector.ImageVector?, ti
  *  the ALLOW as an answers map, so a bare ALLOW from a summary surface would silently read "did not answer".
  *  Long machine names / tools / previews truncate with an ellipsis (mono, layout-aware). */
 @Composable
-private fun TrayApprovalRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Unit, onOpen: () -> Unit) {
+private fun TrayApprovalRow(a: DkAttention, armed: Boolean, onDeny: () -> Unit, onAllow: () -> Unit, onOpen: () -> Unit) {
     Column(
         Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(10.dp)).background(Tok.surface)
             .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).clickable(onClick = onOpen).padding(11.dp),
@@ -322,15 +327,17 @@ private fun TrayApprovalRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> U
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).clickable(onClick = onOpen).padding(vertical = 7.dp),
             )
         } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // guard window: the desktop's existing disabled look — outline → muted ink on a hairline; fill → SettingsModal's
+            // bordered variant (surface + hairline + muted), since this row's own ground is already surface
             Text(
-                stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                stringResource(Res.string.deny), color = if (armed) Tok.danger else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                 style = tightCenter(12.5.sp),
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).border(1.dp, Tok.danger.copy(alpha = 0.4f), RoundedCornerShape(8.dp)).clickable(onClick = onDeny).padding(vertical = 7.dp),
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).border(1.dp, if (armed) Tok.danger.copy(alpha = 0.4f) else Tok.hair, RoundedCornerShape(8.dp)).clickable(enabled = armed) { if (armed) onDeny() }.padding(vertical = 7.dp),
             )
             Text(
-                stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                stringResource(Res.string.allow), color = if (armed) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                 style = tightCenter(12.5.sp),
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.accent).clickable(onClick = onAllow).padding(vertical = 7.dp),
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (armed) Tok.accent else Tok.surface).then(if (armed) Modifier else Modifier.border(1.dp, Tok.hair, RoundedCornerShape(8.dp))).clickable(enabled = armed) { if (armed) onAllow() }.padding(vertical = 7.dp),
             )
         }
     }

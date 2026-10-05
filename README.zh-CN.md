@@ -76,7 +76,7 @@ flowchart LR
     daemon -- "stdio" --> agent["agent CLI<br/>（claude · codex · opencode · kimi · zcode · DeepSeek）"]
 ```
 
-**daemon** 跑在你的电脑上，把 agent CLI 当子进程驱动，并主动**向外**连中继——不用开任何入站端口。**中继**只做两件事：帮设备配对、转发不透明的加密帧；它不持有消息内容，也不持有私钥。App 与 daemon 之间跑一条端到端会话（P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手），明文自始至终只在这两个可信端点上。同一局域网内 App 会直连 daemon，延迟更低；中继是「人在外面」时的兜底。配对可设有效期，也可随时吊销。
+**daemon** 跑在你的电脑上，把 agent CLI 当子进程驱动，并主动**向外**连中继——不用开任何入站端口。**中继**只做两件事：帮设备配对、转发不透明的加密帧；它不持有消息内容，也不持有私钥。App 与 daemon 之间跑一条端到端会话（P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手），明文自始至终只在这两个可信端点上。同一台电脑上的桌面 App 默认直连 daemon；手机要在同一局域网内直连（延迟更低），需在启动 daemon 时加 `--direct-bind 0.0.0.0`。中继是「人在外面」时的兜底。配对可设有效期，也可随时吊销。
 
 **必须说清的限制**：agent 仍以你本机操作系统用户的权限执行——端到端加密不等于沙箱。OpenCode 会话没有可执法的交互审批。项目自定义的 Noise 式通道也还没做过独立第三方审计。威胁模型见 [`docs/SECURITY.md`](docs/SECURITY.md)。安全问题请走 [GitHub security advisories](https://github.com/heypandax/pairlet/security/advisories/new) 私下报告。
 

@@ -1,6 +1,7 @@
 package dev.ccpocket.app.ui.approval
 
 import dev.ccpocket.app.advanceFrameAndWait
+import dev.ccpocket.app.passArrivalGuard
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -104,6 +105,7 @@ class SecureApprovalSheetUiTest {
 
         // positive control: the same harness DOES deliver a tap to a real decision, so the assertion
         // above is about the scrim swallowing it — not about clicks being inert in this test
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
         onAllNodes(hasText(str(Res.string.deny))).onFirst().performClick()
         assertEquals(1, decisions)
     }
@@ -155,6 +157,7 @@ class SecureApprovalSheetUiTest {
         advanceFrameAndWait()
         assertPresent(str(Res.string.allow_session_option))
         assertEquals(0, session, "revealing the option is not taking it")
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
         onAllNodes(hasText(str(Res.string.allow_session_option))).onFirst().performClick()
         assertEquals(1, session)
     }

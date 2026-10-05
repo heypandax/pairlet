@@ -228,6 +228,11 @@ data class DkAttention(
     val sessionId: String? = null,
 )
 
+/** The request behind a row, as the double-tap guard keys it ((convoId, askId) — the repository's own arrival
+ *  key). A seed/preview row carries no conversation, so its machine stands in. */
+internal fun DkAttention.arrivalKey(): dev.ccpocket.app.data.ApprovalKey =
+    dev.ccpocket.app.data.ApprovalKey(convoId ?: accountId, id)
+
 /** What the ⌘K palette shows: everything, just project rows ("All projects…"), or the cross-project
  *  archive ("Archived sessions", issue #202). A scope is a MODE of the one palette, deliberately not a
  *  second panel — a separate window would fork "find a session" into two places, which is the very

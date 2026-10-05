@@ -82,6 +82,9 @@ internal fun ApprovalDecisions(
     ui: ApprovalUi,
     onAction: (ApprovalActionId) -> Unit,
     onOpenSafer: () -> Unit,
+    // false while the card is inside its arrival guard window ([APPROVAL_ARRIVAL_GUARD_MS]): every DECISION
+    // takes the tile's existing disabled look (CAUTION + enabled = false, as Retry safer's Send does)
+    armed: Boolean = true,
 ) {
     var more by remember(ui.ask.convoId, ui.ask.askId) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
@@ -94,8 +97,13 @@ internal fun ApprovalDecisions(
                 horizontalArrangement = Arrangement.spacedBy(TILE_GAP),
             ) {
                 row.forEach { a ->
-                    DecisionTile(a.id.label(), a.emphasis, a.sublabel, Modifier.weight(1f)) {
-                        if (a.id == ApprovalActionId.RETRY_SAFER) onOpenSafer() else onAction(a.id)
+                    // Retry safer only opens a sub-surface — it decides nothing, so the guard leaves it alone
+                    val on = armed || a.id == ApprovalActionId.RETRY_SAFER
+                    DecisionTile(
+                        a.id.label(), if (on) a.emphasis else ActionEmphasis.CAUTION, a.sublabel, Modifier.weight(1f),
+                        enabled = on,
+                    ) {
+                        if (on) { if (a.id == ApprovalActionId.RETRY_SAFER) onOpenSafer() else onAction(a.id) }
                     }
                 }
                 if (row.size == 1 && row.single().id == ApprovalActionId.ALWAYS_ALLOW) {
@@ -106,7 +114,7 @@ internal fun ApprovalDecisions(
         // the session grant is one deliberate step away: the broadest scope is never the fastest tap
         val session = ui.sessionAction
         if (session != null) {
-            if (more) SessionScopeRow(session) { onAction(session.id) } else MoreOptionsRow { more = true }
+            if (more) SessionScopeRow(session, enabled = armed) { if (armed) onAction(session.id) } else MoreOptionsRow { more = true }
         }
     }
 }
@@ -205,17 +213,18 @@ private fun MoreOptionsRow(onClick: () -> Unit) {
 }
 
 @Composable
-private fun SessionScopeRow(action: ApprovalAction, onClick: () -> Unit) {
+private fun SessionScopeRow(action: ApprovalAction, enabled: Boolean = true, onClick: () -> Unit) {
     Row(
         Modifier.padding(top = Metric.gapXs).fillMaxWidth().clip(RoundedCornerShape(Metric.radiusS))
             .background(Tok.surface).border(Metric.hairline, Tok.hair, RoundedCornerShape(Metric.radiusS))
-            .clickable(role = Role.Button, onClick = onClick).heightIn(min = Metric.touch)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick).heightIn(min = Metric.touch)
             .padding(horizontal = Metric.gap, vertical = Metric.gapS),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
     ) {
         Icon(Icons.Rounded.Lock, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
         Column(Modifier.weight(1f)) {
-            Text(stringResource(Res.string.allow_session_option), color = Tok.tx, style = TypeRole.body)
+            // disabled: the secondary ink a CAUTION tile uses — the same quiet the guarded tiles above take
+            Text(stringResource(Res.string.allow_session_option), color = if (enabled) Tok.tx else Tok.tx2, style = TypeRole.body)
             action.sublabel?.let {
                 Text(it, color = Tok.tx2, style = TypeRole.captionMono, modifier = Modifier.padding(top = 2.dp))
             }

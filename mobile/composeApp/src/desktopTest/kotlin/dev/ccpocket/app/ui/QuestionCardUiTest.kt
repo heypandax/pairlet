@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
+import dev.ccpocket.app.passArrivalGuard
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.AskOption
 import dev.ccpocket.protocol.AskQuestion
@@ -111,6 +112,7 @@ class QuestionCardUiTest {
         onAllNodes(hasText(link)).onFirst().performClick()
         onAllNodes(androidx.compose.ui.test.hasSetTextAction()).onFirst().performTextInput("随便选个快的")
         val answerLabel = runBlocking { getString(Res.string.question_answer) }
+        passArrivalGuard() // the double-tap guard: a card that just appeared takes no decision yet
         onAllNodes(hasText(answerLabel)).onFirst().performClick()
         assertNull(gotAnswers)
         assertEquals("随便选个快的", gotResponse)
