@@ -1961,6 +1961,13 @@ class Conversation(
                     p.shutdown(eofGraceMs = 1_000, termGraceMs = 1_000, forceGraceMs = 1_000)
                     p.awaitExit()
                     lifecycleProbe?.invoke(LifecyclePoint.WATCHDOG_AFTER_EXIT)
+                    // Same-process check AGAIN after the kill: shutdown + awaitExit suspend for seconds, and a
+                    // /clear or directory switch plus the next prompt may have replaced this process meanwhile.
+                    // Nulling `proc` / clearing the turn now would orphan that replacement (lifecycle design D3').
+                    if (proc !== p) {
+                        log.info("$convoId OpenCode watchdog: process ${p.pid} was replaced while it was being killed — leaving the new one alone")
+                        return@launch
+                    }
                     // Null proc + clear state so the next sendPrompt triggers a fresh relaunch
                     // (without this, subsequent prompts would write into the dead stdin and be lost)
                     proc = null
@@ -2501,6 +2508,15 @@ class Conversation(
             // classifying it (intentional stops settle in stopProcess)
             p.awaitExit()
             lifecycleProbe?.invoke(LifecyclePoint.DEATH_AFTER_AWAIT_EXIT)
+            // …and again after it: awaitExit suspends (up to 5+2 s), and a /clear, directory switch or settings
+            // relaunch landing meanwhile has already stopped this process and published a new one. Everything
+            // below (clear the turn, revoke grants, drop the handle, heal, re-launch a one-shot drain) would act
+            // on THAT process — orphaning it and minting a second writer (lifecycle design D3). The stop that
+            // replaced us settled this process; its death is history. Stopgap until the lifecycle lock (S4).
+            if (proc !== p) {
+                log.info("$convoId pump: process ${p.pid} was replaced while its exit was awaited — leaving the new one alone")
+                return
+            }
             if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && turnCompleted && p.isCleanTurnExit()) {
                 // The completed turn's ACTIVE authority always dies here. A later prompt that raced this
                 // clean edge keeps its still-staged token: pending authority grants nothing until that exact
