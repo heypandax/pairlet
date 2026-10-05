@@ -17,17 +17,11 @@ import dev.ccpocket.protocol.ReviewInboxAction
 import dev.ccpocket.protocol.ReviewRequest
 import dev.ccpocket.protocol.ReviewResult
 import dev.ccpocket.protocol.ReviewStatus
-import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
-import io.ktor.server.request.receiveChannel
-import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
-import io.ktor.utils.io.readRemaining
-import kotlinx.io.readByteArray
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 
 // ===========================================================================
@@ -36,9 +30,6 @@ import kotlinx.serialization.Serializable
 //  is precisely the accident a shared type invites. Nothing here has a field
 //  that could hold a ticket, a bearer credential or a private key.
 // ===========================================================================
-
-@Serializable
-data class LocalError(val ok: Boolean = false, val code: String, val message: String)
 
 @Serializable
 data class LocalInviteReq(val label: String? = null)
@@ -383,12 +374,10 @@ fun Route.installLocalControl(core: LocalControlDeps, token: String) {
     }
 }
 
-const val LOCAL_CONTROL_PREFIX = "/v1/local"
 const val DIR_OUTBOUND = "outbound"
 const val DIR_INBOUND = "inbound"
 const val SCOPE_SENT = "sent"
 const val SCOPE_RECEIVED = "received"
-internal const val MAX_LOCAL_BODY_BYTES = ReviewLimits.MAX_ENCODED_BYTES + 64 * 1024
 
 /** Wire contact → the CLI's own contact DTO. Same fields, different vocabulary: the CLI has always
  *  spelled direction as a lowercase string, and `--json` consumers key on that. */
@@ -448,58 +437,3 @@ private fun parseStatus(raw: String): ReviewStatus? = when (raw.lowercase()) {
     else -> runCatching { PocketJson.decodeFromString(ReviewStatus.serializer(), "\"${raw.lowercase()}\"") }
         .getOrNull()?.takeIf { it != ReviewStatus.UNKNOWN }
 }
-
-// ---- the three gates, in one place ----------------------------------------
-
-/**
- * Enforce the token + the anti-browser rules. Answers the call itself on refusal and returns false.
- *
- * `internal`, not private: the #367 execution routes ([installExecutionControl]) are a SEPARATE file but
- * must be the SAME gate. Re-implementing these three checks next door is precisely how one surface ends
- * up without the Origin refusal or the body cap.
- */
-internal suspend fun ApplicationCall.authorize(token: String, post: Boolean = true): Boolean {
-    // a CLI never sets Origin; a browser always does. Refusing its PRESENCE (not just a wrong value) is
-    // the honest statement that this API has no web callers at all.
-    if (request.headers["Origin"] != null) {
-        fail(HttpStatusCode.Forbidden, "forbidden_origin", "this API is not callable from a web page")
-        return false
-    }
-    if (post && request.headers["Content-Type"]?.substringBefore(';')?.trim()?.lowercase() != "application/json") {
-        fail(HttpStatusCode.UnsupportedMediaType, "bad_content_type", "Content-Type: application/json is required")
-        return false
-    }
-    if (post && request.headers["Content-Length"]?.toLongOrNull()?.let { it > MAX_LOCAL_BODY_BYTES } == true) {
-        fail(HttpStatusCode.PayloadTooLarge, "body_too_large", "request body exceeds $MAX_LOCAL_BODY_BYTES bytes")
-        return false
-    }
-    if (!LocalControlToken.matches(token, request.headers[LocalControlToken.HEADER])) {
-        fail(HttpStatusCode.Unauthorized, "unauthorized", "missing or wrong local control token")
-        return false
-    }
-    return true
-}
-
-internal suspend fun <T> ApplicationCall.body(serializer: KSerializer<T>): T? {
-    val bytes = runCatching {
-        receiveChannel().readRemaining(MAX_LOCAL_BODY_BYTES.toLong() + 1).readByteArray()
-    }.getOrNull()
-    if (bytes != null && bytes.size > MAX_LOCAL_BODY_BYTES) {
-        fail(HttpStatusCode.PayloadTooLarge, "body_too_large", "request body exceeds $MAX_LOCAL_BODY_BYTES bytes")
-        return null
-    }
-    val text = bytes?.toString(Charsets.UTF_8)
-    val parsed = text?.let { runCatching { PocketJson.decodeFromString(serializer, it) }.getOrNull() }
-    if (parsed == null) fail(HttpStatusCode.BadRequest, "bad_request", "could not read the request body")
-    return parsed
-}
-
-internal suspend fun <T> ApplicationCall.ok(serializer: KSerializer<T>, value: T) =
-    respondText(PocketJson.encodeToString(serializer, value), ContentType.Application.Json)
-
-internal suspend fun ApplicationCall.fail(status: HttpStatusCode, code: String, message: String) =
-    respondText(
-        PocketJson.encodeToString(LocalError.serializer(), LocalError(code = code, message = message)),
-        ContentType.Application.Json,
-        status,
-    )
