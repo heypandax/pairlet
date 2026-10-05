@@ -639,6 +639,22 @@ class Conversation(
     @Volatile
     private var interruptRequested = false
 
+    /**
+     * Per-turn scratch is consumed by the turn's own result. A process that dies (or is stopped / replaced)
+     * before that result leaves it armed, and the NEXT process's first turn then inherits it: a pending ■
+     * repaints a genuine failure as the user's own cancel (no error row, no failure push, no degraded count),
+     * and a stale placeholder or per-call usage is attributed to the wrong turn (lifecycle design S3(e) /
+     * audit L1). Every launch starts a fresh turn context, so [launchProcess] resets it — the one boundary
+     * every new process crosses.
+     */
+    private fun resetTurnScratch() {
+        interruptRequested = false
+        sawSyntheticThisTurn = false
+        lastSyntheticText = null
+        lastCallUsage = null
+        awaitingPostCompactUsage = false
+    }
+
     // UNCONSUMED-PROMPT LEDGER (issue #122). A prompt is only PROVEN delivered when the CLI echoes it
     // back on stdout (`--replay-user-messages` replays a user message once it is actually consumed) —
     // "written to the stdin channel" proves nothing: the channel write succeeds even when the process
@@ -1784,6 +1800,7 @@ class Conversation(
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         modelPickPending = false // …including a model pick: this process's own init may now report the resolved id
+        resetTurnScratch()
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val launchGeneration = processGeneration
         val backendLabel = AgentBackendLabel.entries.firstOrNull { it.name == backend.kind.name } ?: AgentBackendLabel.UNKNOWN

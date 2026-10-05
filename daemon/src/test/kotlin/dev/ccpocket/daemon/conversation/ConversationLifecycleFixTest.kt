@@ -245,6 +245,34 @@ class ConversationLifecycleFixTest {
     }
 
 
+    // ── S3(e): per-turn flags reset at every process boundary ──────────────────────────────────────────
+
+
+    /** Audit L1 — ■ armed `interruptRequested`, then the process died before its result. The flag survived
+     *  into the next process, whose first genuine failure was then painted as the user's own cancel: no
+     *  error row, no failure push. */
+    @Test
+    fun an_interrupt_for_a_dead_process_does_not_mask_the_next_failure() = runBlocking {
+        if (LifecycleHarness.isWindows()) return@runBlocking
+        val backend = LifecycleBackend(interruptLine = "STOP") { index, _ ->
+            if (index == 0) "IFS= read -r l; printf 'init:s1\\nuser:%s\\nsay:working\\n' \"\$l\"; IFS= read -r stop; exit 1"
+            else "IFS= read -r l; printf 'user:%s\\nresult-err:boom\\n' \"\$l\"; $SILENT_TAIL"
+        }
+        val h = LifecycleHarness(backend, "cS3e")
+        try {
+            h.convo.open(resumeId = null, model = null)
+            h.convo.sendPrompt("one", promptId = "one")
+            h.await(what = "turn one running") { chunk(h, "working") }
+            h.convo.cancelTurn() // ■: the fake turns it into the process dying before any result
+            h.await(what = "process death") { h.framesOf<PocketError>().any { it.code == "process_exited" } }
+            h.convo.sendPrompt("two", promptId = "two") // a fresh process whose first turn genuinely fails
+            h.await(what = "turn two") { h.framesOf<TurnDone>().isNotEmpty() }
+            assertEquals("boom", h.framesOf<TurnDone>().single().error, "a real failure must surface as one")
+        } finally {
+            h.close()
+        }
+    }
+
     private companion object {
         /** Keep a one-shot child alive (no further output) until its stdin closes. */
         const val SILENT_TAIL = "while IFS= read -r x; do :; done"
