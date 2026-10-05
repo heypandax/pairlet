@@ -6,6 +6,9 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/opt/cc-pocket-mirror/mirror-sync.sh
+# docs/RELEASE.md「更新包签名」: switch to 1 once update signing is enforced — the mirror then refuses any
+# release without release-manifest.json + .sig. 0 mirrors unsigned releases as before.
+Environment=MIRROR_REQUIRE_SIGNATURE=0
 # a cold sync moves ~550MB from GitHub and this box has seen ~100KB/s to it; downloads resume across
 # runs (mirror-sync.sh keeps partials), so this only bounds one run, never the whole sync
 TimeoutStartSec=90min

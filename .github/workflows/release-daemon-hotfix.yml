@@ -225,6 +225,11 @@ jobs:
       GH_REPO: ${{ github.repository }}
       VERSION: ${{ needs.preflight.outputs.version }}
     steps:
+      # only for scripts/release-manifest.py; a subdirectory, so it never cleans the release copies below
+      - uses: actions/checkout@v7
+        with:
+          path: source
+          persist-credentials: false
       - name: Back up the complete existing release before replacement
         run: |
           gh release download "v$VERSION" --dir before
@@ -259,29 +264,50 @@ jobs:
           assert expected <= {p.name for p in before.iterdir()}, 'Not an existing five-platform daemon release'
           lines = []
           for original in sorted(before.iterdir()):
-              if original.name == 'SHA256SUMS':
+              # the signed manifest is re-signed below; SHA256SUMS never lists it (see release.yml checksums)
+              if original.name in ('SHA256SUMS', 'release-manifest.json', 'release-manifest.json.sig'):
                   continue
               path = replacement / original.name if original.name in expected else original
               digest = hashlib.file_digest(path.open('rb'), 'sha256').hexdigest()
               lines.append(f'{digest}  {original.name}\n')
           (replacement / 'SHA256SUMS').write_text(''.join(lines))
           PYCODE
+      # docs/RELEASE.md「更新包签名」: the replaced daemon packages change the release, so its manifest must be
+      # rebuilt and re-signed over the FINAL set — the replacement files (this run's build outputs) plus every
+      # untouched asset, which must still match the manifest this key signed before. No secret: a warning,
+      # nothing signed, and the existing steps run unchanged.
+      - name: Re-sign the release manifest over the final asset set
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          python3 source/scripts/release-manifest.py ci-sign --version "$VERSION" \
+            --asset-dir before --replacement-dir replacement --out-dir signed
       - name: Replace only daemon packages and their checksums
         run: |
           gh release upload "v$VERSION" replacement/cc-pocket-daemon-* --clobber
           gh release upload "v$VERSION" replacement/SHA256SUMS --clobber
+          if [ -f signed/release-manifest.json.sig ]; then
+            gh release upload "v$VERSION" signed/release-manifest.json signed/release-manifest.json.sig --clobber
+          fi
       - name: Verify every published asset digest and preserve all other assets
         run: |
           gh api "repos/$GH_REPO/releases/tags/v$VERSION" > after-assets.json
           gh release download "v$VERSION" --pattern SHA256SUMS --dir verify
           cmp replacement/SHA256SUMS verify/SHA256SUMS
+          if [ -f signed/release-manifest.json.sig ]; then
+            gh release download "v$VERSION" --pattern 'release-manifest.json*' --dir verify
+            cmp signed/release-manifest.json verify/release-manifest.json
+            cmp signed/release-manifest.json.sig verify/release-manifest.json.sig
+          fi
           python3 - <<'PYCODE'
           import json
           from pathlib import Path
           before = {a['name']: a for a in json.loads(Path('before-assets.json').read_text())['assets']}
           after = {a['name']: a for a in json.loads(Path('after-assets.json').read_text())['assets']}
-          assert before.keys() == after.keys(), 'Asset names changed'
-          replacements = {p.name for p in Path('replacement').iterdir()}
+          # the signed manifest may be added (first signed hotfix) or replaced; every other name is fixed
+          signed = {'release-manifest.json', 'release-manifest.json.sig'}
+          assert before.keys() - signed == after.keys() - signed, 'Asset names changed'
+          replacements = {p.name for p in Path('replacement').iterdir()} | signed
           for name in before.keys() - replacements:
               assert before[name]['id'] == after[name]['id'], f'Unrelated asset replaced: {name}'
           for line in Path('verify/SHA256SUMS').read_text().splitlines():
