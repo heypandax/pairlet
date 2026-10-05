@@ -864,13 +864,22 @@ class SessionRegistry(
             convos.keys.removeAll(s.keys)
             s.values.toList()
         }
-        stale.forEach {
-            // name each casualty: "which session died, when, how stale" is exactly what a field report
-            // of a vanished background task needs from the daemon log (issue #105 was undiagnosable
-            // from the RelayClient's bare reap count)
-            log.info("reapIdle: closing ${it.convoId.take(8)}… (sid=${it.sessionId?.take(8) ?: "-"}, idle ${now - it.lastActivityMs}ms)")
-            beforeReapClose?.invoke(it)
-            it.close(); noteSelfClosed(it)
+        // Every one of these is already OUT of the registry, so nothing else will ever close it: one close that
+        // throws must not skip the rest (their processes would be orphaned), and a reaper cancelled mid-loop
+        // must still finish the job.
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            stale.forEach {
+                // name each casualty: "which session died, when, how stale" is exactly what a field report
+                // of a vanished background task needs from the daemon log (issue #105 was undiagnosable
+                // from the RelayClient's bare reap count)
+                log.info("reapIdle: closing ${it.convoId.take(8)}… (sid=${it.sessionId?.take(8) ?: "-"}, idle ${now - it.lastActivityMs}ms)")
+                try {
+                    beforeReapClose?.invoke(it)
+                    it.close(); noteSelfClosed(it)
+                } catch (e: Exception) {
+                    log.warn("reapIdle: closing ${it.convoId.take(8)}… failed — continuing with the rest", e)
+                }
+            }
         }
         return stale.size
     }
