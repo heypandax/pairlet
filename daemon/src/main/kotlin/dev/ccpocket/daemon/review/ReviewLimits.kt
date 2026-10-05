@@ -1,5 +1,8 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.daemon.peer.TextLimits.MAX_LABEL
+import dev.ccpocket.daemon.peer.TextLimits.singleLine
+import dev.ccpocket.daemon.peer.TextLimits.text
 import dev.ccpocket.protocol.ArtifactKind
 import dev.ccpocket.protocol.ArtifactRef
 import dev.ccpocket.protocol.PocketJson
@@ -26,7 +29,6 @@ import dev.ccpocket.protocol.ReviewVerdict
  */
 object ReviewLimits {
     const val MAX_ID = 128
-    const val MAX_LABEL = 120
     const val MAX_TITLE = 200
 
     /** A prose field (request / background / summary / decline reason / finding detail). */
@@ -52,21 +54,6 @@ object ReviewLimits {
     /** Only these URL schemes are ever recorded. The daemon NEVER opens one (§11.2) — this exists so a
      *  `file:`/`javascript:` reference can't be handed to a reviewer's agent as if it were a web link. */
     private val ALLOWED_SCHEMES = listOf("https://", "http://")
-
-    /** A machine-readable refusal, or null when [value] is acceptable. */
-    fun text(value: String?, max: Int, field: String): String? = when {
-        value == null -> null
-        value.length > max -> "$field is too long (${value.length} > $max)"
-        value.any { it.isISOControl() && it != '\n' && it != '\r' && it != '\t' } ->
-            "$field contains unsafe control characters"
-        else -> null
-    }
-
-    /** Fields rendered on one terminal line must not carry line breaks, tabs or ANSI controls. */
-    fun singleLine(value: String?, max: Int, field: String): String? {
-        text(value, max, field)?.let { return it }
-        return if (value?.any(Char::isISOControl) == true) "$field must be a single line" else null
-    }
 
     /**
      * An OPAQUE identifier: `[A-Za-z0-9_-]+`, bounded by [MAX_ID].

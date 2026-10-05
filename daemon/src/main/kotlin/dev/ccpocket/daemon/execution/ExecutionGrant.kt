@@ -1,6 +1,6 @@
 package dev.ccpocket.daemon.execution
 
-import dev.ccpocket.daemon.review.ReviewLimits
+import dev.ccpocket.daemon.peer.TextLimits
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionMode
 import kotlinx.serialization.SerialName
@@ -134,7 +134,7 @@ object ExecutionPolicy {
         if (draft.approvalCeiling !in ALLOWED_CEILINGS) return refuse("ceiling_not_allowed")
         if (draft.allowedAgents.isEmpty()) return refuse("agents_required")
         if (draft.allowedAgents.any { it !in SUPPORTED_AGENTS }) return refuse("agent_unsupported")
-        if (ReviewLimits.singleLine(draft.sourceLabel, ReviewLimits.MAX_LABEL, "label") != null || draft.sourceLabel.isBlank()) {
+        if (TextLimits.singleLine(draft.sourceLabel, TextLimits.MAX_LABEL, "label") != null || draft.sourceLabel.isBlank()) {
             return refuse("label_invalid")
         }
         if (draft.ttlMs <= 0 || draft.ttlMs > MAX_TTL_MS) return refuse("ttl_out_of_range")

@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.review
 
 import dev.ccpocket.daemon.handoff.CollaboratorControl
+import dev.ccpocket.daemon.peer.TextLimits
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Collaborator
 import dev.ccpocket.protocol.CollaboratorDirection
@@ -84,7 +85,7 @@ class ReviewOwnerService(
 
     /** Mint a REVIEW-purpose one-time invite for a colleague's daemon to redeem. */
     suspend fun invite(label: String?): Outcome<Invite> {
-        ReviewLimits.singleLine(label, ReviewLimits.MAX_LABEL, "label")?.let {
+        TextLimits.singleLine(label, TextLimits.MAX_LABEL, "label")?.let {
             return Outcome.Refused("invite_invalid", it)
         }
         val control = collaborators() ?: return Outcome.Refused(

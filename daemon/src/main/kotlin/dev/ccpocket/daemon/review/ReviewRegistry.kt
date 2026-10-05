@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.daemon.peer.TextLimits
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.ArtifactRef
 import dev.ccpocket.protocol.DEFAULT_REVIEW_EXPIRES_SEC
@@ -121,7 +122,7 @@ class ReviewRegistry(
     /** → DECLINED, with the recipient's own reason. */
     @Synchronized
     fun decline(id: String, deviceId: String, reason: String?, key: String = ""): Outcome {
-        ReviewLimits.text(reason, ReviewLimits.MAX_TEXT, "reason")?.let { return refuse("review_invalid", it) }
+        TextLimits.text(reason, ReviewLimits.MAX_TEXT, "reason")?.let { return refuse("review_invalid", it) }
         return recipientTransition(id, deviceId, key, ReviewStatus.DECLINED) { it.copy(declineReason = reason) }
     }
 

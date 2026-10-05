@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.review
 
+import dev.ccpocket.daemon.peer.TextLimits
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
@@ -310,7 +311,7 @@ private fun decodeInviteAtDoor(
             validRelay(it.relay) && it.accountId.isNotBlank() && it.accountId.length <= 256 &&
             it.ticket.isNotBlank() && it.ticket.length <= 4_096 &&
             validDaemonPub(it.daemonPub) &&
-            ReviewLimits.singleLine(it.ownerLabel, ReviewLimits.MAX_LABEL, "owner label") == null
+            TextLimits.singleLine(it.ownerLabel, TextLimits.MAX_LABEL, "owner label") == null
     }?.let { it.copy(relay = it.relay.trimEnd('/')) }
 }
 

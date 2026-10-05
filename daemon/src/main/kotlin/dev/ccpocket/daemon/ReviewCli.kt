@@ -30,6 +30,7 @@ import dev.ccpocket.daemon.control.LocalReviewsRes
 import dev.ccpocket.daemon.control.LocalSendReq
 import dev.ccpocket.daemon.control.LocalShowRes
 import dev.ccpocket.daemon.control.SCOPE_RECEIVED
+import dev.ccpocket.daemon.peer.TextLimits
 import dev.ccpocket.daemon.review.ArtifactSyntax
 import dev.ccpocket.daemon.review.ReviewLimits
 import dev.ccpocket.protocol.PocketJson
@@ -456,7 +457,7 @@ private const val whoWroteIt = "what the other side wrote"
 /**
  * Flatten peer-supplied text onto ONE line for a single-line slot.
  *
- * [ReviewLimits.text] deliberately permits `\n`/`\r`/`\t` in prose fields — a brief is prose — so any
+ * [TextLimits.text] deliberately permits `\n`/`\r`/`\t` in prose fields — a brief is prose — so any
  * of them printed raw into a `key: value` row lets a colleague inject extra lines that look like the
  * CLI's own output (or like a Skill's parsed fields). Control characters go too: an ANSI escape could
  * repaint what a reader already saw.
