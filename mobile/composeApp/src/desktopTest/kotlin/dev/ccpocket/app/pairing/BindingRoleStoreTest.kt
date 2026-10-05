@@ -11,8 +11,8 @@ import kotlin.test.assertNull
  * Binding roles in the paired-computer store (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.2.1-2).
  *
  * The bug being fenced off: the paired list was keyed on accountId alone, so redeeming ANY second
- * credential for a daemon you already had — a folder-share guest invite — silently replaced the owner
- * binding. One QR scan could downgrade a whole computer to one folder.
+ * credential for a daemon you already had — then a folder-share guest invite, a feature since retired —
+ * silently replaced the owner binding. One QR scan could downgrade a whole computer to one folder.
  */
 class BindingRoleStoreTest {
 
@@ -61,12 +61,30 @@ class BindingRoleStoreTest {
         assertEquals(BindingRole.OWNER, Pairing.loadAll().single().role)
     }
 
+    /** Folder Share is retired and its `guest` role with it. No released build ever stored one (every redeem
+     *  defaulted to OWNER), but were one on disk — in either spelling — it reads like any value this build does
+     *  not know: OWNER, without failing the list decode or unpairing the computers beside it. */
+    @Test
+    fun aStoredGuestRoleFromTheRetiredFolderShareReadsAsOwner() {
+        SecureStore.putString(
+            "paired_daemons",
+            """[{"relay":"wss://r","accountId":"a","daemonPub":"pk","deviceId":"d1","credential":"c","role":"guest"},""" +
+                """{"relay":"wss://r","accountId":"b","daemonPub":"pk","deviceId":"d2","credential":"c","role":"GUEST"},""" +
+                """{"relay":"wss://r","accountId":"c","daemonPub":"pk","deviceId":"d3","credential":"c","role":"owner"}]""",
+        )
+        val all = Pairing.loadAll()
+        assertEquals(listOf("a", "b", "c"), all.map { it.accountId }, "the legacy role must not drop any computer")
+        assertEquals(listOf(BindingRole.OWNER, BindingRole.OWNER, BindingRole.OWNER), all.map { it.role })
+        Pairing.setActive("a")
+        assertEquals("a", Pairing.active()?.accountId, "and it is a computer like any other")
+    }
+
     @Test
     fun rolesRoundTripThroughTheStore() {
         Pairing.upsert(binding("a", "d1", BindingRole.OWNER))
-        Pairing.upsert(binding("b", "d2", BindingRole.GUEST))
+        Pairing.upsert(binding("b", "d2", BindingRole.COLLABORATOR))
         assertEquals(
-            mapOf("a" to BindingRole.OWNER, "b" to BindingRole.GUEST),
+            mapOf("a" to BindingRole.OWNER, "b" to BindingRole.COLLABORATOR),
             Pairing.loadAll().associate { it.accountId to it.role },
         )
     }
@@ -74,12 +92,12 @@ class BindingRoleStoreTest {
     // ── §3.2.2: one daemon may hold several credentials, and they must not clobber each other ─────
 
     @Test
-    fun aGuestShareForADaemonYouOwnAddsABindingInsteadOfReplacingIt() {
+    fun aSecondRoleForADaemonYouOwnAddsABindingInsteadOfReplacingIt() {
         Pairing.upsert(binding("acct-a", "dev-owner", BindingRole.OWNER))
-        Pairing.upsert(binding("acct-a", "dev-guest", BindingRole.GUEST))
+        Pairing.upsert(binding("acct-a", "dev-other", BindingRole.COLLABORATOR))
         val all = Pairing.loadAll()
         assertEquals(2, all.size, "different credentials for one daemon are two bindings, not one")
-        assertEquals(setOf(BindingRole.OWNER, BindingRole.GUEST), all.map { it.role }.toSet())
+        assertEquals(setOf(BindingRole.OWNER, BindingRole.COLLABORATOR), all.map { it.role }.toSet())
     }
 
     @Test
@@ -107,7 +125,7 @@ class BindingRoleStoreTest {
 
     @Test
     fun theOwnerBindingWinsWhenSeveralShareAnAccount() {
-        Pairing.upsert(binding("acct-a", "dev-guest", BindingRole.GUEST))
+        Pairing.upsert(binding("acct-a", "dev-other", BindingRole.COLLABORATOR))
         Pairing.upsert(binding("acct-a", "dev-owner", BindingRole.OWNER))
         Pairing.setActive("acct-a")
         assertEquals("dev-owner", Pairing.active()?.deviceId, "\"switch to that computer\" means the richer credential")

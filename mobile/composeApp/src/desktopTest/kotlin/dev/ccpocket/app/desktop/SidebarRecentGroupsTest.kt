@@ -80,7 +80,7 @@ class SidebarRecentGroupsTest {
         private val projects = HashMap<Pair<String, String>, Project>()
         val sent = mutableListOf<Frame>()
 
-        /** [groups] null = a daemon that predates groups (a guest sees the same), empty = a group-aware owner with none yet. */
+        /** [groups] null = a daemon that predates groups, empty = a group-aware owner with none yet. */
         fun put(
             dir: String,
             rows: List<SessionSummary>,

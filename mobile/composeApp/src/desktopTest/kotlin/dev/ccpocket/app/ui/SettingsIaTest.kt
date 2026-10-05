@@ -34,7 +34,6 @@ import dev.ccpocket.app.resources.exit
 import dev.ccpocket.app.resources.full_control_expiry
 import dev.ccpocket.app.resources.default_effort_section
 import dev.ccpocket.app.resources.fast_mode
-import dev.ccpocket.app.resources.join_title
 import dev.ccpocket.app.resources.mode_plan_label
 import dev.ccpocket.app.resources.mode_default_label
 import dev.ccpocket.app.resources.mode_auto_label
@@ -58,7 +57,6 @@ import dev.ccpocket.app.resources.settings_connected_to
 import dev.ccpocket.app.resources.settings_default_agent
 import dev.ccpocket.app.resources.settings_manual_title
 import dev.ccpocket.app.resources.settings_paired_computers
-import dev.ccpocket.app.resources.settings_shared_folders
 import dev.ccpocket.app.resources.settings_title
 import dev.ccpocket.app.resources.settings_troubleshooting
 import dev.ccpocket.app.resources.settings_usage
@@ -276,8 +274,6 @@ class SettingsIaTest {
         }
         openCategory(str(Res.string.settings_cat_connections)) {
             assertPresent(str(Res.string.settings_paired_computers))
-            assertPresent(str(Res.string.settings_shared_folders))
-            assertPresent(str(Res.string.join_title))       // the row most at risk of being dropped
             assertPresent(str(Res.string.settings_bridges))
         }
         openCategory(str(Res.string.settings_cat_security)) {

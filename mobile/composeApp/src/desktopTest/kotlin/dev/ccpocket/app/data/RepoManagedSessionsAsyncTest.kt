@@ -154,8 +154,8 @@ class RepoManagedSessionsAsyncTest {
     }
 
     @Test
-    fun guest_and_collaborator_bindings_never_send_managed_frames_or_wait() {
-        for (role in listOf(BindingRole.GUEST, BindingRole.COLLABORATOR)) {
+    fun collaborator_bindings_never_send_managed_frames_or_wait() {
+        for (role in listOf(BindingRole.COLLABORATOR)) {
             sent.clear()
             val repo = newRepo(role)
             repo.capable()

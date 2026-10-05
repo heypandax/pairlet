@@ -29,7 +29,6 @@ import dev.ccpocket.app.memo.MemoUiState
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.action_back
-import dev.ccpocket.app.resources.close
 import dev.ccpocket.app.resources.memo_back_to_sessions_cd
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
@@ -40,8 +39,6 @@ import dev.ccpocket.app.ui.git.GitPanelScreen
 import dev.ccpocket.app.ui.git.WorktreesScreen
 import dev.ccpocket.app.ui.memo.MemoFx
 import dev.ccpocket.app.ui.memo.VoiceMemoScreen
-import dev.ccpocket.app.ui.share.JoinFolderScreen
-import dev.ccpocket.app.ui.share.SharedFoldersScreen
 import dev.ccpocket.protocol.WorkflowRun
 import dev.ccpocket.protocol.WorkflowRunStatus
 import org.jetbrains.skia.Color
@@ -113,9 +110,6 @@ class BackTargetUiTest {
             viewedWorkflowRunId.value = RUN
         }, content = { WorkflowRunScreen(it) {} }),
         Scene("schedule", content = { ScheduleScreen(it) {} }),
-        Scene("shared-folders", content = { SharedFoldersScreen(it, onBack = {}) }),
-        // ends its flow rather than stepping back, so it is ✕ — but in the very same slot
-        Scene("join-folder", label = { str(Res.string.close) }, content = { JoinFolderScreen(it, onBack = {}, onJoined = {}) }),
         Scene("onboarding", content = { OnboardingScreen(onPairNow = {}, onBack = {}) }),
         Scene("pairing", content = { PairingScreen(it) }),
         Scene("memo-list", label = { str(Res.string.memo_back_to_sessions_cd) }, content = {
