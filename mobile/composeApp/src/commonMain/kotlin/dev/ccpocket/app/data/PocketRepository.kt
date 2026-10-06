@@ -8139,10 +8139,12 @@ class PocketRepository(
             }
             is VoiceSendFlow.Effect.SubmitSend -> submitVoice(e.captureId, e.text)
             is VoiceSendFlow.Effect.ToComposer -> {
+                voiceCapture?.outcome = VoiceRefineTelemetry.toComposer(e.reason)
                 clearVoice()
                 landVoiceText(e.origin, e.text, e.reason, leaving)
             }
-            VoiceSendFlow.Effect.Discard -> {} // the caller (cancel, leaving, a refused microphone) tears down as it always has
+            // the caller (cancel, leaving, a refused microphone) tears down as it always has
+            VoiceSendFlow.Effect.Discard -> voiceCapture?.outcome = VoiceRefineTelemetry.DISCARDED
             VoiceSendFlow.Effect.NoSpeech -> { showNotice(Res.string.voice_no_speech); clearVoice() }
             VoiceSendFlow.Effect.TranscribeFailed -> {} // the failure state and its retry are already up ([voiceFailed])
             is VoiceSendFlow.Effect.Finished -> endVoiceCapture(e.captureId)
@@ -8156,6 +8158,7 @@ class PocketRepository(
         val c = convoId.value
         capture?.refineConvo = c
         capture?.refineRequested = true
+        Telemetry.track(TelEvent.VoiceRefine, mapOf(TelKey.Outcome to VoiceRefineTelemetry.REQUESTED))
         if (c != null) {
             // agentHint is THIS session's agent: the daemon falls back to it only when it does not know the session's
             // own agent yet (a session with no running process) — never the phone's global default (§11)
@@ -8184,6 +8187,7 @@ class PocketRepository(
     private fun submitVoice(id: String, text: String) {
         beforeVoiceSubmitForTest?.invoke()
         val accepted = sendVoicePrompt(text)
+        if (accepted) voiceCapture?.takeIf { it.id == id }?.outcome = VoiceRefineTelemetry.AUTO_SENT
         voiceEvent(VoiceSendFlow.Event.SendResult(id, accepted))
     }
 
@@ -8212,9 +8216,21 @@ class PocketRepository(
     private fun endVoiceCapture(id: String) {
         val capture = voiceCapture
         if (capture != null && capture.id != id) return
+        if (capture?.refineRequested == true) trackVoiceRefineOutcome(capture)
         resetVoiceHost()
         val v = voice.value
         if (v is VoiceState.Refining || v is VoiceState.Preview) clearVoice()
+    }
+
+    /** The one terminal `voice_refine` of a dictation that asked for a refine: what became of it, how many corrections
+     *  the answer carried, how long ✓ waited for it — buckets only ([VoiceRefineTelemetry]). */
+    private fun trackVoiceRefineOutcome(capture: VoiceCapture) {
+        val params = mutableMapOf<TelKey, Any>(TelKey.Outcome to (capture.outcome ?: VoiceRefineTelemetry.toComposer(null)))
+        capture.refinedEdits?.let { params[TelKey.Edits] = VoiceRefineTelemetry.editsBucket(it) }
+        val latency = if (capture.deadlineFired) VoiceRefineTelemetry.LATENCY_TIMEOUT
+        else capture.refinedAfterMs?.let(VoiceRefineTelemetry::latencyBucket)
+        latency?.let { params[TelKey.LatencyMs] = it }
+        Telemetry.track(TelEvent.VoiceRefine, params)
     }
 
     private fun resetVoiceHost() {
@@ -8258,6 +8274,7 @@ class PocketRepository(
         var refinedAfterMs: Long? = null  // ✓ → the daemon's answer
         var refinedEdits: Int? = null
         var deadlineFired = false
+        var outcome: String? = null       // [VoiceRefineTelemetry]'s name for how it ended
     }
 
     private fun pushLevel(l: Float) {

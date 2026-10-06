@@ -147,3 +147,16 @@ value_reached 目前由会话内容布局、提示输出实际可见、文件可
 | new_session_result | 从该弹层发出的任务结束时一条（`followNewTaskFromChat`）：首条提示送达，或打开 / 发送失败 | `target=header`，`result=delivered / open_refused / timeout / send_refused` | 手机 |
 
 取值都是固定枚举（`result` 的失败值即 `NewTaskError` 的小写名），不带项目路径、会话 ID 或提示内容。项目页悬浮按钮的 Fast Start 不上报这两条。
+
+## 9. 语音输入 v2：发送前校对（2026-10-06）
+
+设计见 [语音输入 v2 评审稿](../design/VOICE-INPUT-V2-REVIEW.md) 第 11 节。新增事件 `voice_refine` 与参数键 `outcome`、`edits`、`latency_ms`（已加入 `AnalyticsCatalog` 白名单）。只有用户选了「校对后发送」、并且这次口述真的向电脑请求了校对时才上报；「放入输入框」和不会发送的录音条不产生任何 `voice_refine`。
+
+| 参数 | 取值 | 含义 |
+|---|---|---|
+| `outcome` | `requested` | 发出校对请求时一条 |
+| | `auto_sent` / `to_composer_timeout` / `to_composer_not_adopted` / `to_composer_unavailable` / `to_composer_review` / `to_composer_disconnected` / `to_composer_not_sent` / `to_composer_edit` / `discarded` | 同一次口述结束时一条：自动发出；或落输入框（按原因行区分，`to_composer_edit` 为没有原因行的情形，例如用户点了「完成并编辑」、离开会话、退到后台、加了附件）；或被取消丢弃 |
+| `edits` | `0` / `1` / `2-3` / `4+` | 电脑成功返回时采用的替换条数；校对失败或没有回包时不带 |
+| `latency_ms` | `0-2999` / `3000-5999` / `6000-9999` / `10000+` / `timeout` | 从点「完成并发送」到收到回包；手机端 10 秒期限先到为 `timeout`；没有回包也没有超时（例如先点了编辑）时不带。Whisper 口述的转写在期限之前，所以回包可能超过 10 秒 |
+
+一次口述最多两条（`requested` 加一个结局），不带文字、录音或会话 ID、原始毫秒数和字数。`auto_sent` 是本地提交成功，不代表 daemon 已收到；送达沿用提示本身的 `prompt_response_result`。`edits` 只是采用的替换条数，不能当作纠错正确率。取值都在 ingress 允许的字符集内（不用 `<`）。

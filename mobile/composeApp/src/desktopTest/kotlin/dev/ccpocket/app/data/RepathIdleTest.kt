@@ -64,6 +64,10 @@ class RepathIdleTest {
     @Test fun voiceRecording() = busy("recording") { voice.value = VoiceState.Recording(0) }
     @Test fun voiceTranscribing() = busy("transcribing") { voice.value = VoiceState.Transcribing }
     @Test fun voiceUploading() = busy("voice upload") { voiceUploading.value = true }
+    // voice input v2: a dictation waiting for its refine, or showing its corrections before it is sent — the answer and
+    // the send belong to the current socket
+    @Test fun voiceRefining() = busy("refining") { voice.value = VoiceState.Refining("open the log", "claude") }
+    @Test fun voicePreview() = busy("preview") { voice.value = VoiceState.Preview("open the log", listOf(0 until 4)) }
     @Test fun historyPaging() = busy("history paging") { historyLoadingOlder.value = true }
     @Test fun fileViewLoading() = busy("file view") { viewedFilePath.value = "/x/a.kt" }
     @Test fun exportWaiting() = busy("export") {

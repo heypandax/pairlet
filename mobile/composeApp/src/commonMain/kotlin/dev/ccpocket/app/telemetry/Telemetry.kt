@@ -14,6 +14,10 @@ enum class TelEvent(val id: String) {
     ConnectionRecoveryResult("connection_recovery_result"),
     // #404 idle relay→direct re-path: Source = trigger, Result = outcome; both fixed enums, never an address
     TransportRepath("transport_repath"),
+    // voice input v2: one `requested` per dictation that asked the computer for a refine, then that dictation's
+    // Outcome (sent / landed in the composer, and why / discarded), with Edits and LatencyMs as fixed buckets.
+    // Never the text, the capture id or a raw number.
+    VoiceRefine("voice_refine"),
     ApprovalApplyResult("approval_apply_result"),
     FileViewResult("file_view_result"),
     BackgroundTaskResult("background_task_result"),
@@ -116,6 +120,11 @@ enum class TelKey(val id: String) {
     // the one categorical qualifier a Target sometimes needs (the OS a segment selected, the install
     // method a copy came from). Same rule: a fixed vocabulary, never free text.
     Value("value"),
+    // voice_refine (voice input v2): what became of a refined dictation, how many corrections it carried and how long
+    // ✓ waited for the computer's answer — each a fixed vocabulary or bucket, see VoiceRefineTelemetry
+    Outcome("outcome"),
+    Edits("edits"),
+    LatencyMs("latency_ms"),
     AnalyticsSchema("analytics_schema"),
     AppPlatform("app_platform"),
     Environment("app_environment"),
