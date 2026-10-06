@@ -85,7 +85,7 @@ class SidePaneModelDelegationGuardTest {
         // #345: the thinking tri-state rides with effort — a column shows no toggle and a pick
         // would land on the FOCUSED session's next launch
         "chatThinking", "supportsThinkingToggle", "switchThinking",
-        "sessionDegraded", "contextUsed", "contextWindow", "observing", "takeOver",
+        "sessionDegraded", "contextUsed", "contextWindow", "observing", "sessionObservation", "takeOver",
         // transcript paging: a column keeps no scrollback loader, so the focused pane's answer would put
         // another session's "load older" over this stream. (Delivery-receipt / stall cues graduated to
         // PANE_SCOPED once SidePane grew its own per-column watchdog — issue #329.)

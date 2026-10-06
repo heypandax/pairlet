@@ -337,6 +337,9 @@ internal const val SESSION_OPEN_RETRY_TIMEOUT_MS = 4_000L
  */
 enum class OpenFailure { LINK, COMPUTER }
 
+/** A failed read-only observation bind / unbind, tied to the session it was asked for ([PocketRepository.sessionObservationError]). */
+data class ObservationBindFailure(val sessionId: String, val error: dev.ccpocket.app.ui.session.ManagedSessionsError)
+
 sealed interface ChatItem {
     /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
      *  chunk / tool event / turn end). Stays true while the link is down so the UI can say so —
@@ -1087,9 +1090,11 @@ class PocketRepository(
     val daemonSessionObservation = mutableStateOf(false)
     /** The open chat's observation snapshot from its latest SessionLive (null = a plain session / observe, or an older daemon). */
     val sessionObservation = mutableStateOf<dev.ccpocket.protocol.SessionObservation?>(null)
-    /** Outcome of the last bind / unbind from the session-info sheet; cleared on the next attempt. */
+    /** A bind / unbind from the session-info sheet is in flight (one at a time). */
     val sessionObservationBusy = mutableStateOf(false)
-    val sessionObservationError = mutableStateOf<dev.ccpocket.app.ui.session.ManagedSessionsError?>(null)
+    /** Why the last bind / unbind failed, and for WHICH session: the info sheet is opened per row, so an outcome
+     *  without its session id would show under whichever session's sheet is opened next. Cleared on the next attempt. */
+    val sessionObservationError = mutableStateOf<ObservationBindFailure?>(null)
     /** DaemonInfo.managedAgents, parsed; empty unless [daemonManagedSessions]. */
     val daemonManagedAgents = mutableStateOf<Set<AgentKind>>(emptySet())
     /** The listed project's accepted managed list; null = none accepted (legacy rows are showing). */
@@ -2848,6 +2853,9 @@ class PocketRepository(
         // describe: kept, they rendered under the NEXT computer's first listing until its own Sessions replaced them.
         retireManaged()
         daemonManagedSessions.value = false; daemonManagedAgents.value = emptySet()
+        // …and so does the read-only observation capability, plus the last bind/unbind outcome: both describe the
+        // computer we just left (a pending request resolves as disconnected above and clears the busy flag itself)
+        daemonSessionObservation.value = false; sessionObservationBusy.value = false; sessionObservationError.value = null
         legacySessions = emptyList(); managedList.value = null; managedMissing.value = emptySet()
         sessionGroups.clear()
         // per-daemon truth: the allowance belongs to the ACCOUNT on the machine we just left. Showing it
@@ -8067,7 +8075,7 @@ class PocketRepository(
                     ManagedCallOutcome.Timeout -> dev.ccpocket.app.ui.session.ManagedSessionsError.UNCONFIRMED
                     ManagedCallOutcome.Unsupported -> dev.ccpocket.app.ui.session.ManagedSessionsError.UNSUPPORTED
                 }
-                sessionObservationError.value = error
+                sessionObservationError.value = error?.let { ObservationBindFailure(sessionId, it) }
                 if (error == null) {
                     // the list is re-read now; an open observe view re-reads the binding itself (within ~8 s) and
                     // re-announces, so its bar flips to read-only / back without reopening. A bound session can

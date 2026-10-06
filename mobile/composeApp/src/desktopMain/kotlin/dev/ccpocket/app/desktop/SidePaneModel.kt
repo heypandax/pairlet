@@ -83,6 +83,8 @@ class SidePaneModel(
     override val contextUsed: Long? get() = null
     override val contextWindow: Long? get() = null
     override val observing: Boolean get() = false
+    // inert with [observing]: delegating would hand a split column the FOCUSED conversation's read-only snapshot
+    override val sessionObservation: dev.ccpocket.protocol.SessionObservation? get() = null
     override val selectedSessionId: String get() = pane.sessionId
 
     /** The approval — or question — THIS session raised. Same frame the bell popover shows for approvals,

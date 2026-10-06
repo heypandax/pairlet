@@ -367,7 +367,8 @@ private fun SessionObservationSection(repo: PocketRepository) {
                     if (!busy) repo.setSessionObservation(workdir, agent, sid, if (binding != null) null else dev.ccpocket.protocol.ObservationBinding())
                 },
             )
-            repo.sessionObservationError.value?.let { err ->
+            // only the failure that belongs to THIS session: the sheet is per row, the outcome is repository-wide
+            repo.sessionObservationError.value?.takeIf { it.sessionId == sid }?.error?.let { err ->
                 Text(
                     stringResource(Res.string.session_observation_failed) + " · " + stringResource(err.messageRes()),
                     color = Tok.danger, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
