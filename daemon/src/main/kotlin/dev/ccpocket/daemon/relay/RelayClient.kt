@@ -219,7 +219,7 @@ class RelayClient(
         }
         // Permission-ask pushes (bridge #91 / owner #138). Same gate as turn ends since 2026-10 (issue #382
         // applied to asks): prefs.pushEnabled is the ONLY switch. Presence — a client attached to the
-        // conversation (`watched`), peerOnline, a LAN-attached desktop App — no longer suppresses: the desktop
+        // conversation (`watched`), a relay peer being online, a LAN-attached desktop App — no longer suppresses: the desktop
         // App is attached around the clock, and under the old gate an owner ask never reached a locked phone.
         // The push goes out urgent so the relay's interactive-device check lets it through too; a phone showing
         // that very session in the foreground hides the banner itself. `watched` still rides the hook for the
