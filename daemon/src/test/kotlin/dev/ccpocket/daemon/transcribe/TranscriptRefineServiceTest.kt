@@ -125,6 +125,23 @@ class TranscriptRefineServiceTest {
     }
 
     @Test
+    fun a_fragment_found_only_in_the_glossary_line_is_invalid() = runTest {
+        // the model sees the glossary next to the transcript; the check runs against the transcript alone
+        glossary = GLOSSARY + "zz-only-in-the-glossary"
+        assertTrue(RefineContract.userMessage(TEXT, glossary).contains("zz-only-in-the-glossary"))
+        for (from in listOf("zz-only-in-the-glossary", "Claude, proj", "<transcript>")) {
+            claude.behavior = { RefineOutcome.Edits(listOf(TextEdit(from, "x"))) }
+            val s = service(); val inbox = Inbox()
+            val log = captureStderr {
+                s.onRefine(req(), inbox)
+                runCurrent()
+            }
+            assertEquals(TranscriptRefineError.INVALID, inbox.only().error, from)
+            assertTrue(log.contains("rule=not_found"), from)
+        }
+    }
+
+    @Test
     fun refiner_failures_map_to_their_codes() = runTest {
         val s = service()
         val cases = listOf(
@@ -360,6 +377,18 @@ class TranscriptRefineServiceTest {
         for (secret in listOf("cloud code", "Claude Code", "守护进程", "用功", "effort", "不存在的片段", "替换")) {
             assertFalse(log.contains(secret), "the log leaked '$secret'")
         }
+    }
+
+    private inline fun captureStderr(block: () -> Unit): String {
+        val captured = ByteArrayOutputStream()
+        val original = System.err
+        System.setErr(PrintStream(captured, true, Charsets.UTF_8))
+        try {
+            block()
+        } finally {
+            System.setErr(original)
+        }
+        return captured.toString(Charsets.UTF_8)
     }
 
     private companion object {
