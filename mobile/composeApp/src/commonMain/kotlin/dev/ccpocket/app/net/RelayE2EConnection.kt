@@ -207,7 +207,7 @@ class RelayE2EConnection {
                 // every silence rebuild doubles the next window, up to a ceiling, until five minutes pass
                 // without one: strikes outlive reconnects and are NOT forgiven by a decrypt, for the same
                 // DaemonInfo reason. Benignly racy across the writer/reader coroutines (see SilenceWatchdog).
-                val silence = silenceWatch.linkUp(epochMillis()) { gen == connSeq } // the completed handshake IS inbound proof
+                val silence = silenceWatch.linkUp(epochMillis(), to = paired.accountId) { gen == connSeq } // the completed handshake IS inbound proof
                 liveGen = gen
                 val writer = launch {
                     // superseded mid-drain: an ordinary frame goes back to the live connection instead of down this

@@ -217,4 +217,30 @@ class SilenceWatchdogTest {
         assertFalse(stale.onSent(2 * base))
         assertEquals(0, watch.strikesAt(2 * base))
     }
+
+    // The connection object outlives a machine switch. Strikes are evidence about ONE computer's path, so a link
+    // to another computer starts without them; a rebuilt link to the same computer keeps them.
+    @Test
+    fun strikesBelongToTheComputerTheyWereEarnedOn() {
+        val watch = SilenceWatchdog()
+        val first = watch.linkUp(0L, to = "computer-a")
+        val tripped = assertNotNull(first.sendUntilTrip(from = 1_000L, until = 200_000L), "a silent link trips")
+        assertEquals(1, watch.strikesAt(tripped))
+
+        // rebuilt to the SAME computer: the strike stands and widens the next window
+        val rebuilt = watch.linkUp(tripped + 1_000L, to = "computer-a")
+        assertEquals(1, watch.strikesAt(tripped + 1_000L))
+        assertEquals(silenceWindowMs(strikes = 1, linkAgeMs = 0L), rebuilt.windowMs(tripped + 1_000L))
+
+        // switched to ANOTHER computer: nothing earned there yet, so its link starts from the plain young-link window
+        val other = watch.linkUp(tripped + 2_000L, to = "computer-b")
+        assertEquals(0, watch.strikesAt(tripped + 2_000L))
+        assertEquals(silenceWindowMs(strikes = 0, linkAgeMs = 0L), other.windowMs(tripped + 2_000L))
+
+        // a caller that does not name the computer leaves the memory alone
+        val trippedAgain = assertNotNull(other.sendUntilTrip(from = tripped + 3_000L, until = tripped + 400_000L))
+        watch.linkUp(trippedAgain + 1_000L)
+        assertEquals(1, watch.strikesAt(trippedAgain + 1_000L))
+    }
+
 }

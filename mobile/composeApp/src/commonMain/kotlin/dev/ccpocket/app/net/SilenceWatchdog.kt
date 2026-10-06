@@ -25,6 +25,7 @@ import kotlin.concurrent.Volatile // commonMain: JVM resolves kotlin.jvm.Volatil
 internal class SilenceWatchdog {
     @Volatile private var strikes = 0
     @Volatile private var lastTripAt = 0L
+    @Volatile private var target: Any? = null
 
     /** The silence trips still remembered at [now]: all of them until [RelayE2EConnection.SILENCE_STRIKE_MEMORY_MS]
      *  have passed since the last one, none after. */
@@ -32,8 +33,19 @@ internal class SilenceWatchdog {
         if (strikes > 0 && now - lastTripAt >= RelayE2EConnection.SILENCE_STRIKE_MEMORY_MS) 0 else strikes
 
     /** A handshake completed at [now]: the new link's age and its silence clock both start there, because the
-     *  completed handshake IS inbound proof. [isCurrent] says whether that link still owns the connection (#142). */
-    fun linkUp(now: Long, isCurrent: () -> Boolean = { true }): Link = Link(now, isCurrent)
+     *  completed handshake IS inbound proof. [isCurrent] says whether that link still owns the connection (#142).
+     *
+     *  [to] names the computer this link reaches. The strikes are evidence about ONE computer's path — "rebuilding
+     *  did not help HERE" — so a link to a different computer starts without them: the connection object outlives
+     *  a machine switch, and a slow link to the computer just left must not buy the next one minutes of patience
+     *  it has not earned (a zombie there would go unnoticed for up to the widest window). Null = not told, keep. */
+    fun linkUp(now: Long, to: Any? = null, isCurrent: () -> Boolean = { true }): Link {
+        if (to != null && to != target) {
+            if (target != null) { strikes = 0; lastTripAt = 0L }
+            target = to
+        }
+        return Link(now, isCurrent)
+    }
 
     inner class Link internal constructor(private val upAt: Long, private val isCurrent: () -> Boolean) {
         @Volatile private var sentSinceInbound = 0
