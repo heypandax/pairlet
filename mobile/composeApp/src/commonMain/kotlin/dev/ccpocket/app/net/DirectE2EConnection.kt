@@ -275,8 +275,10 @@ class DirectUnreachableException(
 /** Why a direct attempt fell back to the relay (#403), reported through the existing CONNECTION/CONNECT
  *  diagnostic as its [ErrorCode] — no new ErrorPath, no address or identifier attached. */
 enum class DirectFallbackReason(val code: ErrorCode) {
-    /** Refused, DNS, TLS, abrupt close, superseded — the socket never carried a handshake. */
-    REFUSED(ErrorCode.UNAVAILABLE),
+    /** Refused, DNS, TLS, abrupt close, superseded — the socket never carried a handshake. Keeps the code this
+     *  case has always reported (`fallback_used`): existing queries on it must not go quiet because the three
+     *  cases below, which were never reported before, now have codes of their own. */
+    REFUSED(ErrorCode.FALLBACK_USED),
     /** [DirectE2EConnection.DIRECT_ESTABLISH_BUDGET_MS] ran out (black hole, wedged upgrade). */
     BUDGET_EXPIRED(ErrorCode.TIMEOUT),
     /** The socket came up but the handshake/key confirmation didn't finish in time. */
