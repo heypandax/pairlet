@@ -112,6 +112,13 @@ internal fun NewTaskSheet(
     dirs: List<DirectoryEntry>,
     onBrowseOther: () -> Unit,
     onDismiss: () -> Unit,
+    /** A calm line for the status slot when nothing louder needs it: same slot and type as a failure, in
+     *  secondary ink. The chat header's "+" uses it to say the conversation being left keeps running; the
+     *  Projects FAB leaves nothing behind, so it passes none and its sheet is unchanged. */
+    quietStatus: String? = null,
+    /** A send was accepted (a session is opening) and the sheet is about to close. The chat header's "+" follows
+     *  that open to its end; the Projects FAB doesn't need to — it is already where a failed open lands. */
+    onStarted: () -> Unit = {},
 ) {
     val recents = remember(dirs) { recentProjects(dirs) }
     // Prefill, resolved every recomposition rather than latched: the chips hold a USER pick (nullable), so
@@ -130,7 +137,7 @@ internal fun NewTaskSheet(
             // conversation" true without a navigation call: the root router renders the chat the moment
             // convoId lands, and this sheet is already out of the way. A failure re-opens it (the caller
             // watches newTaskError) with the draft and both chip picks exactly as they were.
-            if (repo.startTaskWithPrompt(dir, text, agent)) onDismiss()
+            if (repo.startTaskWithPrompt(dir, text, agent)) { onStarted(); onDismiss() }
         }
     }
 
@@ -198,6 +205,8 @@ internal fun NewTaskSheet(
                 repo.newTaskError.value == PocketRepository.NewTaskError.SEND_REFUSED ->
                     Tok.danger to stringResource(Res.string.new_task_send_failed)
                 repo.newTaskError.value != null -> Tok.danger to stringResource(Res.string.new_task_failed)
+                // last: a reassurance must never sit where a failure, or the opening it is waiting on, needs the line
+                quietStatus != null -> Tok.tx2 to quietStatus
                 else -> null
             }
             status?.let { (color, text) ->

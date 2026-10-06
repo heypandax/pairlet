@@ -6,14 +6,17 @@ import kotlin.time.TimeSource
 enum class ProductResult { SUCCESS, FAILURE, TIMEOUT, CANCELLED, UNKNOWN, WAITING }
 enum class Coverage { COMPLETE, PARTIAL, UNKNOWN }
 /** `feature` values of feature_exposed / feature_used (sent as `name.lowercase()`). The first five are the core
- *  features with exposure denominators and value/outcome events. The rest (second batch, 2026-10-04) are
+ *  features with exposure denominators and value/outcome events. The second batch (2026-10-04) are
  *  keep-or-remove candidates: usage only — feature_used at the one point that shows the feature was really
- *  used, no exposure denominator, never a parameter beyond the shared enum dimensions. */
+ *  used, no exposure denominator, never a parameter beyond the shared enum dimensions. The chat header's "+"
+ *  (new session from a chat, 2026-10-05) is the one exception: its entry adds `target`, its result `target` +
+ *  `result` — both fixed vocabularies (`header`; `delivered` or a NewTaskError name), never a path or text. */
 enum class ProductFeature {
     SESSION_VIEW, PROMPT_TASK, APPROVAL, FILE_VIEW, BACKGROUND_TASK,
     WORKFLOW_RUN, VOICE_MEMO,
     GIT_PANEL, WORKTREE, SESSION_REWIND, SESSION_FORK, SKILL_BROWSE, SPLIT_PANE, EMBEDDED_TERMINAL,
     HTML_PREVIEW, BRIDGE_ADMIN,
+    NEW_SESSION_ENTRY, NEW_SESSION_RESULT,
 }
 
 /** Business denominators are independent of Sentry sampling/admission. One instance per user operation.

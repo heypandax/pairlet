@@ -246,6 +246,7 @@ import dev.ccpocket.protocol.GroupDelete
 import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.app.isPreviewMode
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.memo_new_session_offline
 import dev.ccpocket.app.resources.preview_cmd_title
 import dev.ccpocket.app.resources.preview_cmd_note
 import dev.ccpocket.app.resources.status_conn_lost
@@ -322,6 +323,12 @@ internal const val SESSION_OPEN_TIMEOUT_MS = 8_000L
  *  been replayed, so this is only about not making a genuinely wedged open cost 16s of spinner before it
  *  admits it. */
 internal const val SESSION_OPEN_RETRY_TIMEOUT_MS = 4_000L
+
+/** How long the composer's notice explains a greyed-out "+" in the chat header ([PocketRepository.noteNewSessionUnavailable]). */
+internal const val NEW_SESSION_NOTICE_MS = 4_000L
+
+/** `target` of new_session_entry / new_session_result: the chat header's "+" — the one entry that reports them. */
+internal const val NEW_SESSION_FROM_HEADER = "header"
 
 /**
  * Why an open gave up (issue #340) — the two worlds one blind 8s deadline could not tell apart.
@@ -1412,7 +1419,9 @@ class PocketRepository(
     private val promptOutcomes = PromptOutcomeTracker(scope, { appIsForeground.value }, { promptTurnTimeoutMs })
     private val backgroundOutcomes = BackgroundOutcomeTracker()
     fun exposeFeature(feature: ProductFeature) = ProductFeatures.expose(feature, productDimensions())
-    fun useFeature(feature: ProductFeature) = ProductFeatures.used(feature, productDimensions())
+    /** [extra]: a fixed-vocabulary qualifier only ([TelKey.Target] / [TelKey.Result]) — never a path, id or text. */
+    fun useFeature(feature: ProductFeature, extra: Map<TelKey, Any> = emptyMap()) =
+        ProductFeatures.used(feature, productDimensions() + extra)
     private var daemonDiagnostics = false
     private var openObservation: SessionOpenObservation? = null
     private var historyDiagnosticDeadline: Job? = null
@@ -4733,6 +4742,37 @@ class PocketRepository(
         return true
     }
 
+    /**
+     * A Fast Start sent from INSIDE a chat — the chat header's "+": [startTaskWithPrompt] accepted it and the sheet
+     * is closing. Three things the Projects FAB never needed, because it is not a chat:
+     *
+     *  - Hold the chat on screen across the open, as [switchToSession] does (#165). The open nulls convoId while
+     *    it waits and the router drops a chat with no conversation, so without the hold the user bounced onto a
+     *    list for the length of the open — and a refused send after landing found no chat left to hand the draft
+     *    back on. Only while the open is really in flight: every path that ends one ([opening]) releases it.
+     *  - Once the prompt is DELIVERED, point BACK at the landed session's project ([pointBackAtSessions]), so
+     *    backing out of the new chat lands where it lives rather than in the project it was started from. Not
+     *    before: a failed open leaves the back stack exactly as it was, not on a list the user never visited.
+     *  - Report new_session_result — `delivered`, or the [NewTaskError] that ended it.
+     *
+     * Settled on this repository's scope, not the caller's: the chat that sent the task may be gone by then (a
+     * failed open releases the hold and the router removes it). [onDelivered] runs only for a delivered prompt.
+     */
+    fun followNewTaskFromChat(onDelivered: () -> Unit = {}) {
+        if (opening.value) switchingSession.value = true
+        scope.launch {
+            // the flag startTaskWithPrompt publishes LAST, so the outcome is already readable when it drops
+            snapshotFlow { newTaskStarting.value }.first { !it }
+            val failure = newTaskError.value
+            if (failure == null) workdir.value?.let(::pointBackAtSessions)
+            useFeature(
+                ProductFeature.NEW_SESSION_RESULT,
+                mapOf(TelKey.Target to NEW_SESSION_FROM_HEADER, TelKey.Result to (failure?.name?.lowercase() ?: "delivered")),
+            )
+            if (failure == null) onDelivered()
+        }
+    }
+
     /** App / daemon / newest-release versions (issue #200), refreshed from every [DaemonInfo]. Starts as
      *  "only our own version known"; a daemon too old to report leaves the other fields null, which reads
      *  as "unknown" everywhere rather than as "up to date". */
@@ -7284,13 +7324,21 @@ class PocketRepository(
         while (voiceLevels.size > LEVEL_WINDOW) voiceLevels.removeAt(0)
     }
 
-    private fun showNotice(msg: StringResource) {
+    private fun showNotice(msg: StringResource, holdMs: Long = 2500) {
         voiceNotice.value = msg
         noticeJob?.cancel()
-        noticeJob = scope.launch { delay(2500); voiceNotice.value = null }
+        noticeJob = scope.launch { delay(holdMs); voiceNotice.value = null }
     }
 
     private fun clearNotice() { noticeJob?.cancel(); voiceNotice.value = null }
+
+    /**
+     * The chat header's "+" was tapped while the computer can't be reached. Answered in the composer's own
+     * transient line — the slot "didn't catch any speech" already uses — rather than with a dialog or a second
+     * banner over a chat that is otherwise fine. Held longer than the voice notice: it explains a control the
+     * user just found greyed out, and has to outlast the glance from the header down to the composer.
+     */
+    fun noteNewSessionUnavailable() = showNotice(Res.string.memo_new_session_offline, holdMs = NEW_SESSION_NOTICE_MS)
 
     /** Reset all composer voice state (keeps [preferRemote] — it describes the device, not the session). */
     private fun clearVoice() {
@@ -7743,14 +7791,21 @@ class PocketRepository(
         // Preserve an existing hold on a duplicate tap: after the first open worker runs, convoId is null,
         // but the original in-flight transition still owns the chat route until it lands/fails/times out.
         switchingSession.value = switchingSession.value || convoId.value != null
-        sessionsDir.value = item.dirKey
-        legacySessions = emptyList() // #360: the previous project's daemon rows must not be merged under this one
-        listSessions(item.dirKey) // freshen that project's list so the back trip doesn't show the old one's
+        pointBackAtSessions(item.dirKey)
         // Optimistic touch so the sheet re-orders under the tap. The daemon's SessionLive re-touches with
         // the authoritative id right after (a fork or lock-heal can hand back a different one), so a
         // wrong guess self-corrects instead of sticking in the MRU.
         rememberOpenedSession(item.dirKey, item.sessionId, item.title, item.agent, markSeen = false)
         openSession(item.dirKey, item.sessionId, title = item.title, agent = item.agent)
+    }
+
+    /** Point the chat's BACK at [dirKey]'s session list — the list a session reached without passing through
+     *  it returns to. Shared by [switchToSession] and [followNewTaskFromChat]: one meaning of "this chat now
+     *  lives in that project". */
+    private fun pointBackAtSessions(dirKey: String) {
+        sessionsDir.value = dirKey
+        legacySessions = emptyList() // #360: the previous project's daemon rows must not be merged under this one
+        listSessions(dirKey) // freshen that project's list so the back trip doesn't show the old one's
     }
 
     /** Leaving the chat or losing the connection invalidates any in-flight capture. */
