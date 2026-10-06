@@ -259,6 +259,9 @@ class SessionStateUiTest {
             listOf(
                 SurfaceState.APPROVAL, SurfaceState.ANSWER, SurfaceState.FAILURE,
                 SurfaceState.RUNNING, SurfaceState.NEW_RESULT, SurfaceState.COMPLETE,
+                // read-only observed members only (docs/design/DOTS-SESSION-OBSERVABILITY.md): appended, so the
+                // relative order of the original ladder is exactly what it was
+                SurfaceState.WAITING_EXTERNAL, SurfaceState.UNKNOWN,
             ),
             SurfaceState.entries.toList(),
         )

@@ -350,6 +350,22 @@ class SessionRegistry(
      *  alike — the Conversation's SessionInit choke point), read at report time. Null = managed list not wired. */
     @Volatile var managedSessions: NativeSessionHook? = null
 
+    /**
+     * Read-only observation policy (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.3): the PERSISTED binding of
+     * (agent, workdir, sessionId), consulted before any control path — plain open, take-over, rename. Null =
+     * no managed store wired (nothing is bound). An [ObservationLookup.Unavailable] answer (corrupt / unreadable
+     * store) refuses control: a policy this build cannot read never degrades to "writable".
+     */
+    @Volatile var observationPolicy: ((agent: AgentKind, workdir: String, sessionId: String) -> dev.ccpocket.daemon.disk.ObservationLookup)? = null
+
+    /** Why a session may not be controlled right now, or null when it may. Evaluated per request, never cached. */
+    private fun controlRefusal(agent: AgentKind, workdir: String, sessionId: String): String? =
+        when (val lookup = observationPolicy?.invoke(agent, workdir, sessionId) ?: dev.ccpocket.daemon.disk.ObservationLookup.Unbound) {
+            dev.ccpocket.daemon.disk.ObservationLookup.Unbound -> null
+            is dev.ccpocket.daemon.disk.ObservationLookup.Bound -> if (lookup.binding.readOnly) "this session is observed read-only (bound to an outside task); act on it in its own app" else null
+            is dev.ccpocket.daemon.disk.ObservationLookup.Unavailable -> "the managed-session store cannot be read (${lookup.reason}); control is refused until it is repaired"
+        }
+
     /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is
      *  emitted). [origin] names the restricted credential that opened it (issue #91 bridge / #115 guest);
      *  null = interactive. [pathScope] (issue #115) is a GUEST's shared roots — the conversation's
@@ -382,6 +398,9 @@ class SessionRegistry(
         // #367 LOW-3: how an approval from this conversation is announced to the OWNER (see
         // [dev.ccpocket.daemon.conversation.Conversation.askOriginLabel]). Only a remote run sets it.
         askOriginLabel: String? = null,
+        // read-only observation: the peer declared ClientCaps.supportsSessionObservationV1, so a read-only view
+        // announces its binding + progress snapshot (an undeclared peer gets `observing` + notice only)
+        peerSupportsObservation: Boolean = false,
     ): String {
         // S8: whatever this open claims (the resume id's cold open) is released however it ends
         val openClaim = OpenClaim()
@@ -389,7 +408,7 @@ class SessionRegistry(
             return openClaimed(
                 openClaim, open, sink, origin, pathScope, peerSupportsOpencode, peerSupportsKimi, peerSupportsZcode,
                 peerSupportsDsh, bridgeAllowedCommands, bridgeContextPreamble, ownerBypass, headless,
-                announcedWorkdir, askOriginLabel,
+                announcedWorkdir, askOriginLabel, peerSupportsObservation,
             )
         } finally {
             val resume = open.resumeId
@@ -419,6 +438,7 @@ class SessionRegistry(
         headless: Boolean,
         announcedWorkdir: String?,
         askOriginLabel: String?,
+        peerSupportsObservation: Boolean = false,
     ): String {
         val resume = open.resumeId
         // A resume id is the durable backend identity. Older Apps did not send `agent`, and a newer App
@@ -429,6 +449,58 @@ class SessionRegistry(
         val effectiveAgent = resume?.let { resolveResumeAgent(open.agent, open.workdir, it) } ?: open.agent
         if (effectiveAgent != open.agent) {
             log.info("open ${resume?.take(8)}…: corrected stale agent ${open.agent} → $effectiveAgent from transcript")
+        }
+        // Read-only observation (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.3) comes BEFORE reattach, writer
+        // probing, resume/fork and any launch: a persisted read-only binding, or the caller's own `observeOnly`,
+        // yields an independent observe subscription on the EXISTING native record — even when this daemon drives
+        // the same session (that conversation is untouched and this client gets no handle on it) — and nothing
+        // else. A take-over of a bound session is refused outright; a store this build cannot read refuses too.
+        if (resume != null) {
+            val lookup = observationPolicy?.invoke(effectiveAgent, open.workdir, resume) ?: dev.ccpocket.daemon.disk.ObservationLookup.Unbound
+            if (lookup is dev.ccpocket.daemon.disk.ObservationLookup.Unavailable) {
+                log.info("open ${resume.take(8)}… → refused: observation policy unreadable (${lookup.reason})")
+                sink.emit(PocketError(dev.ccpocket.protocol.ObservationErrors.READ_ONLY, controlRefusal(effectiveAgent, open.workdir, resume) ?: "managed store unreadable"))
+                return ""
+            }
+            val binding = (lookup as? dev.ccpocket.daemon.disk.ObservationLookup.Bound)?.binding
+            val readOnly = open.observeOnly || binding?.readOnly == true
+            if (readOnly) {
+                if (open.takeOver && binding?.readOnly == true) {
+                    log.info("open ${resume.take(8)}… → refused: take-over of a read-only bound session")
+                    sink.emit(PocketError(dev.ccpocket.protocol.ObservationErrors.READ_ONLY, controlRefusal(effectiveAgent, open.workdir, resume) ?: "read-only"))
+                    return ""
+                }
+                if (origin != null) {
+                    // a bridge / headless adapter has no read-only rendering and no prompt path here
+                    sink.emit(PocketError(dev.ccpocket.protocol.ObservationErrors.READ_ONLY, "session is observed read-only; not available to a bridge"))
+                    return ""
+                }
+                val file = transcriptResolver(effectiveAgent, open.workdir, resume)
+                if (file == null || !file.exists()) {
+                    log.info("open ${resume.take(8)}… → refused: observe-only but no readable native record")
+                    sink.emit(PocketError(dev.ccpocket.protocol.ObservationErrors.OBSERVE_UNAVAILABLE, "no readable record for this session on this computer — nothing was created"))
+                    return ""
+                }
+                val stale = mutex.withLock {
+                    val dead = observes.filterValues { it.sessionId == resume && it.isAttachedTo(sink) }
+                    dead.keys.forEach(observes::remove)
+                    dead.values.toList()
+                }
+                stale.forEach { o ->
+                    log.info("open ${resume.take(8)}… → reap stale observer ${o.convoId.take(8)}… (same client re-open)")
+                    runCatching { o.close() }
+                }
+                val convoId = UUID.randomUUID().toString()
+                log.info("open ${resume.take(8)}… → OBSERVE ${convoId.take(8)}… (read-only${if (binding != null) ", bound" else ", observeOnly"})")
+                val obs = ObserveSession(
+                    convoId, open.workdir, resume, file, sink, scope,
+                    agent = effectiveAgent, sinceSeq = open.lastEventSeq,
+                    readOnly = true, binding = binding, observationCapable = peerSupportsObservation,
+                )
+                mutex.withLock { observes[convoId] = obs }
+                obs.start()
+                return convoId
+            }
         }
         if (resume != null) {
             // re-attach to a session the daemon is already running (a cc-pocket background session).
@@ -514,7 +586,7 @@ class SessionRegistry(
                     is OpenStep.Live -> return openClaimed(
                         openClaim, open, sink, origin, pathScope, peerSupportsOpencode, peerSupportsKimi, peerSupportsZcode,
                         peerSupportsDsh, bridgeAllowedCommands, bridgeContextPreamble, ownerBypass,
-                        headless, announcedWorkdir, askOriginLabel,
+                        headless, announcedWorkdir, askOriginLabel, peerSupportsObservation,
                     )
                     is OpenStep.Claimed -> openClaim.done = step.done
                 }
@@ -554,6 +626,7 @@ class SessionRegistry(
                     val obs = ObserveSession(
                         convoId, open.workdir, resume, file!!, sink, scope,
                         agent = effectiveAgent, sinceSeq = open.lastEventSeq,
+                        observationCapable = peerSupportsObservation,
                     )
                     mutex.withLock { observes[convoId] = obs }
                     obs.start()
@@ -1201,6 +1274,8 @@ class SessionRegistry(
     suspend fun renameSession(workdir: String, sessionId: String, title: String): String? {
         val t = title.trim()
         if (t.isEmpty()) return "title must not be empty"
+        // a read-only bound session is renamed in its own app; same policy input as open/take-over
+        for (agent in listOf(AgentKind.CLAUDE, AgentKind.CODEX)) controlRefusal(agent, workdir, sessionId)?.let { return it }
         // Pre-first-turn the agent hasn't reported a sessionId yet — match the resume anchor too (the
         // same identity [open] reattaches by above): a spawned-but-not-yet-init conversation already
         // holds the transcript, and a sessionId-only miss here read it as "idle disk" and appended

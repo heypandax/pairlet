@@ -20,6 +20,10 @@ import dev.ccpocket.protocol.DiscoveredSessions
 import dev.ccpocket.protocol.EnableManagedSessions
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.ImportSession
+import dev.ccpocket.protocol.ObservedProgress
+import dev.ccpocket.protocol.SessionObservation
+import dev.ccpocket.protocol.SetSessionObservation
+import dev.ccpocket.protocol.isValidObservationBinding
 import dev.ccpocket.protocol.ListManagedSessions
 import dev.ccpocket.protocol.MANAGED_CURSOR_MAX_CHARS
 import dev.ccpocket.protocol.MANAGED_DISCOVER_MAX_PAGES
@@ -138,6 +142,11 @@ class ManagedSessionService internal constructor(
     private val groupOf: (String, String) -> String? = { w, s -> SessionGroups.groupOf(w, s) },
     private val archivedIds: (String) -> Set<String> = { emptySet() },
     private val busyIds: suspend () -> Set<String> = { emptySet() },
+    /** Is [sessionId] driven by a controllable conversation of this daemon right now? A binding is refused while
+     *  it is (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.2): the running driver is never demoted. */
+    private val liveSession: suspend (sessionId: String) -> Boolean = { false },
+    /** The latest proven turn progress of a bound member (agent, native id), or null when none can be derived. */
+    private val progressOf: (AgentKind, String) -> ObservedProgress? = { _, _ -> null },
     private val clock: () -> Long = System::currentTimeMillis,
     private val deliveryTimeoutMs: Long = DELIVERY_TIMEOUT_MS,
     private val frameBudgetBytes: Int = MANAGED_FRAME_BUDGET_BYTES,
@@ -221,6 +230,7 @@ class ManagedSessionService internal constructor(
             is DiscoverSessions -> frame.requestId
             is ImportSession -> frame.requestId
             is RemoveManagedSession -> frame.requestId
+            is SetSessionObservation -> frame.requestId
             else -> return
         }
         if (!isValidManagedId(requestId)) { log.warn("managed request with a malformed requestId dropped"); return }
@@ -268,6 +278,7 @@ class ManagedSessionService internal constructor(
                         is EnableManagedSessions -> frame.workdir to frame.agent
                         is ImportSession -> frame.workdir to frame.agent
                         is RemoveManagedSession -> frame.workdir to frame.agent
+                        is SetSessionObservation -> frame.workdir to frame.agent
                         else -> return
                     }
                     scope.launch { reply(refusal(requestId, wd, Scope(agent, false), ManagedSessionErrors.STORE_UNAVAILABLE, message = "too many pending changes; retry")) }
@@ -313,8 +324,16 @@ class ManagedSessionService internal constructor(
                 if (!isValidManagedWorkdir(frame.workdir)) return@withLock refusal(frame.requestId, frame.workdir, Scope(frame.agent, false), ManagedSessionErrors.INVALID_WORKDIR) to null
                 val agent = frame.agent ?: return@withLock invalidAgent(frame.requestId, frame.workdir) to null
                 preflight(frame.requestId, frame.workdir, Scope(agent, false), frame.sessionId)?.let { return@withLock it to null }
+                observationRefusal(frame.requestId, frame.workdir, agent, frame.sessionId, frame.observation)?.let { return@withLock it to null }
                 val s = scanOf(validateWorkdir(frame.workdir)!!, agent)
-                finish(frame.requestId, frame.workdir, agent, frame.sessionId, s, store.import(frame.workdir, agent, frame.sessionId, s))
+                finish(frame.requestId, frame.workdir, agent, frame.sessionId, s, store.import(frame.workdir, agent, frame.sessionId, s, frame.observation))
+            }
+            is SetSessionObservation -> {
+                if (!isValidManagedWorkdir(frame.workdir)) return@withLock refusal(frame.requestId, frame.workdir, Scope(frame.agent, false), ManagedSessionErrors.INVALID_WORKDIR) to null
+                val agent = frame.agent ?: return@withLock invalidAgent(frame.requestId, frame.workdir) to null
+                preflight(frame.requestId, frame.workdir, Scope(agent, false), frame.sessionId)?.let { return@withLock it to null }
+                observationRefusal(frame.requestId, frame.workdir, agent, frame.sessionId, frame.binding)?.let { return@withLock it to null }
+                finish(frame.requestId, frame.workdir, agent, frame.sessionId, null, store.setObservation(frame.workdir, agent, frame.sessionId, frame.binding))
             }
             is RemoveManagedSession -> {
                 if (!isValidManagedWorkdir(frame.workdir)) return@withLock refusal(frame.requestId, frame.workdir, Scope(frame.agent, false), ManagedSessionErrors.INVALID_WORKDIR) to null
@@ -328,6 +347,21 @@ class ManagedSessionService internal constructor(
 
     private fun invalidAgent(requestId: String, workdir: String) =
         refusal(requestId, workdir, Scope(null, false), ManagedSessionErrors.INVALID_REQUEST, message = "missing or unknown agent")
+
+    /** Why a (new) binding on [sessionId] is refused before the store is touched: structurally invalid, or this daemon
+     *  currently drives the session (the conversation stays as it is — nothing is interrupted or demoted). */
+    private suspend fun observationRefusal(
+        requestId: String, workdir: String, agent: AgentKind, sessionId: String, binding: dev.ccpocket.protocol.ObservationBinding?,
+    ): ManagedSessionsState? {
+        if (binding == null) return null
+        if (!isValidObservationBinding(binding)) {
+            return refusal(requestId, workdir, Scope(agent, false), ManagedSessionErrors.OBSERVATION_INVALID, message = "binding is not a valid user-assigned read-only binding").copy(sessionId = sessionId)
+        }
+        if (runCatching { liveSession(sessionId) }.getOrDefault(false)) {
+            return refusal(requestId, workdir, Scope(agent, false), ManagedSessionErrors.OBSERVATION_CONFLICT, message = "this computer is driving the session right now; close that conversation first").copy(sessionId = sessionId)
+        }
+        return null
+    }
 
     private suspend fun finish(
         requestId: String, workdir: String, agent: AgentKind, sessionId: String?, scanned: SessionScan?, out: ManagedMutation,
@@ -473,6 +507,10 @@ class ManagedSessionService internal constructor(
     private fun entryOf(m: ManagedMember, s: SessionScan, row: SessionSummary?, scanWd: String, busy: Set<String>, ambiguous: Boolean): ManagedSessionEntry {
         val sid = m.key.nativeSessionId
         val group = runCatching { groupOf(scanWd, sid) }.getOrNull()
+        // the snapshot is derived ONLY for a bound member: an unbound row keeps today's shape exactly
+        val observation = m.observation?.let { b ->
+            SessionObservation(binding = b, readOnly = b.readOnly, progress = if (row != null) runCatching { progressOf(m.key.agent, sid) }.getOrNull() else null)
+        }
         return ManagedSessionEntry(
             sessionId = sid,
             agent = m.key.agent,
@@ -483,11 +521,12 @@ class ManagedSessionService internal constructor(
                 s.isComplete -> ManagedAvailability.MISSING
                 else -> ManagedAvailability.UNKNOWN
             },
-            summary = row?.let { boundedSummary(it, m.key.agent, group, it.busy || sid in busy) },
+            summary = row?.let { boundedSummary(it, m.key.agent, group, it.busy || sid in busy).copy(observation = observation) },
             lastKnownTitle = if (row == null) m.lastKnownSummary?.title?.let { truncateUtf8(it, MANAGED_TITLE_MAX_BYTES) } else null,
             lastKnownModified = if (row == null) m.lastKnownSummary?.lastModified else null,
             group = group,
             groupAmbiguous = ambiguous,
+            observation = observation,
         )
     }
 
@@ -676,6 +715,8 @@ class ManagedSessionService internal constructor(
             pendingFile = File(root, "pending-registrations.json"),
             archivedIds = { SessionArchive.archivedIds(it) },
             busyIds = { registry.busySessionIds() },
+            liveSession = { registry.isLiveSession(it) },
+            progressOf = { agent, sid -> dev.ccpocket.daemon.conversation.SessionObservationProjector.progressFor(agent, sid) },
         )
 
         /** The exact bytes a cursor MAC covers: every field length-prefixed (`<length>:<field>`), so no field content -
@@ -707,6 +748,13 @@ class ManagedSessionService internal constructor(
             PocketJson.encodeToString(Envelope("x".repeat(20), Long.MAX_VALUE, body = frame)).encodeToByteArray().size + 64
 
         /** Drop every row (and status / entry) whose agent the receiving connection cannot decode. */
+        /** A connection that did not declare [dev.ccpocket.protocol.ClientCaps.supportsSessionObservationV1] gets
+         *  no observation snapshot: the rows read exactly as before the capability existed. */
+        fun stripObservation(state: ManagedSessionsState): ManagedSessionsState = state.copy(
+            items = state.items?.map { it.copy(observation = null, summary = it.summary?.copy(observation = null)) },
+            entry = state.entry?.let { e -> e.copy(observation = null, summary = e.summary?.copy(observation = null)) },
+        )
+
         fun filterAgents(state: ManagedSessionsState, allows: (AgentKind) -> Boolean): ManagedSessionsState = state.copy(
             agents = state.agents?.filter { s -> s.agent?.let(allows) == true },
             items = state.items?.filter { e -> e.agent?.let(allows) == true },

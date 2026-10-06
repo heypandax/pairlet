@@ -27,6 +27,8 @@ import dev.ccpocket.app.resources.st_complete
 import dev.ccpocket.app.resources.st_failure
 import dev.ccpocket.app.resources.st_new_result
 import dev.ccpocket.app.resources.st_running
+import dev.ccpocket.app.resources.st_unknown
+import dev.ccpocket.app.resources.st_waiting_external
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import org.jetbrains.compose.resources.stringResource
@@ -58,6 +60,8 @@ fun stateLabel(state: SurfaceState): String = stringResource(
         SurfaceState.RUNNING -> Res.string.st_running
         SurfaceState.NEW_RESULT -> Res.string.st_new_result
         SurfaceState.COMPLETE -> Res.string.st_complete
+        SurfaceState.WAITING_EXTERNAL -> Res.string.st_waiting_external
+        SurfaceState.UNKNOWN -> Res.string.st_unknown
     },
 )
 

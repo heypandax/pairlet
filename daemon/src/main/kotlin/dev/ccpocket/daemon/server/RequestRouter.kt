@@ -6,6 +6,7 @@ import dev.ccpocket.daemon.diagnostics.SessionOpenDiagnostics
 import dev.ccpocket.daemon.agent.ApprovalTimeout
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.claude.ClaudeModelService
+import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.conversation.sinkKey
 import dev.ccpocket.daemon.codex.CodexModelService
@@ -286,6 +287,9 @@ class RequestRouter(
         /** issue #380 live folding: the client wants an outcome-only RESULT for every finished ordinary tool. */
         @Volatile var supportsToolOutcomes: Boolean = false
 
+        /** read-only session observation: this connection decodes the observation snapshot on rows / SessionLive. */
+        @Volatile var supportsSessionObservation: Boolean = false
+
         /** voice memo → tasks: this connection decodes pocket/memo.state. Replies and pushes are both gated on it. */
         @Volatile var supportsVoiceMemo: Boolean = false
 
@@ -519,6 +523,7 @@ class RequestRouter(
                 caps?.supportsManagedSessions = frame.supportsManagedSessions // #360: gates pocket/managed.state + .discovered
                 caps?.supportsToolOutcomes = frame.supportsToolOutcomes // #380: gates outcome-only tool RESULTs
                 caps?.supportsVoiceMemo = frame.supportsVoiceMemo // gates pocket/memo.state
+                caps?.supportsSessionObservation = frame.supportsSessionObservationV1 // gates the observation snapshot
                 caps?.maxFrameBytes = ClientCapsHolder.frameCap(frame.maxFrameBytes) // KTOR-6963: sizes every frame sealed to this connection
             }
 
@@ -593,7 +598,8 @@ class RequestRouter(
             is dev.ccpocket.protocol.EnableManagedSessions,
             is dev.ccpocket.protocol.DiscoverSessions,
             is dev.ccpocket.protocol.ImportSession,
-            is dev.ccpocket.protocol.RemoveManagedSession -> managedSessionsRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, caps)
+            is dev.ccpocket.protocol.RemoveManagedSession,
+            is dev.ccpocket.protocol.SetSessionObservation -> managedSessionsRequest(frame as dev.ccpocket.protocol.ToDaemon, sink, origin, caps)
 
             // session rename (issue #158): lands claude's own custom-title record (live daemon session:
             // the CLI appends it itself over a control_request; idle: a one-line transcript append) —
@@ -816,6 +822,7 @@ class RequestRouter(
 
                             announcedWorkdir = frame.workdir, // #219: announce the RAW workdir the phone opened (may be "~/x")
                             ownerBypass = ownerBypass, // trusted in-process open flag ⇒ owner's own session
+                            peerSupportsObservation = caps?.supportsSessionObservation == true,
                         )
                         if (convoId.isNotEmpty()) onOpened(convoId) // "" = backend unavailable (PocketError already sent)
                     }
@@ -1060,6 +1067,7 @@ class RequestRouter(
                 is dev.ccpocket.protocol.DiscoverSessions -> Triple(frame.requestId, frame.workdir, frame.agent)
                 is dev.ccpocket.protocol.ImportSession -> Triple(frame.requestId, frame.workdir, frame.agent)
                 is dev.ccpocket.protocol.RemoveManagedSession -> Triple(frame.requestId, frame.workdir, frame.agent)
+                is dev.ccpocket.protocol.SetSessionObservation -> Triple(frame.requestId, frame.workdir, frame.agent)
                 else -> return null
             }
             if (!dev.ccpocket.protocol.isValidManagedId(requestId)) return null // uncorrelatable: a reply would read as a push
@@ -1079,7 +1087,12 @@ class RequestRouter(
             refuse(dev.ccpocket.protocol.ManagedSessionErrors.UNSUPPORTED)?.let { sink.emit(it) }
             return
         }
-        svc.accept(frame, sink, sinkKey(sink)) { agent -> capsAllow(caps, agent) }
+        // the snapshot rides only to a connection that declared it: an undeclared peer reads today's row shape
+        val observationCapable = caps.supportsSessionObservation
+        val gated = if (observationCapable) sink else OutboundSink { f ->
+            sink.emit(if (f is dev.ccpocket.protocol.ManagedSessionsState) dev.ccpocket.daemon.session.ManagedSessionService.stripObservation(f) else f)
+        }
+        svc.accept(frame, if (observationCapable) sink else KeyedSink(sinkKey(sink), gated), sinkKey(sink)) { agent -> capsAllow(caps, agent) }
     }
 
 

@@ -183,6 +183,9 @@ data class ManagedSessionEntry(
     val lastKnownModified: Long? = null,
     val group: String? = null,
     val groupAmbiguous: Boolean = false,
+    /** The member's read-only observation binding and latest progress (docs/design/DOTS-SESSION-OBSERVABILITY.md).
+     *  Null = unbound, or a connection that did not declare [ClientCaps.supportsSessionObservationV1]. */
+    val observation: SessionObservation? = null,
 )
 
 // ── requests (client -> daemon, owner only, only after capability negotiation) ─────────────────────────
@@ -254,6 +257,14 @@ data class ImportSession(
     val workdir: String,
     val agent: AgentKind? = null,
     val sessionId: String,
+    /**
+     * Import AND bind in one durable write (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.1): the member is
+     * registered with this read-only [ObservationBinding], so there is no window in which it is imported but
+     * controllable. Refused as a whole (nothing imported) when the binding is invalid or the session is currently
+     * driven by this daemon. Null (the default, and all an older App sends) = a plain import. Send it only to a
+     * daemon advertising [DaemonInfo.supportsSessionObservationV1]; an older daemon drops the key and imports plainly.
+     */
+    val observation: ObservationBinding? = null,
 ) : ToDaemon
 
 /**
@@ -396,4 +407,9 @@ object ManagedSessionErrors {
     const val STORE_UNAVAILABLE = "managed_store_unavailable"
     /** The cursor belongs to another workdir / scope / query / store revision, or has expired; restart from page one. */
     const val CURSOR_INVALID = "managed_cursor_invalid"
+    /** Observation: the binding fails [isValidObservationBinding] (unknown attribution, writable, oversized ref…). */
+    const val OBSERVATION_INVALID = "managed_observation_invalid"
+    /** Observation: this daemon currently drives a controllable conversation on the session; bind it once that
+     *  conversation is closed. The running driver was not touched. */
+    const val OBSERVATION_CONFLICT = "managed_observation_conflict"
 }

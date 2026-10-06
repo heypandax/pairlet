@@ -208,6 +208,8 @@ class WsConnection(
                                 // #360: managed session list, for the agents the router can actually serve
                                 supportsManagedSessions = router.managedSessionAgentWires().isNotEmpty(),
                                 managedAgents = router.managedSessionAgentWires(),
+                                // read-only observation bindings + observeOnly opens (needs the managed store)
+                                supportsSessionObservationV1 = router.managedSessionAgentWires().isNotEmpty(),
                                 // #348: which backends' SUBSCRIPTION allowance this daemon can read. The
                                 // router owns the answer because it owns the readers; absent (an older
                                 // daemon) decodes to empty = "Claude only, legacy behaviour".
@@ -248,7 +250,8 @@ class WsConnection(
             onRegisterError = { notice -> if (caps.supportsManagedSessions) sink.emit(notice) },
         ) { state ->
             if (caps.supportsManagedSessions) {
-                sink.emit(dev.ccpocket.daemon.session.ManagedSessionService.filterAgents(state) { a -> RequestRouter.capsAllow(caps, a) })
+                val filtered = dev.ccpocket.daemon.session.ManagedSessionService.filterAgents(state) { a -> RequestRouter.capsAllow(caps, a) }
+                sink.emit(if (caps.supportsSessionObservation) filtered else dev.ccpocket.daemon.session.ManagedSessionService.stripObservation(filtered))
             }
         }
         val writer = launch {

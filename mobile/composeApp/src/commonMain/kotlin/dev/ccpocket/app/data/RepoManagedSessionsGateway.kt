@@ -53,9 +53,16 @@ class RepoManagedSessionsGateway(private val repo: PocketRepository) : ManagedSe
             else -> DiscoverResult.Failure(o.error(mutation = false))
         }
 
-    override suspend fun import(scope: ManagedScope, agent: AgentKind, nativeId: String): ImportResult =
+    override suspend fun import(scope: ManagedScope, agent: AgentKind, nativeId: String): ImportResult = importWith(scope, agent, nativeId, null)
+
+    override suspend fun importObserved(scope: ManagedScope, agent: AgentKind, nativeId: String, binding: dev.ccpocket.protocol.ObservationBinding): ImportResult =
+        // never sent to a daemon that did not advertise bindings: it would drop the key and import a CONTROLLABLE member
+        if (!repo.daemonSessionObservation.value) ImportResult.Failure(ManagedSessionsError.UNSUPPORTED)
+        else importWith(scope, agent, nativeId, binding)
+
+    private suspend fun importWith(scope: ManagedScope, agent: AgentKind, nativeId: String, binding: dev.ccpocket.protocol.ObservationBinding?): ImportResult =
         when (val o = repo.managedCall(scope.computerId, scope.workdir, agent, mutation = true) {
-            ImportSession(requestId = it, workdir = scope.workdir, agent = agent, sessionId = nativeId)
+            ImportSession(requestId = it, workdir = scope.workdir, agent = agent, sessionId = nativeId, observation = binding)
         }) {
             is ManagedCallOutcome.Reply -> {
                 val f = o.frame as? ManagedSessionsState

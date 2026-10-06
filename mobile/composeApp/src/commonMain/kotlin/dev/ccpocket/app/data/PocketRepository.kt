@@ -1078,6 +1078,14 @@ class PocketRepository(
     // drops the project back to the legacy rows — never to "no sessions".
     /** DaemonInfo.supportsManagedSessions on this connection; false = every legacy path, unchanged. */
     val daemonManagedSessions = mutableStateOf(false)
+    /** DaemonInfo.supportsSessionObservationV1 on this connection (docs/design/DOTS-SESSION-OBSERVABILITY.md): read-only
+     *  bindings and observe-only opens are offered only when true; an older daemon would silently ignore them. */
+    val daemonSessionObservation = mutableStateOf(false)
+    /** The open chat's observation snapshot from its latest SessionLive (null = a plain session / observe, or an older daemon). */
+    val sessionObservation = mutableStateOf<dev.ccpocket.protocol.SessionObservation?>(null)
+    /** Outcome of the last bind / unbind from the session-info sheet; cleared on the next attempt. */
+    val sessionObservationBusy = mutableStateOf(false)
+    val sessionObservationError = mutableStateOf<dev.ccpocket.app.ui.session.ManagedSessionsError?>(null)
     /** DaemonInfo.managedAgents, parsed; empty unless [daemonManagedSessions]. */
     val daemonManagedAgents = mutableStateOf<Set<AgentKind>>(emptySet())
     /** The listed project's accepted managed list; null = none accepted (legacy rows are showing). */
@@ -3057,7 +3065,7 @@ class PocketRepository(
         sessionsDir.value = null; sessions.clear(); browseIntentDir = null // #349: same rule as disconnect()
         clearSessionsOpening()
         legacySessions = emptyList(); managedListLoading.value = false // #360: the daemon rows leave with the list
-        chatTitle.value = null; observing.value = false; streaming.value = false
+        chatTitle.value = null; observing.value = false; sessionObservation.value = null; streaming.value = false
         opening.value = false; openTimedOut.value = false; switching.value = false; switchingSession.value = false
         openInFlight = null; lastOpenAttempt = null // #235: the claim + its retry target belong to the machine we're leaving
         autoFocusComposer.value = false
@@ -3284,7 +3292,7 @@ class PocketRepository(
 
     /** What this build declares to the daemon. One definition, because it is sent from two places. */
     private fun clientCaps() =
-        ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true, maxFrameBytes = dev.ccpocket.app.net.RelayE2EConnection.MAX_FRAME_BYTES, supportsVoiceMemo = true)
+        ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true, maxFrameBytes = dev.ccpocket.app.net.RelayE2EConnection.MAX_FRAME_BYTES, supportsVoiceMemo = true, supportsSessionObservationV1 = true)
 
     /**
      * Declare the capabilities again, on the session that just proved itself live.
@@ -3875,6 +3883,7 @@ class PocketRepository(
                 // #360: this link's managed-list capability. Losing it (or its agent set changing) retires every
                 // pending managed reply and every accepted list, back to the legacy rows.
                 val managedAgentsNow = if (f.supportsManagedSessions) managedAgentsOf(f.managedAgents) else emptySet()
+                daemonSessionObservation.value = f.supportsManagedSessions && f.supportsSessionObservationV1
                 if (managedAgentsNow != daemonManagedAgents.value || f.supportsManagedSessions != daemonManagedSessions.value) {
                     retireManaged()
                     daemonManagedSessions.value = f.supportsManagedSessions
@@ -3925,6 +3934,7 @@ class PocketRepository(
                     allowRules.clear()
                 }
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
+                sessionObservation.value = f.observation?.takeIf { f.observing } // daemon truth; null = plain / older daemon
                 f.sessionId?.let {
                     sessionKey.value = it
                     // #360: only the answer to a brand-new open is "created here" — resuming an existing session is not
@@ -7722,7 +7732,7 @@ class PocketRepository(
         pendingImages.clear()
         clearFileUploads()
         clearBackgroundJobs()
-        observing.value = false
+        observing.value = false; sessionObservation.value = null
         abandonVoice()
     }
 
@@ -7760,6 +7770,44 @@ class PocketRepository(
         clearNotice()
     }
 
+    /** The open chat is a read-only observe view by POLICY (a bound member or an observe-only open): no take-over. */
+    fun observationReadOnly(): Boolean = observing.value && sessionObservation.value?.readOnly == true
+
+    /**
+     * Set (non-null) or clear (null) the read-only Dot binding of a managed member from the session-info sheet
+     * (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.2). One owner request; the daemon refuses while this computer
+     * drives the session, and the managed list is re-read either way so the row shows the committed state.
+     */
+    fun setSessionObservation(workdir: String, agent: AgentKind, sessionId: String, binding: dev.ccpocket.protocol.ObservationBinding?) {
+        if (!daemonSessionObservation.value || sessionObservationBusy.value) return
+        val computer = paired.value?.accountId ?: return
+        sessionObservationBusy.value = true
+        sessionObservationError.value = null
+        scope.launch {
+            try {
+                val outcome = managedCall(computer, workdir, agent, mutation = true) {
+                    dev.ccpocket.protocol.SetSessionObservation(requestId = it, workdir = workdir, agent = agent, sessionId = sessionId, binding = binding)
+                }
+                val error = when (outcome) {
+                    is ManagedCallOutcome.Reply -> (outcome.frame as? dev.ccpocket.protocol.ManagedSessionsState)?.error?.let(::managedErrorOf)
+                        ?: if (outcome.frame is dev.ccpocket.protocol.ManagedSessionsState) null else dev.ccpocket.app.ui.session.ManagedSessionsError.INTERNAL
+                    ManagedCallOutcome.Disconnected -> dev.ccpocket.app.ui.session.ManagedSessionsError.DISCONNECTED
+                    ManagedCallOutcome.Timeout -> dev.ccpocket.app.ui.session.ManagedSessionsError.UNCONFIRMED
+                    ManagedCallOutcome.Unsupported -> dev.ccpocket.app.ui.session.ManagedSessionsError.UNSUPPORTED
+                }
+                sessionObservationError.value = error
+                if (error == null) {
+                    // the open view's own snapshot follows on its next announce; the list is re-read now
+                    refreshManagedList(workdir)
+                    // a bound session must not stay open as a controllable chat: the daemon refused the bind if it
+                    // was live here, so an open chat on it is at most a read-only view already — nothing to close
+                }
+            } finally {
+                sessionObservationBusy.value = false
+            }
+        }
+    }
+
     /** Take over an observed (terminal-running) session: stop the read-only tail, resume a controllable process. */
     fun takeOver() {
         val obs = convoId.value
@@ -7768,7 +7816,7 @@ class PocketRepository(
         scope.launch {
             obs?.let { send(CloseSession(it)) }
             clearPromptLifecycleState()
-            transcript.clearMessages(); convoId.value = null; observing.value = false
+            transcript.clearMessages(); convoId.value = null; observing.value = false; sessionObservation.value = null
             resetHistoryPaging() // #147: the take-over open replays in full
             // "Continue here" resumes under the Settings default mode — omitting it fell back to the
             // wire default (ask each step), ignoring the user's chosen mode (issue #50). Model/effort

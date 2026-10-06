@@ -42,6 +42,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.copy_path
+import dev.ccpocket.app.resources.obs_dot_short
+import dev.ccpocket.app.resources.obs_last_recorded
+import dev.ccpocket.app.resources.observe_readonly_short
 import dev.ccpocket.app.resources.new_session_cta
 import dev.ccpocket.app.resources.rewind_caption_fork
 import dev.ccpocket.app.resources.rewind_caption_rewound
@@ -350,8 +353,17 @@ private fun StateActionBand(
 @Composable
 private fun sessionMetaLine(row: SessionRowUi): String {
     val s = row.session
+    val observation = s.observation?.takeIf { it.readOnly }
     val parts = buildList {
-        if (row.action == null) add(stateLabel(row.state))
+        if (row.action == null) {
+            // an observed member's non-terminal state older than the freshness threshold is "last recorded", not current
+            val stale = observation?.progress?.let { p ->
+                dev.ccpocket.protocol.ObservedFreshness.normalize(p.freshness) == dev.ccpocket.protocol.ObservedFreshness.STALE &&
+                    (row.state == SurfaceState.RUNNING || row.state == SurfaceState.WAITING_EXTERNAL || row.state == SurfaceState.UNKNOWN)
+            } == true
+            add(if (stale) "${stringResource(Res.string.obs_last_recorded)}: ${stateLabel(row.state)}" else stateLabel(row.state))
+        }
+        if (observation != null) add(stringResource(if (observation.binding != null) Res.string.obs_dot_short else Res.string.observe_readonly_short))
         add(agentName(s.agent ?: AgentKind.CLAUDE))
         s.gitBranch?.takeIf { it.isNotBlank() }?.let { add(it) }
         if (s.lastModified > 0L) add(relativeTime(s.lastModified))

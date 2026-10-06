@@ -1158,6 +1158,8 @@ interface DesktopModel {
     // must yield — a prompt sent into an observe convo is silently unroutable on the daemon (issue #45 ②)
     val observing: Boolean get() = false
     fun takeOver() {}
+    /** read-only observation snapshot of the open observe view (null = a plain observe / older daemon) */
+    val sessionObservation: dev.ccpocket.protocol.SessionObservation? get() = null
 
     // interrupt the running turn (■ beside send / Esc); the interrupted prompt returns to the composer (#48)
     fun stopTurn() {}

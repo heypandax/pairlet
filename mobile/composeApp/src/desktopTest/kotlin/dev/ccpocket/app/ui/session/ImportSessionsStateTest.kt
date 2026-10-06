@@ -272,4 +272,34 @@ class ImportSessionsStateTest {
         val otherComputer = reduceImportSessions(s0, Ev.MembershipChanged(b, key, managed = false)).state
         assertTrue(otherComputer.isImported(otherComputer.items.single()), "another computer's change is not ours")
     }
+
+    // ── read-only Dot link (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.2) ───────────────────────────────
+
+    @Test
+    fun the_observe_switch_is_only_honoured_when_offered_and_rides_the_import_effect() {
+        // not offered (older daemon): the toggle is a no-op and an import carries no binding
+        val plain = loaded(row("s1"))
+        assertFalse(reduceImportSessions(plain, Ev.ToggleObserveAsDot(true)).state.observeAsDot)
+        assertNull(reduceImportSessions(plain, Ev.ImportClicked(DiscoveredKey(AgentKind.CLAUDE, "s1"))).effects.filterIsInstance<Fx.Import>().single().binding)
+
+        // offered: on → every import from this screen is an import + read-only bind, off → plain
+        val o = reduceImportSessions(ImportSessionsState(), Ev.Open(a, observationOffered = true))
+        val offered = reduceImportSessions(o.state, Ev.DiscoverReturned(o.discover().tag, DiscoverResult.Page(listOf(row("s1"), row("s2")), null, true))).state
+        assertTrue(offered.observationOffered)
+        assertFalse(offered.observeAsDot)
+        val on = reduceImportSessions(offered, Ev.ToggleObserveAsDot(true)).state
+        assertTrue(on.observeAsDot)
+        val bound = reduceImportSessions(on, Ev.ImportClicked(DiscoveredKey(AgentKind.CLAUDE, "s1"))).effects.filterIsInstance<Fx.Import>().single().binding
+        assertEquals(dev.ccpocket.protocol.ObservationBinding(), bound)
+        assertTrue(bound!!.readOnly)
+        assertEquals(dev.ccpocket.protocol.ObservationAttributions.USER_ASSIGNED, bound.attribution)
+        val off = reduceImportSessions(on, Ev.ToggleObserveAsDot(false)).state
+        assertNull(reduceImportSessions(off, Ev.ImportClicked(DiscoveredKey(AgentKind.CLAUDE, "s2"))).effects.filterIsInstance<Fx.Import>().single().binding)
+
+        // re-opening the SAME scope keeps the switch; another computer starts off
+        assertTrue(reduceImportSessions(on, Ev.Open(a, observationOffered = true)).state.observeAsDot)
+        assertFalse(reduceImportSessions(on, Ev.Open(b, observationOffered = true)).state.observeAsDot)
+        // losing the capability (older daemon on reconnect) drops it entirely
+        assertFalse(reduceImportSessions(on, Ev.Open(a, observationOffered = false)).state.observeAsDot)
+    }
 }
