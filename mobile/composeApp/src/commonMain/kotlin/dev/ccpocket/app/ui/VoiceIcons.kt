@@ -76,6 +76,32 @@ val XSmallIcon: ImageVector by lazy {
     }.build()
 }
 
+/**
+ * Keyboard — the send bar's leading "finish and edit" (voice input v2): a 19×13 body, two rows of keys and the
+ * space bar (stroke 1.6 in a 24-viewport). Apple dictation and Gboard voice typing use this glyph for "back to typing".
+ */
+val KeyboardIcon: ImageVector by lazy {
+    builder("Keyboard", 24f).apply {
+        // body x2.5..21.5, y5.5..18.5, r2
+        stroked(1.6f) {
+            moveTo(4.5f, 5.5f)
+            horizontalLineTo(19.5f)
+            arcTo(2f, 2f, 0f, isMoreThanHalf = false, isPositiveArc = true, 21.5f, 7.5f)
+            verticalLineTo(16.5f)
+            arcTo(2f, 2f, 0f, isMoreThanHalf = false, isPositiveArc = true, 19.5f, 18.5f)
+            horizontalLineTo(4.5f)
+            arcTo(2f, 2f, 0f, isMoreThanHalf = false, isPositiveArc = true, 2.5f, 16.5f)
+            verticalLineTo(7.5f)
+            arcTo(2f, 2f, 0f, isMoreThanHalf = false, isPositiveArc = true, 4.5f, 5.5f)
+            close()
+        }
+        // keys: short round-capped dashes, which read as dots at this size
+        for (x in listOf(6f, 9f, 12f, 15f, 18f)) stroked(1.6f) { moveTo(x - 0.3f, 9.5f); horizontalLineToRelative(0.6f) }
+        for (x in listOf(7.5f, 10.5f, 13.5f, 16.5f)) stroked(1.6f) { moveTo(x - 0.3f, 12.5f); horizontalLineToRelative(0.6f) }
+        stroked(1.6f) { moveTo(8.5f, 15.5f); horizontalLineTo(15.5f) } // space bar
+    }.build()
+}
+
 /** Shield with a mic inside — the S6 permission-sheet tile glyph (26-viewport). */
 val ShieldMicIcon: ImageVector by lazy {
     builder("ShieldMic", 26f).apply {

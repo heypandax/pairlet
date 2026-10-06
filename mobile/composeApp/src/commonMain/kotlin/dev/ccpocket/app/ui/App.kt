@@ -105,6 +105,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -180,11 +181,13 @@ import dev.ccpocket.app.ui.chat.ProcessMemberSegment
 import dev.ccpocket.app.ui.chat.joinPreviousSegment
 import dev.ccpocket.app.ui.chat.liveLineState
 import dev.ccpocket.app.ui.chat.rememberChatPresentationState
+import dev.ccpocket.app.data.ComposerProbe
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.OpenFailure
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
+import dev.ccpocket.app.data.VoiceBarMode
 import dev.ccpocket.app.data.VoiceState
 import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.pairing.displayName
@@ -2642,6 +2645,15 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     val draftKey = repo.composerKey()
     val composer = remember(repo.composerEpoch.value) { ComposerState(repo.draftFor(draftKey)) }
     val input = composer.text // reads track the field; writes go through composer's explicit methods
+    // voice input v2: whether a dictation may be sent is asked of THIS composer as it stands — its live text and
+    // whether an IME composition is open — never of the 400 ms-debounced draft (review §10 item 7). Registered while
+    // the chat is composed (its full-screen children keep the composer, so they keep the probe); without one no
+    // capture is ever eligible.
+    DisposableEffect(repo, composer) {
+        val probe: () -> ComposerProbe = { ComposerProbe(composer.text, composer.composing) }
+        repo.composerProbe = probe
+        onDispose { if (repo.composerProbe === probe) repo.composerProbe = null }
+    }
     var viewer by remember { mutableStateOf<Pair<ChatImages, Int>?>(null) } // tapped images → full-screen
     var videoViewer by remember { mutableStateOf<dev.ccpocket.app.data.SentFile?>(null) } // tapped sent video → player (issue #98)
     var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer
@@ -2840,14 +2852,29 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     // when the draft doesn't already end on whitespace), route through ComposerState.setText so the caret
     // lands at the end and a live IME composition is respected (#93/#118), then focus + raise the keyboard
     // for immediate edits. Consume the slot so the same phrase spoken twice still re-fires.
+    // The text right after the append is what the reason line's "first edit" is measured against (below).
+    var landedVoiceText by remember(composer) { mutableStateOf<String?>(null) }
     val pendingVoice = repo.pendingVoiceText.value
     LaunchedEffect(pendingVoice) {
         if (pendingVoice != null) {
             repo.pendingVoiceText.value = null
             val existing = composer.text
-            composer.setText(appendVoiceTranscript(existing, pendingVoice))
+            val landed = appendVoiceTranscript(existing, pendingVoice)
+            composer.setText(landed)
+            landedVoiceText = landed
             runCatching { composerFocus.requestFocus() }
             keyboard?.show()
+        }
+    }
+    // Voice input v2's reason line (why that dictation was not sent) stays until the user's first EDIT of what landed;
+    // a send and leaving the chat clear it in the repository. The landing above is a programmatic append, not an edit:
+    // while one is still on its way (or held behind an IME composition) nothing counts, and after it only a text that
+    // differs from what it left behind does.
+    val voiceReason = repo.voiceComposerReason.value
+    LaunchedEffect(composer, voiceReason != null) {
+        if (voiceReason == null) return@LaunchedEffect
+        snapshotFlow { Triple(composer.text, landedVoiceText, repo.pendingVoiceText.value) }.collect { (text, landed, incoming) ->
+            if (incoming == null && landed != null && composer.pending == null && text != landed) repo.clearVoiceComposerReason()
         }
     }
     // Page in older history when the reader is genuinely parked at the top of the loaded window — NOT
@@ -2905,8 +2932,15 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             }
         }
     }
-    // persist the composer draft per project (debounced) so leaving mid-message doesn't lose it
-    LaunchedEffect(input, draftKey) { delay(400); repo.saveDraft(draftKey, input) }
+    // persist the composer draft per project (debounced) so leaving mid-message doesn't lose it. A write to this key's
+    // draft made while the debounce waits is newer than the text it holds and wins — voice input v2 appends a
+    // dictation to the draft of the conversation being left (the leave paths save this composer first, then the
+    // repository appends) — so this stale save is skipped rather than overwriting it.
+    LaunchedEffect(input, draftKey) {
+        val stored = repo.draftFor(draftKey)
+        delay(400)
+        if (repo.draftFor(draftKey) == stored) repo.saveDraft(draftKey, input)
+    }
     // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport
     LaunchedEffect(repo.messages.size, repo.messages.lastOrNull(), repo.streaming.value) {
         if (pinned && repo.messages.isNotEmpty()) { listState.scrollToEnd(); landed = true }
@@ -3347,7 +3381,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     LimitResetBanner(repo) // usage-limit hit → one-tap "auto-continue after reset" (issue #137)
                     AgentRepairBanner(repo) // dsh incomplete install → one-tap reinstall
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
-                    val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
+                    // voice input v2: the send bar's waiting states (correcting, the corrections on show) keep the bar up
+                    val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing ||
+                        voiceState is VoiceState.Refining || voiceState is VoiceState.Preview
                     LaunchedEffect(capturing) { if (capturing) attachSheet = false }
                     if (suggestions.isNotEmpty() && !capturing) {
                         SlashCommandMenu(suggestions) { cmd -> composer.setText(cmd.completion()) }
@@ -3376,8 +3412,19 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         Text(stringResource(n), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                     }
                     if (capturing) {
-                        if (repo.liveDictation.value && voiceState is VoiceState.Recording) {
-                            LiveTranscriptField(repo.liveFinal.value, repo.livePartial.value)
+                        val barMode = repo.voiceBarMode.value
+                        when {
+                            // the send bar after ✓: the original while it is corrected, then the corrections on show
+                            voiceState is VoiceState.Refining -> VoiceTextPreview(AnnotatedString(voiceState.original))
+                            voiceState is VoiceState.Preview ->
+                                VoiceTextPreview(voicePreviewText(voiceState.text, voiceState.ranges, voiceCorrectionMark()))
+                            repo.liveDictation.value && voiceState is VoiceState.Recording ->
+                                LiveTranscriptField(repo.liveFinal.value, repo.livePartial.value)
+                            // a send bar keeps iOS's live words in place through transcription, read-only, so the field
+                            // does not flash out between ✓ and "correcting"; today's bar drops it there, as it always did
+                            barMode != VoiceBarMode.LEGACY && repo.liveDictation.value && voiceState is VoiceState.Transcribing &&
+                                (repo.liveFinal.value + repo.livePartial.value).isNotBlank() ->
+                                VoiceTextPreview(liveTranscriptText(repo.liveFinal.value, repo.livePartial.value))
                         }
                         RecordingBar(
                             elapsedMs = recElapsed,
@@ -3386,6 +3433,14 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             onCancel = repo::cancelVoice,
                             onDone = repo::stopVoice,
                             uploading = voiceState is VoiceState.Transcribing && repo.voiceUploading.value,
+                            mode = barMode,
+                            onFinishEdit = repo::finishAndEditVoice,
+                            onFinishSend = repo::finishAndSendVoice,
+                            wait = when (voiceState) {
+                                is VoiceState.Refining -> VoiceBarWait.Correcting(refinerDisplayName(voiceState.agent))
+                                is VoiceState.Preview -> VoiceBarWait.Sending
+                                else -> null
+                            },
                         )
                         // RecordingBar's ✕/✓ own the voice capture. If an agent turn is also running,
                         // keep its separate interrupt reachable instead of hiding it for the entire recording
@@ -3443,6 +3498,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 }
                                 // the wait is still on and a late transcript will land: the quiet note, not the danger ribbon
                                 stillWaiting -> ComposerNote(stringResource(Res.string.voice_still_waiting))
+                                // voice input v2: why the dictation in the field was not sent — until the first edit or
+                                // send. It outranks the upload, compression and queue notes: a wait still reads in the
+                                // action slot, and the queue note is back after that first edit
+                                voiceReason != null -> ComposerNote(stringResource(voiceReasonRes(voiceReason)))
                                 uploadsBusy -> ComposerNote(
                                     stringResource(
                                         Res.string.composer_uploading,

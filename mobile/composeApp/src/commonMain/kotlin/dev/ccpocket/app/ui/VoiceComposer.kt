@@ -26,10 +26,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +45,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +59,8 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -66,10 +71,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.data.VoiceBarMode
+import dev.ccpocket.app.data.VoiceComposerReason
 import dev.ccpocket.app.data.VoiceSetupIssue
+import dev.ccpocket.app.data.memoAgentWire
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.tightCenter
+import dev.ccpocket.protocol.AgentKind
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /** Design easing for the recording-bar morph: cubic-bezier(.22,1,.36,1), 220ms. */
@@ -398,9 +408,27 @@ fun ComposerAccessoryLane(
     }
 }
 
+/** Test tag of the send bar's waiting ring — status with no semantics of its own, so tests find it by tag. */
+internal const val SEND_WAIT_RING_TAG = "voice-send-wait"
+
+/** What the send bar waits on once the transcript is in (voice input v2) — the pill's one state line. */
+sealed interface VoiceBarWait {
+    /** The computer is correcting the transcript; [agent] is the agent's product name ("Claude"). */
+    data class Correcting(val agent: String) : VoiceBarWait
+
+    /** The corrections are on show for a moment before the text goes out. */
+    data object Sending : VoiceBarWait
+}
+
 /**
  * S2/S3 recording bar: ✕ · [rec-dot + waveform | spinner + “Transcribing…”] · timer · ✓.
  * Morph-in per the design (translateY 6dp → 0, 220 ms).
+ *
+ * Voice input v2 (README "后续决定", review §11): [mode] is the user's setting made visible. [VoiceBarMode.LEGACY]
+ * is today's bar, item for item. The two send-bar modes trade ✕ for the keyboard — the text goes to the composer,
+ * never discarded — and [VoiceBarMode.EDIT_SEND] draws the send arrow in ✓'s filled circle. The mode only ever falls
+ * during a capture, so the arrow turns into ✓ in place. Once ✓ was tapped the keyboard reads "edit instead"; while
+ * transcribing the trailing control rests, and in the [wait] stages it is status, not a control.
  */
 @Composable
 fun RecordingBar(
@@ -411,17 +439,33 @@ fun RecordingBar(
     onDone: () -> Unit,
     /** S3 while the audio is still queued on the phone: the same spinner row reads the upload line instead. */
     uploading: Boolean = false,
+    mode: VoiceBarMode = VoiceBarMode.LEGACY,
+    /** The keyboard (send-bar modes): "finish and edit" while recording, "edit instead" from ✓ until it sends. */
+    onFinishEdit: () -> Unit = {},
+    /** The send arrow, [VoiceBarMode.EDIT_SEND] only: "finish and send". */
+    onFinishSend: () -> Unit = {},
+    /** The send bar's stages after the transcript is in; null while recording or transcribing. */
+    wait: VoiceBarWait? = null,
 ) {
     val appear = remember { Animatable(0f) }
     LaunchedEffect(Unit) { appear.animateTo(1f, tween(220, easing = MorphEasing)) }
+    val sendBar = mode != VoiceBarMode.LEGACY || wait != null
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)
             .graphicsLayer { translationY = (1f - appear.value) * 6.dp.toPx() },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(9.dp),
     ) {
-        IconButton(onClick = onCancel, modifier = Modifier.size(Metric.touch)) {
-            Icon(XSmallIcon, stringResource(Res.string.cancel_recording), tint = Tok.muted, modifier = Modifier.size(18.dp))
+        if (sendBar) {
+            val waiting = transcribing || wait != null
+            val editLabel = stringResource(if (waiting) Res.string.voice_edit_instead else Res.string.voice_finish_edit)
+            IconButton(onClick = onFinishEdit, modifier = Modifier.size(Metric.touch)) {
+                Icon(KeyboardIcon, editLabel, tint = Tok.tx2, modifier = Modifier.size(24.dp))
+            }
+        } else {
+            IconButton(onClick = onCancel, modifier = Modifier.size(Metric.touch)) {
+                Icon(XSmallIcon, stringResource(Res.string.cancel_recording), tint = Tok.muted, modifier = Modifier.size(18.dp))
+            }
         }
         val pillShape = RoundedCornerShape(12.dp)
         Row(
@@ -430,7 +474,20 @@ fun RecordingBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
         ) {
-            if (transcribing) {
+            if (wait != null) {
+                // no dot, no waveform, no spinner of its own (the trailing ring has it): one polite state line, which
+                // may wrap at large type — the pill grows rather than crowding the controls
+                Text(
+                    when (wait) {
+                        is VoiceBarWait.Correcting -> stringResource(Res.string.voice_refining, wait.agent)
+                        VoiceBarWait.Sending -> stringResource(Res.string.voice_sending)
+                    },
+                    color = Tok.tx2,
+                    fontSize = 13.sp,
+                    style = tightCenter(13.sp),
+                    modifier = Modifier.weight(1f).padding(vertical = 6.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            } else if (transcribing) {
                 CircularProgressIndicator(modifier = Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
                 // Keep the live region on the stable state text only. Putting it on the whole bar would
                 // re-announce every timer tick; this announces the Recording -> Transcribing edge once.
@@ -450,10 +507,44 @@ fun RecordingBar(
                 fmtElapsed(elapsedMs), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, style = tightCenter(12.5.sp),
             )
         }
-        val doneLabel = stringResource(Res.string.done)
-        RoundActionButton(onClick = onDone, filled = true, contentDescription = doneLabel) {
-            // the button names itself now — a second description here would be announced twice
-            Icon(CheckIcon, null, tint = Tok.base, modifier = Modifier.size(20.dp))
+        when {
+            wait != null -> SendWaitRing()
+            mode == VoiceBarMode.EDIT_SEND -> {
+                // the composer's send glyph in ✓'s filled circle: same place, same weight, a different promise
+                RoundActionButton(
+                    onClick = onFinishSend, filled = true, enabled = !transcribing,
+                    contentDescription = stringResource(Res.string.voice_finish_send),
+                ) {
+                    Icon(SendArrowIcon, null, tint = Tok.base, modifier = Modifier.size(18.dp))
+                }
+            }
+            else -> {
+                val doneLabel = stringResource(Res.string.done)
+                // today's bar keeps ✓ live through transcription, exactly as before; a send bar's rests until the text is in
+                RoundActionButton(onClick = onDone, filled = true, enabled = !(sendBar && transcribing), contentDescription = doneLabel) {
+                    // the button names itself now — a second description here would be announced twice
+                    Icon(CheckIcon, null, tint = Tok.base, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The send bar's trailing slot while the computer corrects and the preview holds: the composer's waiting-send
+ * treatment — a hairline circle, the spinner ring, the muted arrow (see the upload status slot). Status, not a
+ * control: no click and no semantics, so nothing on screen is accent-filled and a second tap cannot land anywhere;
+ * the pill's state line is what assistive tech hears.
+ */
+@Composable
+private fun SendWaitRing() {
+    Box(Modifier.size(Metric.touch).clearAndSetSemantics { testTag = SEND_WAIT_RING_TAG }, contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).background(Tok.base).border(1.dp, Tok.hair, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            SpinnerRing(30.dp, 2.dp)
+            Icon(SendArrowIcon, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
         }
     }
 }
@@ -502,6 +593,68 @@ fun LiveTranscriptField(final: String, partial: String) {
     }
 }
 
+/** The preview's most lines; longer text scrolls inside the box (README "实现规格对板子的修正"). */
+private const val PREVIEW_MAX_LINES = 6
+
+/**
+ * Voice input v2: the dictated text above the send bar once ✓ was tapped — while it is corrected, and with the
+ * corrections marked while they are on show. Read-only: [LiveTranscriptField]'s box, type and place without the caret,
+ * so iOS's live transcript turns into the preview where it stands. Six lines at most; longer text scrolls inside the
+ * box and stays pinned to its end.
+ */
+@Composable
+fun VoiceTextPreview(text: AnnotatedString) {
+    val shape = RoundedCornerShape(12.dp)
+    val line = 21.sp
+    val scroll = rememberScrollState()
+    LaunchedEffect(text) { snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) } }
+    Box(
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp).heightIn(min = 44.dp)
+            .clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape).padding(horizontal = 14.dp, vertical = 11.dp),
+    ) {
+        Text(
+            text, color = Tok.tx, fontSize = 14.5.sp, lineHeight = line,
+            modifier = Modifier.fillMaxWidth()
+                .heightIn(max = with(LocalDensity.current) { (line * PREVIEW_MAX_LINES).toDp() })
+                .verticalScroll(scroll),
+        )
+    }
+}
+
+/** iOS live dictation as plain styled text: committed words primary, the volatile tail muted (no caret). */
+@Composable
+internal fun liveTranscriptText(final: String, partial: String): AnnotatedString = buildAnnotatedString {
+    withStyle(SpanStyle(color = Tok.tx)) { append(final) }
+    withStyle(SpanStyle(color = Tok.muted)) { append(partial) }
+}
+
+/** [text] with each corrected range marked by [mark]. The ranges are [VoiceState.Preview]'s — UTF-16 indices into
+ *  [text], validated upstream; one that does not fit is skipped rather than trusted. */
+internal fun voicePreviewText(text: String, ranges: List<IntRange>, mark: SpanStyle): AnnotatedString =
+    buildAnnotatedString {
+        append(text)
+        for (r in ranges) if (!r.isEmpty() && r.first >= 0 && r.last < text.length) addStyle(mark, r.first, r.last + 1)
+    }
+
+/** How a correction is marked in the preview: the accent, on a tint of itself. */
+@Composable
+internal fun voiceCorrectionMark(): SpanStyle = SpanStyle(color = Tok.accent, background = Tok.accent.copy(alpha = 0.12f))
+
+/** The reason line for each way a send-bar dictation lands in the composer unsent (review §4, §11). */
+internal fun voiceReasonRes(reason: VoiceComposerReason): StringResource = when (reason) {
+    VoiceComposerReason.TIMEOUT -> Res.string.voice_reason_timeout
+    VoiceComposerReason.NOT_ADOPTED -> Res.string.voice_reason_not_adopted
+    VoiceComposerReason.UNAVAILABLE -> Res.string.voice_reason_unavailable
+    VoiceComposerReason.REVIEW -> Res.string.voice_reason_review
+    VoiceComposerReason.DISCONNECTED -> Res.string.voice_reason_disconnected
+    VoiceComposerReason.NOT_SENT -> Res.string.voice_reason_not_sent
+}
+
+/** The product name of the agent a correction runs on, from its wire name ("claude" → "Claude"). A name this build
+ *  does not know is shown as it came. */
+internal fun refinerDisplayName(wire: String): String =
+    AgentKind.entries.firstOrNull { memoAgentWire(it) == wire }?.let(::agentName) ?: wire
+
 /**
  * S5: the danger state above the composer.
  *
@@ -532,9 +685,72 @@ fun VoiceSetupChip(issue: VoiceSetupIssue, enabled: Boolean, onRequest: () -> Un
 
 /** S6: mic permission sheet in the PermissionSheet visual language. */
 @Composable
-fun MicPermissionSheet(onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
+fun MicPermissionSheet(onOpenSettings: () -> Unit, onDismiss: () -> Unit) = VoiceDecisionSheet(
+    title = stringResource(Res.string.mic_title),
+    primary = stringResource(Res.string.open_settings), onPrimary = onOpenSettings,
+    secondary = stringResource(Res.string.not_now), onSecondary = onDismiss,
+    onDismiss = onDismiss,
+) {
+    Text(
+        stringResource(Res.string.mic_body),
+        color = Tok.tx2, fontSize = 14.sp, lineHeight = 21.sp,
+    )
+}
+
+/**
+ * Voice input v2: the one-time "correct before sending" disclosure (README "后续决定", review §10 item 9) — what is
+ * sent, to whom, on whose quota, when nothing is sent on its own, and how to turn it off. The S6 sheet's component.
+ * [onTurnOn] is the only way through to "Correct and send": the scrim, back and a downward drag all mean [onNotNow].
+ */
+@Composable
+fun VoiceRefineDisclosureSheet(onTurnOn: () -> Unit, onNotNow: () -> Unit) = VoiceDecisionSheet(
+    title = stringResource(Res.string.voice_refine_disclosure_title),
+    primary = stringResource(Res.string.voice_refine_disclosure_on), onPrimary = onTurnOn,
+    secondary = stringResource(Res.string.voice_refine_disclosure_later), onSecondary = onNotNow,
+    onDismiss = onNotNow,
+) {
+    listOf(
+        Res.string.voice_refine_disclosure_data,
+        Res.string.voice_refine_disclosure_swaps,
+        Res.string.voice_refine_disclosure_off,
+    ).forEachIndexed { i, point ->
+        Row(
+            Modifier.padding(top = if (i == 0) 0.dp else 10.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+        ) {
+            // the dot centres on the point's FIRST line box (ComposerNote's construction, tightCenter per AGENTS.md)
+            val line = 21.sp
+            Box(Modifier.height(with(LocalDensity.current) { line.toDp() }).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(Tok.accent))
+            }
+            Text(
+                stringResource(point), color = Tok.tx2, fontSize = 14.sp,
+                style = tightCenter(14.sp).copy(lineHeight = line), modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/**
+ * The voice sheets' one layout (S6 and the refine disclosure): a tinted tile, a title, the [body], a filled
+ * [primary] action and a quiet [secondary] one. The explanation scrolls when large type makes it taller than the
+ * screen; the two actions stay on it.
+ */
+@Composable
+private fun VoiceDecisionSheet(
+    title: String,
+    primary: String,
+    onPrimary: () -> Unit,
+    secondary: String,
+    onSecondary: () -> Unit,
+    onDismiss: () -> Unit,
+    body: @Composable () -> Unit,
+) {
     PocketSheet(onDismiss) {
-        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 6.dp)) {
+        Column(
+            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 12.dp),
+        ) {
             Box(
                 Modifier.size(50.dp).clip(RoundedCornerShape(14.dp))
                     .background(Tok.accent.copy(alpha = 0.12f))
@@ -542,23 +758,21 @@ fun MicPermissionSheet(onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) { Icon(ShieldMicIcon, null, tint = Tok.accent, modifier = Modifier.size(26.dp)) }
             Spacer(Modifier.height(16.dp))
-            Text(stringResource(Res.string.mic_title), color = Tok.tx, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = Tok.tx, fontSize = 19.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(7.dp))
-            Text(
-                stringResource(Res.string.mic_body),
-                color = Tok.tx2, fontSize = 14.sp, lineHeight = 21.sp,
-            )
-            Spacer(Modifier.height(18.dp))
+            body()
+        }
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp)) {
             Box(
                 Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(12.dp)).background(Tok.accent)
-                    .clickable(onClick = onOpenSettings),
+                    .clickable(onClick = onPrimary),
                 contentAlignment = Alignment.Center,
-            ) { Text(stringResource(Res.string.open_settings), color = Tok.base, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+            ) { Text(primary, color = Tok.base, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
             Box(
                 Modifier.fillMaxWidth().height(44.dp).padding(top = 6.dp).clip(RoundedCornerShape(12.dp))
-                    .clickable(onClick = onDismiss),
+                    .clickable(onClick = onSecondary),
                 contentAlignment = Alignment.Center,
-            ) { Text(stringResource(Res.string.not_now), color = Tok.tx2, fontSize = 15.sp, fontWeight = FontWeight.Medium) }
+            ) { Text(secondary, color = Tok.tx2, fontSize = 15.sp, fontWeight = FontWeight.Medium) }
         }
     }
 }
