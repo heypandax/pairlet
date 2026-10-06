@@ -217,16 +217,15 @@ class RelayClient(
             if (decision is TurnPushDecision.Queued) controlOutbox.send(decision.push)
             log.info(TurnPushCoalescer.logLine(decision, sessionId))
         }
-        // Permission-ask pushes. Bridge asks (issue #91, origin != null) can't reach the bridge at all
-        // (egress whitelist) — always pushed, urgent. OWNER-session asks (issue #138, origin == null)
-        // push only when the card provably has no live viewer: nobody attached to the conversation, or
-        // the phone gone everywhere (locked/offline). The relay's "interactive socket live" suppression
-        // remains the second gate on the non-urgent path, so an in-app owner isn't double-alerted.
-        // Returns whether a push was queued — the conversation's coalesce window only counts real pushes.
-        core.registry.askPushHook = AskPushHook { workdir, sessionId, origin, tool, watched ->
-            val push = if (core.prefs.pushEnabled) {
-                PushPolicy.askPush(workdir, sessionId, origin, tool, watched, peerOnline, core.registry.lanConnected())
-            } else null
+        // Permission-ask pushes (bridge #91 / owner #138). Same gate as turn ends since 2026-10 (issue #382
+        // applied to asks): prefs.pushEnabled is the ONLY switch. Presence — a client attached to the
+        // conversation (`watched`), peerOnline, a LAN-attached desktop App — no longer suppresses: the desktop
+        // App is attached around the clock, and under the old gate an owner ask never reached a locked phone.
+        // The push goes out urgent so the relay's interactive-device check lets it through too; a phone showing
+        // that very session in the foreground hides the banner itself. `watched` still rides the hook for the
+        // conversation's log line. Returns whether a push was queued — the coalesce window only counts real pushes.
+        core.registry.askPushHook = AskPushHook { workdir, sessionId, origin, tool, _ ->
+            val push = PushPolicy.askPushFor(core.prefs.pushEnabled, workdir, sessionId, origin, tool)
             push?.let { controlOutbox.send(it) }
             push != null
         }

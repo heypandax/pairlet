@@ -4,6 +4,7 @@ import dev.ccpocket.observability.*
 
 import dev.ccpocket.relay.store.PushTarget
 import dev.ccpocket.relay.store.RelayStore
+import kotlinx.coroutines.delay
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -42,13 +43,19 @@ class LoggingPushService : PushService {
  * Looks up the account's registered push tokens and dispatches each to the [PushSender] for its
  * platform. Sends sequentially (a personal/small-team account has a handful of devices). A permanently
  * dead token (APNs 410 / FCM 404) is pruned from the store so we stop hammering it; a transient failure
- * is left in place to retry next turn. A fan-out where *no* device accepts is escalated to a WARN with a
- * running streak — the "silently 410-rotted for a month" state now shows up loudly in the logs.
+ * (thrown I/O, 429/5xx, timeout) is re-attempted [transientRetries] times, [retryDelayMs] apart, and then left
+ * in place — nothing re-sends a lost turn-end or approval alert later, so one "Connection reset" used to lose
+ * it outright. A fan-out where *no* device accepts is escalated to a WARN with a running streak — the
+ * "silently 410-rotted for a month" state now shows up loudly in the logs. Every accepted delivery logs one
+ * content-free line (platform, device/token prefixes, route kind + session-id prefix — never title or body),
+ * so "did the relay even send it" is answerable without inferring from the absence of a failure.
  */
 class StorePushService(
     private val store: RelayStore,
     private val senders: Map<String, PushSender>,
     private val now: () -> Long = System::currentTimeMillis,
+    private val transientRetries: Int = 1,
+    private val retryDelayMs: Long = 500L,
     private val log: (String) -> Unit = ::println,
 ) : PushService {
     /** Consecutive fully-failed fan-outs across the relay — a coarse "push is 100% down" smoke alarm. */
@@ -92,10 +99,15 @@ class StorePushService(
         for (t in targets) {
             val sender = senders[t.platform]
             if (sender == null) { log("[push] no sender for platform=${t.platform} (device=${t.deviceId.take(8)}…)"); continue }
-            val result = runCatching { sender.send(t.token, title, body, route) }
-                .getOrElse { Diagnostics.report(ErrorPath.PUSH, Stage.DISPATCH, ErrorCode.SEND_FAILED, it); log("[push] send failed platform=${t.platform}: ${it.message}"); SendResult.FAILED }
+            val result = sendWithRetry(sender, t, title, body, route)
             when (result) {
-                SendResult.ACCEPTED -> accepted++
+                SendResult.ACCEPTED -> {
+                    accepted++
+                    log(
+                        "[push] sent platform=${t.platform} device=${t.deviceId.take(8)}… token=${t.token.take(6)}… " +
+                            "kind=${route?.kind ?: "-"} sid=${route?.sessionId?.take(8) ?: "-"}",
+                    )
+                }
                 SendResult.INVALID_TOKEN -> {
                     if (store.clearPushToken(t.deviceId, t.platform, t.token, now())) pruned++
                     log("[push] dropped invalid token device=${t.deviceId.take(8)}… platform=${t.platform}")
@@ -116,5 +128,27 @@ class StorePushService(
         } else {
             consecutiveFullFailures.set(0)
         }
+    }
+
+    /** One attempt. Thrown I/O is a transient [SendResult.FAILED]: a sender never throws for a gateway rejection. */
+    private suspend fun sendOnce(sender: PushSender, t: PushTarget, title: String, body: String, route: NotifyRoute?): SendResult =
+        runCatching { sender.send(t.token, title, body, route) }
+            .getOrElse { Diagnostics.report(ErrorPath.PUSH, Stage.DISPATCH, ErrorCode.SEND_FAILED, it); log("[push] send failed platform=${t.platform}: ${it.message}"); SendResult.FAILED }
+
+    /**
+     * [sendOnce], re-attempted up to [transientRetries] times after a transient outcome — thrown I/O such as
+     * "Connection reset", or a FAILED gateway answer (429/5xx/timeout). [SendResult.INVALID_TOKEN] is final and
+     * never retried. Bounded and sequential: a provider that is down costs one short delay per target, not a queue.
+     */
+    private suspend fun sendWithRetry(sender: PushSender, t: PushTarget, title: String, body: String, route: NotifyRoute?): SendResult {
+        var result = sendOnce(sender, t, title, body, route)
+        var attempt = 1
+        while (result == SendResult.FAILED && attempt <= transientRetries) {
+            attempt++
+            delay(retryDelayMs)
+            log("[push] retry attempt=$attempt platform=${t.platform} device=${t.deviceId.take(8)}…")
+            result = sendOnce(sender, t, title, body, route)
+        }
+        return result
     }
 }
