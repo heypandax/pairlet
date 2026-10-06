@@ -66,10 +66,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.data.VoiceComposerReason
 import dev.ccpocket.app.data.VoiceSetupIssue
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.tightCenter
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /** Design easing for the recording-bar morph: cubic-bezier(.22,1,.36,1), 220ms. */
@@ -500,6 +502,16 @@ fun LiveTranscriptField(final: String, partial: String) {
                 .background(Tok.accent, RoundedCornerShape(2.dp)),
         )
     }
+}
+
+/** The reason line for each way a send-bar dictation lands in the composer unsent (review §4, §11). */
+internal fun voiceReasonRes(reason: VoiceComposerReason): StringResource = when (reason) {
+    VoiceComposerReason.TIMEOUT -> Res.string.voice_reason_timeout
+    VoiceComposerReason.NOT_ADOPTED -> Res.string.voice_reason_not_adopted
+    VoiceComposerReason.UNAVAILABLE -> Res.string.voice_reason_unavailable
+    VoiceComposerReason.REVIEW -> Res.string.voice_reason_review
+    VoiceComposerReason.DISCONNECTED -> Res.string.voice_reason_disconnected
+    VoiceComposerReason.NOT_SENT -> Res.string.voice_reason_not_sent
 }
 
 /**
