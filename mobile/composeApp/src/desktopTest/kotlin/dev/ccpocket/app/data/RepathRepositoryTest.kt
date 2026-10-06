@@ -9,10 +9,18 @@ import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.Role
+import dev.ccpocket.protocol.FetchImage
+import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.ImageContent
+import dev.ccpocket.protocol.ImageData
+import dev.ccpocket.protocol.ImageRefs
+import dev.ccpocket.protocol.SessionLive
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
@@ -86,6 +94,40 @@ class RepathRepositoryTest {
         r.streaming.value = false
         advance(RepathController.BUSY_RECHECK_MS)
         assertEquals(1, directDials, "the 15 s recheck switches once the turn ended")
+    }
+
+    @Test fun aFullImageReplyMustArriveBeforeThePlannedSwitch() {
+        val r = readyOnRelay()
+        val sent = mutableListOf<Frame>()
+        r.onSendForTest = { sent += it }
+        r.receiveForTest(SessionLive("c1", "/w", "s1", executing = false))
+        val ref = ImageRefs.of(byteArrayOf(1, 2, 3))
+        r.requestFullImage(ref, 10L, 0)
+        val request = sent.filterIsInstance<FetchImage>().single()
+        r.onAppForeground()
+        advance(RepathController.FOREGROUND_DELAY_MS + 1)
+        assertEquals(0, directDials, "the image reply still belongs to the relay socket")
+
+        r.receiveForTest(ImageContent("c1", ref, requestId = request.requestId, image = ImageData("image/png", "AQID")))
+        assertTrue(ref in r.fullImages)
+        assertFalse(ref in r.fullImagePending)
+        advance(RepathController.BUSY_RECHECK_MS)
+        assertEquals(1, directDials, "a completed image no longer prevents repathing")
+    }
+
+    @Test fun anImageTimeoutReleasesThePlannedSwitch() {
+        val r = readyOnRelay()
+        r.onSendForTest = {}
+        r.receiveForTest(SessionLive("c1", "/w", "s1", executing = false))
+        val ref = ImageRefs.of(byteArrayOf(1, 2, 3))
+        r.requestFullImage(ref, 10L, 0)
+        r.onAppForeground()
+        advance(RepathController.FOREGROUND_DELAY_MS + 1)
+        assertEquals(0, directDials)
+        advance(PocketRepository.FULL_IMAGE_TIMEOUT_MS + RepathController.BUSY_RECHECK_MS)
+        assertFalse(ref in r.fullImagePending)
+        assertTrue(ref in r.fullImageUnavailable)
+        assertEquals(1, directDials, "an unanswered image cannot pin the relay forever")
     }
 
     @Test fun disabledDoesNothing() {

@@ -13,6 +13,9 @@ import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.HelpCenterScreen
 import dev.ccpocket.app.ui.HelpEntryPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.swing.Swing
 import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
 import kotlin.test.Test
@@ -30,7 +33,7 @@ class DesktopScreenshotTest {
     private val scale = 2 // pixel scale; [w]/[h] are LOGICAL dp, the scene takes pixels → multiply
 
     private fun shot(name: String, w: Int, h: Int, content: @Composable () -> Unit) {
-        val scene = ImageComposeScene(width = w * scale, height = h * scale, density = Density(scale.toFloat())) {
+        val scene = ImageComposeScene(width = w * scale, height = h * scale, density = Density(scale.toFloat()), coroutineContext = Dispatchers.Swing) {
             PocketTheme { Box(Modifier.fillMaxSize().background(Tok.base)) { content() } }
         }
         try {
@@ -61,7 +64,9 @@ class DesktopScreenshotTest {
     private fun seed(block: SeedDesktopModel.() -> Unit = {}) = SeedDesktopModel().apply(block)
 
     @Test
-    fun generate() {
+    fun generate() = runBlocking(Dispatchers.Swing) {
+        // Compose schedules layout/effects on Swing; create, render and close the scene there too.
+        // Rendering on the JUnit worker races the UI dispatcher once an effect invalidates a layer.
         val W = 1180; val H = 798
         shot("01-shell.png", W, H) { WindowFrame(seed()) } // fleet: machine-grouped sidebar + chat
         shot("02-codex-diff-approval.png", W, H) { WindowFrame(seed { selectSession(sessions[2]) }) }
@@ -85,4 +90,3 @@ class DesktopScreenshotTest {
         assertTrue(shots.size >= 9, "expected at least 9 screenshots")
     }
 }
-

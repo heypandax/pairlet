@@ -47,6 +47,7 @@ class ChatTranscript {
     fun clearMessages() {
         sessionNotice = null
         cachedRows = 0
+        retainedHistoryRows = 0
         messages.clear()
     }
 
@@ -61,6 +62,10 @@ class ChatTranscript {
      */
     private var cachedRows = 0
 
+    /** Scrollback retained BEFORE the latest full window. Pages cover this prefix next; the window and
+     *  anything streamed after it must stay outside their anchor search (repeated prompts are common). */
+    private var retainedHistoryRows = 0
+
     /** Seed a freshly reset conversation with a left session's cached rows, before its open goes out. NOT a
      *  history arrival: the replay-echo dedupe stays disarmed and no receipt sees it — only the reply is. */
     fun showCached(rows: List<ChatItem>) {
@@ -73,11 +78,24 @@ class ChatTranscript {
         }
     }
 
-    /** One page of OLDER history in front of everything (issue #147). Part of a cached head when it lands
-     *  on one: those rows sit before the same cursor. */
-    fun prependHistory(older: List<ChatItem>) {
-        messages.addAll(0, older)
-        if (cachedRows > 0) cachedRows += older.size
+    /** Apply an older page and return the number of newly inserted rows for the viewport anchor. A full
+     *  replay may have retained overlapping scrollback, so only that prefix participates in the merge. */
+    fun prependHistory(older: List<ChatItem>): Int {
+        if (older.isEmpty()) return 0
+        if (retainedHistoryRows == 0) {
+            messages.addAll(if (sessionNotice != null && messages.firstOrNull() === sessionNotice) 1 else 0, older)
+            if (cachedRows > 0) cachedRows += older.size
+            return older.size
+        }
+        val all = messages.filterNot { it === sessionNotice }
+        val prefixSize = retainedHistoryRows.coerceAtMost(all.size)
+        val merged = TranscriptMerge.mergeWithPrefix(all.take(prefixSize), older)
+        retainedHistoryRows = merged.retainedPrefixRows
+        messages.clear()
+        sessionNotice?.let { messages.add(it) }
+        messages.addAll(merged.rows)
+        messages.addAll(all.drop(prefixSize))
+        return (merged.rows.size - prefixSize).coerceAtLeast(0)
     }
 
     /** The last row is still one of the cached head's — a live text block must not glue onto it: a delta
@@ -317,7 +335,7 @@ class ChatTranscript {
             // on the delta's first row, after the very row that already carries it.
             if (cached > 0) head + TranscriptMerge.merge(local, replay) else TranscriptMerge.mergeDelta(local, replay)
         } else {
-            TranscriptMerge.merge(local, replay)
+            TranscriptMerge.mergeWithPrefix(local, replay).also { retainedHistoryRows = it.retainedPrefixRows }.rows
         }
         val displayed = sessionNotice?.let { listOf(it) + merged } ?: merged
         if (displayed != messages) {

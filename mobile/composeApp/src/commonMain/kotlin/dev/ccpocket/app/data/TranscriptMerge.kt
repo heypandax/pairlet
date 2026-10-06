@@ -29,11 +29,17 @@ package dev.ccpocket.app.data
 object TranscriptMerge {
 
     /** Merge [replay] (authoritative for what it covers) into [local]. Pure; safe to call repeatedly. */
-    fun merge(local: List<ChatItem>, replay: List<ChatItem>): List<ChatItem> {
-        if (replay.isEmpty()) return emptyList() // the daemon's /clear wipe must still clear
-        if (local.isEmpty()) return replay
+    fun merge(local: List<ChatItem>, replay: List<ChatItem>): List<ChatItem> = mergeWithPrefix(local, replay).rows
+
+    /** Rows before the replay's anchor are still displayed but have not been covered by this window.
+     *  Older pages must reconcile that prefix instead of blindly inserting another copy of it. */
+    internal data class MergedHistory(val rows: List<ChatItem>, val retainedPrefixRows: Int = 0)
+
+    internal fun mergeWithPrefix(local: List<ChatItem>, replay: List<ChatItem>): MergedHistory {
+        if (replay.isEmpty()) return MergedHistory(emptyList()) // the daemon's /clear wipe must still clear
+        if (local.isEmpty()) return MergedHistory(replay)
         val anchor = findAnchor(local, replay)
-            ?: return replayResolvingPending(local, replay) // nothing lines up — replay wholesale
+            ?: return MergedHistory(replayResolvingPending(local, replay)) // nothing lines up — replay wholesale
         val out = ArrayList<ChatItem>(local.size + replay.size)
         out.addAll(local.subList(0, anchor)) // scrollback older than the replay window survives
         var li = anchor
@@ -55,7 +61,7 @@ object TranscriptMerge {
                 // hard divergence: the on-disk replay wins from here — but typed-and-undelivered
                 // bubbles in the dropped region are rescued (input must never vanish)
                 out.addAll(replayResolvingPending(local.subList(li, local.size), replay.subList(ri, replay.size)))
-                return out
+                return MergedHistory(out, anchor)
             }
             when (l) {
                 is ChatItem.Assistant -> {
@@ -104,7 +110,7 @@ object TranscriptMerge {
         }
         while (li < local.size) { out.add(local[li]); li++ } // replay exhausted → local is ahead; keep it
         if (ri < replay.size) out.addAll(replay.subList(ri, replay.size)) // the reconnect gap — the backfill
-        return out
+        return MergedHistory(out, anchor)
     }
 
     /**

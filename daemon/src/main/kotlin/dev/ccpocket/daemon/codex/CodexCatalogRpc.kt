@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.codex
 
+import dev.ccpocket.daemon.util.ProcessTree
 import dev.ccpocket.daemon.util.logger
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -138,7 +139,9 @@ object CodexCatalogRpc {
             withTimeoutOrNull(timeoutMs) { conversation.await() }
                 ?: CatalogOutcome.Failure("the Codex app-server did not answer in time")
         } finally {
-            runCatching { proc.destroyForcibly() }
+            // npm / .cmd / shell launchers own the actual app-server as a descendant. Killing just the
+            // launcher orphans that server and leaves its inherited stdout holding readLine open.
+            ProcessTree.terminate(proc, graceMs = EXIT_GRACE_MS)
             runCatching { proc.waitFor(EXIT_GRACE_MS, TimeUnit.MILLISECONDS) }
             conversation.cancel()
         }

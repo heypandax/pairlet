@@ -536,6 +536,7 @@ class ResetInventoryTest {
             transcript.replayEcho        K K K R K K K K
             transcript.thinkStartMs      K K K R K K K K
             transcript.cachedRows        R R R R R R R R
+            transcript.retainedHistoryRows R R R R R R R R
             sessionCache.entries         R R R C C C K C  # 缓存-存 / 缓存-清
             sessionCache.bytes           R R R C C C K C  # 缓存-存 / 缓存-清
             sidePanes.panes              R R R K K K K K

@@ -1,9 +1,11 @@
-What's new in 2.4.0
+What's new in 2.5.0
 
-- Dictation: a slow connection no longer shows a failure first. Uploading and waiting are shown separately, a transcript that arrives late is still used, and retrying does not transcribe the same recording twice.
-- Reopening a session you just looked at shows what you already had right away and then adds what is new, so long sessions do not reload their whole history each time.
-- Approvals: a card ignores taps for a moment after it appears, so a double tap cannot approve the next request, and its buttons only act on the request they show.
-- While a photo is still being compressed the send button waits, instead of sending the message without the photo.
-- Settings > About now shows this device's fingerprint and your computer's, so you can check that you paired with your own computer.
-- Removed a few rarely used features: review requests, handing a session over to a collaborator, sharing a folder with a guest, and the unencrypted direct-connection option. Normal pairing and sessions are not affected.
-- After you also update Pairlet on your computer: Kimi sessions run with the model and permission mode you chose, and a device you revoked on the computer stays revoked after a restart.
+- Long conversations open faster: recent messages load first, with more history added as needed. Scrolling back no longer duplicates loaded history or new messages.
+- Images in history load as previews first. Tap an image to fetch the original, reducing the wait on slower connections.
+- More reliable connections: fewer unnecessary reconnects on slow networks. When you return to the same local network, Pairlet switches back to a direct connection while idle, keeping the current connection during transfers and replies.
+- A new + button at the top of a conversation lets you start another session in the current project.
+- Fixed Follow System always using dark mode. Appearance now follows your system setting.
+- More reliable approval and question notifications, even when another device is online.
+- Model lists appear from cache and refresh in the background, reducing waits and preventing older lists from replacing newer models.
+
+Update Pairlet on your computer too for the full connection and history improvements.

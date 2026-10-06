@@ -2717,8 +2717,8 @@ class PocketRepository(
             pendingFiles.any { it.state == FileUpState.Queued || it.state == FileUpState.Uploading }) return false
         // voice: recording, transcribing, or its upload
         if (voice.value !is VoiceState.Idle && voice.value !is VoiceState.Failed || voiceUploading.value) return false
-        // history paging, file view / export
-        if (historyLoadingOlder.value || outstanding(NonSessionRequest.FILE) > 0) return false
+        // history paging, full-image downloads, file view / export: replies belong to the current socket
+        if (historyLoadingOlder.value || fullImagePending.isNotEmpty() || outstanding(NonSessionRequest.FILE) > 0) return false
         // project pin sync
         if (pinLink.syncInFlight) return false
         return true
@@ -4632,9 +4632,8 @@ class PocketRepository(
                 historyLoadingOlder.value = false
                 val older = f.messages.map(::historyItem)
                 if (older.isNotEmpty()) {
-                    transcript.prependHistory(older)
+                    lastHistoryPrependCount = transcript.prependHistory(older)
                     historyRows = historyRows?.let { older + it } // the snapshot's window widens the same way
-                    lastHistoryPrependCount = older.size
                     historyPrependGen.value++
                 }
                 historyFirstSeq = f.firstSeq ?: historyFirstSeq

@@ -218,7 +218,7 @@ open class SeedDesktopModel : DesktopModel {
             ),
         ),
     )
-    override val appVersion = "2.4.0"
+    override val appVersion = "2.5.0"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     // demo/screenshot data: never show the developer-machine "Launch Dia" pill, whatever the host has installed
     override val diaCdpAvailable = false
