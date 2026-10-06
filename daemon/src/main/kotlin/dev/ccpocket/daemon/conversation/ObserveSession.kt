@@ -179,6 +179,10 @@ class ObserveSession(
         to.emit(dev.ccpocket.protocol.ConvoHistoryPage(convoId, slice.messages, firstSeq = slice.firstSeq, hasMore = slice.hasMore))
     }
 
+    /** The replayed rows at transcript cursor [seq] — same contract as [Conversation.historyRowsAt]. */
+    fun historyRowsAt(seq: Long): List<dev.ccpocket.protocol.HistoryMessage> =
+        reader.page(activeFile, seq + 1, ROWS_AT_CURSOR).messages.filter { it.seq == seq }
+
     /** The latest turn progress of [current] as the shared reducer derives it; null for a backend without evidence. */
     private fun progressOf(current: Path): ObservedProgress? {
         val now = clock()

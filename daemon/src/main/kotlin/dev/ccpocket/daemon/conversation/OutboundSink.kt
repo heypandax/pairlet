@@ -35,3 +35,7 @@ fun sinkKey(sink: OutboundSink): Any = (sink as? KeyedSink)?.key ?: sink
  *  mints every device sink under it, [dev.ccpocket.daemon.session.SessionRegistry.detachDevice] matches on it, and the idle reaper reads it as "this
  *  view rides the relay" for the per-session occupancy check (issue #216). */
 const val DEVICE_SINK_KEY_PREFIX = "dev:"
+
+/** How many of the newest rows before a cursor are read to find the rows AT it (lean history's picture
+ *  read-back): one source line yields a handful of rows at most — a reply's text plus its tool calls. */
+internal const val ROWS_AT_CURSOR = 16

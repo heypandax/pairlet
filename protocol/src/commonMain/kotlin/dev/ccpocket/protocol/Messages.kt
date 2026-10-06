@@ -192,9 +192,20 @@ data class SendPrompt(
     val diagnostic: DiagnosticContext? = null,
 ) : ToDaemon
 
-/** A base64 image attached to a prompt — downscaled on the phone to fit the relay frame cap. */
+/**
+ * A base64 image: a prompt attachment on the way up (downscaled on the phone to fit the relay frame cap), and
+ * the pictures a history row or a tool result carries on the way down.
+ *
+ * [ref] (lean history, 2026-10): non-null ONLY on a daemon → client image, and only for a connection that
+ * declared [ClientCaps.supportsImagePreviews]. It means [base64] is a reduced PREVIEW sized for the chat
+ * tile, and names the full version the daemon serves on demand ([FetchImage] → [ImageContent]). The value is
+ * [ImageRefs.of] the full image's bytes, so a client holding the same picture locally (the prompt it just
+ * sent) can recognise it without downloading anything. Null — every uplink image, every image an old daemon
+ * sends, and any image already small enough to ship whole — means [base64] IS the picture. Trailing optional
+ * both ways: an old daemon never sets it, an old client never declares the capability and so never sees one.
+ */
 @Serializable
-data class ImageData(val mediaType: String, val base64: String)
+data class ImageData(val mediaType: String, val base64: String, val ref: String? = null)
 
 /** Resolve a pending permission prompt. askId == the Anthropic request_id (1:1). */
 @Serializable
@@ -1403,6 +1414,14 @@ data class DaemonInfo(
      * the client shows no observation entry and never sends `observeOnly` (it would be silently ignored).
      */
     val supportsSessionObservationV1: Boolean = false,
+    /**
+     * Capability advertisement (lean history, docs/design/SLOW-LINK-RESILIENCE.md §6): this daemon honours
+     * [ClientCaps.supportsImagePreviews] and [ClientCaps.supportsShortHistoryWindow] — previews with
+     * [FetchImage], and history frames (first window AND older pages) bounded by bytes. ABSENT (older daemon)
+     * decodes to false: its older-history pages are still up to a hundred full rows each, so a client must not
+     * fetch several of them on its own to fill a short window.
+     */
+    val supportsLeanHistory: Boolean = false,
 ) : ToPhone
 
 @Serializable
@@ -2219,6 +2238,17 @@ data class ClientCaps(
     // rows, managed entries and SessionLive. The daemon leaves those fields null for a connection that did not
     // declare it (such a peer still gets the legacy `observing` + notice for a read-only open).
     val supportsSessionObservationV1: Boolean = false,
+    // lean history (trailing optional, docs/design/SLOW-LINK-RESILIENCE.md §6): this connection renders an
+    // image whose [ImageData.ref] is set as a preview and fetches the full picture itself ([FetchImage]) when
+    // the user opens it. The daemon sends previews only to a connection that declared this; everyone else
+    // keeps the full-size thumbnails.
+    val supportsImagePreviews: Boolean = false,
+    // lean history (trailing optional): this connection pages older history ON ITS OWN when the window it
+    // was given does not fill the screen, so the daemon may answer an open with a first window bounded by
+    // bytes (the newest rows only, `hasMore = true`) and keep its older-history pages small. A client that
+    // only pages when the reader scrolls to the top must NOT declare it: a window too short to scroll would
+    // strand it there.
+    val supportsShortHistoryWindow: Boolean = false,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────

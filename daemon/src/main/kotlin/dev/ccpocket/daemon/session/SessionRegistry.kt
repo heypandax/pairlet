@@ -1278,6 +1278,34 @@ class SessionRegistry(
     }
 
     /**
+     * The full version of a picture a connection was sent as a preview (lean history, SLOW-LINK-RESILIENCE §6).
+     * Answered to the REQUESTING sink only, always with exactly one [dev.ccpocket.protocol.ImageContent].
+     *
+     * Only for a conversation (or read-only view) that is open on this daemon right now — the same reach as
+     * [fetchHistoryPage], and what keeps a ref from outliving the conversation it was issued in. The picture
+     * comes from memory when it is still there; otherwise the transcript is read back at the row's cursor,
+     * which a restart or an aged-out entry cannot take away.
+     */
+    suspend fun fetchImage(f: dev.ccpocket.protocol.FetchImage, sink: OutboundSink) {
+        fun reply(image: dev.ccpocket.protocol.ImageData?, error: String?) =
+            dev.ccpocket.protocol.ImageContent(f.convoId, f.ref, image, error, f.requestId)
+        if (!dev.ccpocket.protocol.ImageRefs.isValid(f.ref)) {
+            sink.emit(reply(null, dev.ccpocket.protocol.ImageContent.ERROR_BAD_REF)); return
+        }
+        val convo = get(f.convoId)
+        val observe = if (convo == null) mutex.withLock { observes[f.convoId] } else null
+        if (convo == null && observe == null) {
+            sink.emit(reply(null, dev.ccpocket.protocol.ImageContent.ERROR_NO_CONVERSATION)); return
+        }
+        val image = dev.ccpocket.daemon.media.ImagePreviews.full(f.convoId, f.ref) ?: f.seq?.let { seq ->
+            val rows = runCatching { convo?.historyRowsAt(seq) ?: observe?.historyRowsAt(seq) }.getOrNull().orEmpty()
+            dev.ccpocket.daemon.media.ImagePreviews.recover(f.convoId, f.ref, f.index, rows.map { it.images })
+        }
+        // a recovered picture is the full rendition, never a preview: drop any ref it might carry
+        sink.emit(if (image != null) reply(image.copy(ref = null), null) else reply(null, dev.ccpocket.protocol.ImageContent.ERROR_UNAVAILABLE))
+    }
+
+    /**
      * Rename [sessionId]'s title (issue #158) by landing Claude's own `custom-title` transcript record,
      * picking the writer by who holds the file:
      *  - a conversation THIS daemon is driving with a live process → the CLI renames itself

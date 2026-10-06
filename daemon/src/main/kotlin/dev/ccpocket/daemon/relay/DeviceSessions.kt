@@ -568,6 +568,7 @@ class DeviceSessions(
                 supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
                 supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
                 supportsPromptRecovery = true,
+                supportsLeanHistory = true, // SLOW-LINK-RESILIENCE §6: previews + byte-bounded history for declared connections
                                 supportsDiagnostics = true, // #122: acked prompts stay ledgered until agent consumption
                 supportsProjectPins = true, // #362: this build owns the per-computer project-pin list
                 // #360: managed session list — same source as the LAN transport's copy
@@ -1090,13 +1091,15 @@ class DeviceSessions(
         // KTOR-6963: a shipped iOS build drops the whole link on any message over 1 MiB, whatever the relay
         // allows. The frame is sized to the LIVE connection's declared cap (the newest handshake's holder —
         // no link means the frame is undeliverable anyway, see below) before it is sealed.
-        val cap = mutex.withLock { sessions[deviceId]?.activeCaps?.maxFrameBytes } ?: return
+        // …and, for a connection that declared it, the lean shape: picture previews and a byte-bounded window.
+        val holder = mutex.withLock { sessions[deviceId]?.activeCaps } ?: return
+        val cap = holder.maxFrameBytes
         var shrunk = false
         val json = try {
             dev.ccpocket.daemon.server.FrameFitter.encodeWithin(
-                Envelope(nextId.getAndIncrement().toString(), 0L, body = frame), cap,
-                // SLOW-LINK-RESILIENCE 3.3: routine, so info — and not `shrunk`, which means "to the client's frame cap"
-                onSoftTrim = { log.info("history soft cap for ${deviceId.take(8)}…: $it") },
+                Envelope(nextId.getAndIncrement().toString(), 0L, body = frame), cap, holder.lean(),
+                // SLOW-LINK-RESILIENCE 3.3 / §6: routine, so info — and not `shrunk`, which means "to the client's frame cap"
+                onSoftTrim = { log.info("history window for ${deviceId.take(8)}…: $it") },
             ) { shrunk = true; log.warn("frame cap for ${deviceId.take(8)}…: $it") }
         } catch (error: Exception) {
             Diagnostics.report(ErrorPath.PAYLOAD_SEND, DiagnosticStage.ENCODE, ErrorCode.UNEXPECTED, error)

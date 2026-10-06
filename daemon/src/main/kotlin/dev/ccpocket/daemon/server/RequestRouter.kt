@@ -287,6 +287,17 @@ class RequestRouter(
         /** issue #380 live folding: the client wants an outcome-only RESULT for every finished ordinary tool. */
         @Volatile var supportsToolOutcomes: Boolean = false
 
+        /** Lean history (SLOW-LINK-RESILIENCE §6): the client shows an image carrying a ref as a preview and
+         *  fetches the full picture itself. Read by the two sealers through [lean]. */
+        @Volatile var supportsImagePreviews: Boolean = false
+
+        /** Lean history: the client pages a window that does not fill its screen, so history frames toward it
+         *  are bounded by bytes ([FrameFitter.LEAN_FIRST_WINDOW_BYTES]). Read by the two sealers through [lean]. */
+        @Volatile var supportsShortHistoryWindow: Boolean = false
+
+        /** The lean shape this connection declared, for [FrameFitter.encodeWithin]. */
+        fun lean(): FrameFitter.Lean = FrameFitter.Lean(supportsImagePreviews, supportsShortHistoryWindow)
+
         /** read-only session observation: this connection decodes the observation snapshot on rows / SessionLive. */
         @Volatile var supportsSessionObservation: Boolean = false
 
@@ -525,6 +536,8 @@ class RequestRouter(
                 caps?.supportsVoiceMemo = frame.supportsVoiceMemo // gates pocket/memo.state
                 caps?.supportsSessionObservation = frame.supportsSessionObservationV1 // gates the observation snapshot
                 caps?.maxFrameBytes = ClientCapsHolder.frameCap(frame.maxFrameBytes) // KTOR-6963: sizes every frame sealed to this connection
+                caps?.supportsImagePreviews = frame.supportsImagePreviews // lean history: previews + FetchImage
+                caps?.supportsShortHistoryWindow = frame.supportsShortHistoryWindow // lean history: byte-bounded windows
             }
 
             is ListDirectories ->
@@ -941,6 +954,9 @@ class RequestRouter(
             // older-history page (issue #147): a transcript parse → off the inbound pump; answered to
             // the requesting sink only (never fanned out to other attached clients)
             is FetchHistoryPage -> scope.launch { registry.fetchHistoryPage(frame, sink) }
+            // lean history: the full version of a picture this connection was sent as a preview. Memory first,
+            // else a transcript parse at the row's cursor → off the inbound pump, answered to the requester only
+            is dev.ccpocket.protocol.FetchImage -> scope.launch { registry.fetchImage(frame, sink) }
             // rewind / fork (issue #282): a transcript parse plus (on execute) a conversation swap, so
             // off the inbound loop like the other disk-bound frames. Answered to the requesting sink only —
             // the registry never fans a rewind reply out.

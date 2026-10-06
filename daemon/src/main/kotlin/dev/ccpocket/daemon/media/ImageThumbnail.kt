@@ -111,7 +111,12 @@ object ImageThumbnail {
         // Alpha is preserved only when PNG also fits the ceiling: re-encoding a screenshot with a
         // transparent chrome as JPEG would black out (or white out) exactly the region that was
         // see-through, which reads as a rendering bug rather than a compression trade.
-        val wantsAlpha = src.colorModel.hasAlpha()
+        //
+        // …and only when something in it actually IS see-through. Screenshot tools write an alpha channel
+        // as a matter of course with every pixel opaque; keeping those as PNG cost roughly twice the bytes
+        // of the same picture as JPEG (measured 2026-10-06: 162 KB vs 79 KB of base64 at 1024 px) for no
+        // visible difference.
+        val wantsAlpha = src.colorModel.hasAlpha() && hasTransparentPixel(src)
         var edge = MAX_EDGE
         while (edge >= MIN_EDGE) {
             val scaled = scaleToEdge(src, edge, keepAlpha = wantsAlpha)
@@ -133,6 +138,33 @@ object ImageThumbnail {
             edge /= 2
         }
         return drop(image, "still over ${MAX_BASE64_BYTES} B of base64 at ${MIN_EDGE}px")
+    }
+
+    /** Does any pixel of [img] let the background through? False for the common "alpha channel present,
+     *  every pixel opaque" screenshot. One pass over the alpha band, stopping at the first hit. */
+    internal fun hasTransparentPixel(img: BufferedImage): Boolean {
+        // no separate alpha band: a palette image (PNG-8 with tRNS, a transparent GIF) keeps its transparency
+        // in the colour table, where only the resolved pixels can answer
+        val alpha = img.alphaRaster ?: return hasTransparentArgb(img)
+        val w = alpha.width
+        val row = IntArray(w)
+        // the opaque value is the band's own maximum (255 for 8-bit, 65535 for 16-bit PNGs)
+        val opaque = (1 shl alpha.sampleModel.getSampleSize(0)) - 1
+        for (y in 0 until alpha.height) {
+            alpha.getSamples(0, y, w, 1, 0, row)
+            for (x in 0 until w) if (row[x] != opaque) return true
+        }
+        return false
+    }
+
+    private fun hasTransparentArgb(img: BufferedImage): Boolean {
+        if (!img.colorModel.hasAlpha()) return false
+        val row = IntArray(img.width)
+        for (y in 0 until img.height) {
+            img.getRGB(0, y, img.width, 1, row, 0, img.width)
+            for (argb in row) if (argb ushr 24 != 0xFF) return true
+        }
+        return false
     }
 
     /**
