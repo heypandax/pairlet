@@ -247,6 +247,10 @@ internal class ProjectPinLink(
 
     val scopeKey: PinScopeKey? get() = bound?.key
 
+    /** #404: a pin request is on the wire — a planned transport switch now would strand its reply. */
+    val syncInFlight: Boolean
+        get() = generation?.let { it.inflightRequestId != null || it.outstanding.isNotEmpty() } == true
+
     /** Point this repository at [binding]'s pins. A no-op only for the same identity with a still-current lease; a
      *  changed device or credential drops the old lease and generation first. Never copies another scope. */
     fun bind(binding: PairedDaemon?, demo: Boolean) {

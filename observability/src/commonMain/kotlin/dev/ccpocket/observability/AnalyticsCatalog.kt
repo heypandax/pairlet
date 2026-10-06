@@ -11,7 +11,7 @@ object AnalyticsCatalog {
 
     val events: Set<String> = setOf(
         "session_open_result", "session_open_recovered", "prompt_response_result", "prompt_response_recovered",
-        "turn_result", "connection_recovery_result", "approval_apply_result", "file_view_result",
+        "turn_result", "connection_recovery_result", "transport_repath", "approval_apply_result", "file_view_result",
         "background_task_result", "value_reached", "first_value_observed", "feature_exposed", "feature_used",
         "app_launch", "onboarding_shown", "onboarding_cta", "demo_entered", "demo_exited", "pair_started", "paired",
         "pair_failed", "connected", "disconnected", "conn_phase", "conn_failed", "session_opened",
