@@ -3201,9 +3201,19 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             if (questionAsk != null && cardOwnsInput) {
                 // composer yields while the card's field has the keyboard
             } else if (repo.observing.value) {
-                Row(Modifier.fillMaxWidth().background(Tok.surface).windowInsetsPadding(WindowInsets.navigationBars).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(Res.string.observing_notice), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Button({ repo.takeOver() }) { Text(stringResource(Res.string.continue_here)) }
+                val observation = repo.sessionObservation.value
+                if (observation?.readOnly == true) {
+                    // read-only by policy (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.3): no "Continue here", no send —
+                    // the daemon refuses a take-over anyway; this bar says who drives it and what the record proves
+                    dev.ccpocket.app.ui.session.ObservedReadOnlyBar(
+                        observation,
+                        Modifier.fillMaxWidth().background(Tok.surface).windowInsetsPadding(WindowInsets.navigationBars).padding(12.dp),
+                    )
+                } else {
+                    Row(Modifier.fillMaxWidth().background(Tok.surface).windowInsetsPadding(WindowInsets.navigationBars).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(Res.string.observing_notice), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        Button({ repo.takeOver() }) { Text(stringResource(Res.string.continue_here)) }
+                    }
                 }
             } else {
                 val hasReady = repo.hasReadyImages()

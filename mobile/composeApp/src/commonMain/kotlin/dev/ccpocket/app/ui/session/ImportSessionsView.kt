@@ -98,10 +98,37 @@ fun ImportSessionsView(
             else if (readOnly) NoticeLine(stringResource(Res.string.managed_sessions_read_only), Tok.danger)
             else if (uninitialized) NoticeLine(stringResource(Res.string.managed_sessions_enable_required, agentName(state.agent)), Tok.warn)
             SearchField(state.queryInput) { onEvent(Ev.QueryTyped(it)) }
+            if (state.observationOffered) ObserveToggle(state.observeAsDot) { onEvent(Ev.ToggleObserveAsDot(it)) }
             if (state.agents.size > 1) AgentFilter(state) { onEvent(Ev.SelectAgent(it)) }
             if (state.list == ListPhase.Loaded && !state.complete) PartialNotice(state.diagnostic)
             Body(state, onEvent, wide, importAllowed = !locked && !readOnly)
         }
+    }
+}
+
+/** Test tag of the "link as a Dot sub-session" switch (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.2). */
+const val IMPORT_OBSERVE_TOGGLE_TAG = "managed_sessions_observe_toggle"
+
+/**
+ * The one import-time option read-only observation adds: imports from this screen also bind the member read-only.
+ * Plain words about what it does NOT do (send, take over, verify) sit right under it, since that is the whole point.
+ */
+@Composable
+private fun ObserveToggle(on: Boolean, onToggle: (Boolean) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(10.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Row(Modifier.fillMaxWidth().testTag(IMPORT_OBSERVE_TOGGLE_TAG).clickable { onToggle(!on) }, verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(Res.string.import_observe_toggle), color = Tok.tx, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                style = tightCenter(13.sp), modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(10.dp))
+            Pill(stringResource(if (on) Res.string.import_observe_on else Res.string.import_observe_off), if (on) Tok.accent else Tok.muted)
+        }
+        Text(stringResource(Res.string.import_observe_hint), color = Tok.tx2, fontSize = 11.5.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
@@ -325,6 +352,7 @@ internal fun ManagedSessionsError.messageRes(): StringResource = when (this) {
     ManagedSessionsError.STORE_CORRUPT -> Res.string.managed_sessions_error_store_corrupt
     ManagedSessionsError.CURSOR_EXPIRED -> Res.string.managed_sessions_error_cursor_expired
     ManagedSessionsError.UNCONFIRMED -> Res.string.managed_sessions_error_unconfirmed
+    ManagedSessionsError.OBSERVATION_CONFLICT -> Res.string.session_observation_conflict
 }
 
 /** Test tag of the first-use notice card. */

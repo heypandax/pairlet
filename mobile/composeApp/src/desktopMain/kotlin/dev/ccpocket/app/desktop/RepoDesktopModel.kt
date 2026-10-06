@@ -1814,6 +1814,7 @@ class RepoDesktopModel(
 
     override val observing: Boolean get() = repo.observing.value
     override fun takeOver() { repo.takeOver() }
+    override val sessionObservation: dev.ccpocket.protocol.SessionObservation? get() = repo.sessionObservation.value
 
     // stop-refill (#48) applies only this close to the prompt's own send — the CLI-style "oops" beat
     // (grab it back before the run really gets going), not a revise-anytime affordance. A test seam.

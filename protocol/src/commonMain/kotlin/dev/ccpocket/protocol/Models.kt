@@ -207,6 +207,13 @@ data class SessionSummary(
     // NOT a "collapsed" flag on the original — a flag would need a second write to a row the daemon may
     // not be scanning, while the child's own pointer is written once and reads the same to every client.
     val rewindOf: String? = null,
+    /**
+     * Read-only observation of this session (docs/design/DOTS-SESSION-OBSERVABILITY.md): its Pairlet-own binding
+     * and the latest turn progress the daemon could prove from the native record. Null = not an observed member,
+     * an older daemon, or a connection that did not declare [ClientCaps.supportsSessionObservationV1]. Trailing
+     * optional both ways; never an authorization input on the client.
+     */
+    val observation: SessionObservation? = null,
 )
 
 /**

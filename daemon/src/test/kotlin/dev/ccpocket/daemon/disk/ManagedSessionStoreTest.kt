@@ -177,7 +177,7 @@ class ManagedSessionStoreTest {
         val file = storeFile(s)
         val cases = listOf(
             "not json at all",
-            """{"schemaVersion":2,"canonicalWorkdir":"$canonical","members":[],"order":[]}""",
+            """{"schemaVersion":3,"canonicalWorkdir":"$canonical","members":[],"order":[]}""",
             """{"schemaVersion":1,"revision":1,"canonicalWorkdir":"$canonical","perAgentMigration":{},"members":[],"order":[],"futureField":1}""",
             """{"schemaVersion":1,"revision":1,"canonicalWorkdir":"$canonical","perAgentMigration":{"kimi":"ready"},"members":[],"order":[]}""",
             """{"schemaVersion":1,"revision":1,"canonicalWorkdir":"$canonical","perAgentMigration":{},"members":[{"key":{"agent":"claude","canonicalWorkdir":"$canonical","nativeSessionId":"a"},"origin":"legacy_adopted","createdAt":1,"lastKnownSummary":null}],"order":[]}""",

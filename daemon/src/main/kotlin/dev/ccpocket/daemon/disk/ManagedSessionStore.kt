@@ -12,8 +12,10 @@ import dev.ccpocket.protocol.truncateUtf8
 import dev.ccpocket.protocol.ManagedMigrationState
 import dev.ccpocket.protocol.ManagedSessionErrors
 import dev.ccpocket.protocol.ManagedSessionOrigin
+import dev.ccpocket.protocol.ObservationBinding
 import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.isValidManagedId
+import dev.ccpocket.protocol.isValidObservationBinding
 import dev.ccpocket.protocol.isValidManagedWorkdir
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -52,6 +54,14 @@ data class ManagedMember(
     val origin: ManagedSessionOrigin,
     val createdAt: Long,
     val lastKnownSummary: LastKnownSummary? = null,
+    /**
+     * Read-only observation binding (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.1): Pairlet's own record that this
+     * member is driven by an outside task and only watched here. The persisted value is the control-policy input
+     * the registry consults; the native transcript is never rewritten. Omitted from the file when null, so a store
+     * without bindings keeps its schema-1 bytes exactly; a file that carries one is written as schema 2, which an
+     * older daemon refuses (read-only) rather than silently dropping the binding on its next write.
+     */
+    val observation: ObservationBinding? = null,
 )
 
 /**
@@ -84,9 +94,23 @@ data class ManagedProjectState(
     fun ambiguousSessionIds(): Set<String> =
         members.groupBy { it.key.nativeSessionId }.filterValues { rows -> rows.map { it.key.agent }.distinct().size > 1 }.keys
 
+    /** The schema this state must be written under: 2 once any member carries an observation binding, else 1. */
+    fun requiredSchema(): Int = if (members.any { it.observation != null }) SCHEMA_VERSION_OBSERVATION else SCHEMA_VERSION
+
     companion object {
         const val SCHEMA_VERSION = 1
+        /** Schema 2 = schema 1 plus [ManagedMember.observation]. Written only when a binding exists. */
+        const val SCHEMA_VERSION_OBSERVATION = 2
+        val SUPPORTED_SCHEMAS: Set<Int> = setOf(SCHEMA_VERSION, SCHEMA_VERSION_OBSERVATION)
     }
+}
+
+/** What a binding lookup for one session found. [Unavailable] (corrupt / unreadable store) must be treated as
+ *  "cannot prove the session is controllable": control requests refuse, nothing falls back to writable. */
+sealed interface ObservationLookup {
+    data object Unbound : ObservationLookup
+    data class Bound(val binding: ObservationBinding) : ObservationLookup
+    data class Unavailable(val reason: String) : ObservationLookup
 }
 
 /** What reading one project's state found. Only [Missing] and [Loaded] may ever be mutated. */
@@ -193,17 +217,52 @@ class ManagedSessionStore internal constructor(
      * COMPLETE. Importing an existing member commits nothing and reports `changed = false`.
      */
     @Synchronized
-    fun import(workdir: String, agent: AgentKind, sessionId: String, scan: SessionScan): ManagedMutation =
+    fun import(workdir: String, agent: AgentKind, sessionId: String, scan: SessionScan, observation: ObservationBinding? = null): ManagedMutation =
         mutate(workdir, agent, sessionId) { state, canonical ->
-            if (state.member(agent, sessionId) != null) return@mutate ManagedMutation.Committed(state, changed = false)
+            if (observation != null && !isValidObservationBinding(observation)) return@mutate ManagedMutation.Refused(ManagedSessionErrors.OBSERVATION_INVALID)
+            val existing = state.member(agent, sessionId)
+            if (existing != null) {
+                // an existing member imported again WITH a binding: that is a bind request on it (same durable write)
+                if (observation == null || existing.observation == observation) return@mutate ManagedMutation.Committed(state, changed = false)
+                return@mutate ManagedMutation.Committed(state.copy(members = state.members.map { if (it === existing) it.copy(observation = observation) else it }), changed = true)
+            }
             scanMismatch(scan, agent, canonical)?.let { return@mutate it }
             val row = scan.items.firstOrNull { it.sessionId == sessionId }
                 ?: return@mutate ManagedMutation.Refused(
                     if (scan.isComplete) ManagedSessionErrors.NOT_FOUND else ManagedSessionErrors.SCAN_INCOMPLETE,
                     scan.completeness.wire,
                 )
-            insertTop(state, ManagedMember(ManagedSessionKey(agent, canonical, sessionId), ManagedSessionOrigin.EXPLICIT_IMPORT, clock(), lastKnown(row)))
+            // import + bind is ONE write: there is no committed state in which the member exists without its policy
+            insertTop(state, ManagedMember(ManagedSessionKey(agent, canonical, sessionId), ManagedSessionOrigin.EXPLICIT_IMPORT, clock(), lastKnown(row), observation))
         }
+
+    /** Set (non-null) or clear (null) the observation binding of an existing member. A non-member is NOT_FOUND —
+     *  binding never registers a session; an invalid binding is refused untouched. Idempotent. */
+    @Synchronized
+    fun setObservation(workdir: String, agent: AgentKind, sessionId: String, binding: ObservationBinding?): ManagedMutation =
+        mutate(workdir, agent, sessionId) { state, _ ->
+            if (binding != null && !isValidObservationBinding(binding)) return@mutate ManagedMutation.Refused(ManagedSessionErrors.OBSERVATION_INVALID)
+            val member = state.member(agent, sessionId) ?: return@mutate ManagedMutation.Refused(ManagedSessionErrors.NOT_FOUND, "not a member")
+            if (member.observation == binding) return@mutate ManagedMutation.Committed(state, changed = false)
+            ManagedMutation.Committed(state.copy(members = state.members.map { if (it === member) it.copy(observation = binding) else it }), changed = true)
+        }
+
+    /**
+     * The persisted binding of ([agent], [workdir], [sessionId]) — the registry's control-policy input. A store
+     * file this build cannot vouch for answers [ObservationLookup.Unavailable]: the caller must refuse control, never
+     * assume "unbound". A missing file or a non-member is [ObservationLookup.Unbound].
+     */
+    @Synchronized
+    fun observationOf(workdir: String, agent: AgentKind, sessionId: String): ObservationLookup {
+        val canonical = resolveProject(workdir) ?: return ObservationLookup.Unbound
+        return when (val r = readCanonical(canonical)) {
+            is ManagedProjectRead.Loaded -> r.state.member(agent, sessionId)?.observation?.let { ObservationLookup.Bound(it) } ?: ObservationLookup.Unbound
+            is ManagedProjectRead.Missing, ManagedProjectRead.InvalidWorkdir -> ObservationLookup.Unbound
+            // the reason names the file: there is no automatic repair, so the owner has to fix or remove it by hand
+            is ManagedProjectRead.Corrupt -> ObservationLookup.Unavailable("${r.reason}; file ${fileFor(canonical).path}")
+            is ManagedProjectRead.Unreadable -> ObservationLookup.Unavailable("${r.reason}; file ${fileFor(canonical).path}")
+        }
+    }
 
     /** Drop [sessionId]'s registration only. Removing a non-member commits nothing. */
     @Synchronized
@@ -294,7 +353,7 @@ class ManagedSessionStore internal constructor(
         }
         val outcome = change(current, canonical)
         if (outcome !is ManagedMutation.Committed || !outcome.changed) return outcome
-        val next = outcome.state.copy(revision = current.revision + 1)
+        val next = outcome.state.let { it.copy(revision = current.revision + 1, schemaVersion = it.requiredSchema()) }
         invariantViolation(next, canonical)?.let {
             log.warn("refusing to persist a managed state that breaks its own invariant: $it")
             return ManagedMutation.Refused(ManagedSessionErrors.STORE_UNAVAILABLE, it)
@@ -329,7 +388,7 @@ class ManagedSessionStore internal constructor(
         val tree = try { JSON.parseToJsonElement(text) as? JsonObject } catch (e: Exception) { null }
             ?: return ManagedProjectRead.Corrupt(canonical, "undecodable")
         val version = (tree["schemaVersion"] as? JsonPrimitive)?.intOrNull
-        if (version != ManagedProjectState.SCHEMA_VERSION) return ManagedProjectRead.Corrupt(canonical, "unsupported schema $version")
+        if (version !in ManagedProjectState.SUPPORTED_SCHEMAS) return ManagedProjectRead.Corrupt(canonical, "unsupported schema $version")
         val state = try { JSON.decodeFromJsonElement(ManagedProjectState.serializer(), tree) } catch (e: Exception) {
             return ManagedProjectRead.Corrupt(canonical, "undecodable (${e::class.simpleName})")
         }
@@ -341,8 +400,11 @@ class ManagedSessionStore internal constructor(
     companion object {
         private val log = logger("ManagedSessionStore")
 
-        /** Strict on purpose: an unknown key or enum value means a newer build wrote it — read-only, not rewritten. */
-        private val JSON = Json { ignoreUnknownKeys = false; encodeDefaults = true; coerceInputValues = false; explicitNulls = true }
+        /** Strict on purpose: an unknown key or enum value means a newer build wrote it — read-only, not rewritten.
+         *  Nulls are OMITTED on write (explicitNulls = false) so a member without an observation binding is encoded
+         *  exactly as schema 1 always was — an explicit `"observation":null` would be an unknown key to an older
+         *  daemon and turn every store read-only on downgrade. Explicit nulls in existing files still decode. */
+        private val JSON = Json { ignoreUnknownKeys = false; encodeDefaults = true; coerceInputValues = false; explicitNulls = false }
 
         fun defaultRoot(): File = File(Identity.defaultPath().parentFile, "managed-sessions")
 
@@ -390,7 +452,11 @@ class ManagedSessionStore internal constructor(
         internal fun invariantViolation(state: ManagedProjectState, canonical: String): String? {
             val keys = state.members.map { it.key }
             return when {
-                state.schemaVersion != ManagedProjectState.SCHEMA_VERSION -> "unsupported schema ${state.schemaVersion}"
+                state.schemaVersion !in ManagedProjectState.SUPPORTED_SCHEMAS -> "unsupported schema ${state.schemaVersion}"
+                // a binding written under schema 1 is a file this build did not write: an older daemon cannot have
+                // produced it, and an older daemon reading it would drop the policy — refuse rather than guess
+                state.schemaVersion < state.requiredSchema() -> "observation binding under schema ${state.schemaVersion}"
+                state.members.any { it.observation != null && !isValidObservationBinding(it.observation) } -> "invalid observation binding"
                 state.canonicalWorkdir != canonical -> "state names another project"
                 state.revision < 0 -> "negative revision"
                 state.perAgentMigration.keys.any { it !in MANAGED_SESSION_AGENTS } -> "migration state for an unmanaged agent"
