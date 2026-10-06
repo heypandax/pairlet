@@ -329,6 +329,13 @@ internal const val SESSION_OPEN_TIMEOUT_MS = 8_000L
  *  admits it. */
 internal const val SESSION_OPEN_RETRY_TIMEOUT_MS = 4_000L
 
+/** What an open gets after its first deadline when the link claimed Ready but NOTHING has come down it since the
+ *  request went out (docs/design/SLOW-LINK-RESILIENCE.md 3.2): 8s + 12s = 20s in all, and no replay. On a link
+ *  that delivers in order the answer is then either still in flight behind a big frame — a replay would only
+ *  queue behind the same frame and make the daemon read and send the same window again — or it was swallowed by
+ *  a zombie link, which swallows a replay just the same and which the silence watchdog rebuilds on its own. */
+internal const val SESSION_OPEN_SILENT_LINK_TIMEOUT_MS = 12_000L
+
 /** How long the composer's notice explains a greyed-out "+" in the chat header ([PocketRepository.noteNewSessionUnavailable]). */
 internal const val NEW_SESSION_NOTICE_MS = 4_000L
 
@@ -339,9 +346,12 @@ internal const val NEW_SESSION_FROM_HEADER = "header"
  * Why an open gave up (issue #340) — the two worlds one blind 8s deadline could not tell apart.
  *
  * [LINK]: the connection was not [ConnPhase.Ready], so nothing we sent could have arrived and nothing we
- * resend would either. The computer is very probably fine; the honest thing to name is the link.
- * [COMPUTER]: the link claimed Ready and the request still went unanswered — for a resume, even after
- * being replayed once. This is the only case that has ever deserved "the computer didn't respond".
+ * resend would either — or it claimed Ready, but nothing at all came down it after the request was sent
+ * (SLOW-LINK-RESILIENCE 3.2): the answer is stuck in the link or was lost by it. Either way the computer is
+ * very probably fine; the honest thing to name is the link.
+ * [COMPUTER]: the link claimed Ready, kept carrying the daemon's other answers, and the request still went
+ * unanswered — for a resume, even after being replayed once. This is the only case that has ever deserved
+ * "the computer didn't respond".
  */
 enum class OpenFailure { LINK, COMPUTER }
 
@@ -591,6 +601,7 @@ class PocketRepository(
     private var presenceProbeJob: Job? = null // #145: healthy-link re-sync probe armed by a daemon-comeback presence edge
     internal var presenceProbeMs = LIST_WAIT_MS           // test seam
     internal var linkHealthOverride: (() -> Boolean)? = null // test seam for transportHealthy()
+    internal var downlinkFramesOverride: (() -> Long)? = null // test seam for downlinkFrames()
     private var directoriesRev = 0          // bumped on every Directories reply — the #145 probe's "did the computer answer" check
     // per-session connection bookkeeping (plain vars; [phase]/[directoriesLoaded] hold the observable truth)
     private var attachedThisSession = false // relay Attached seen (or, direct mode, socket + first Directories)
@@ -2182,6 +2193,10 @@ class PocketRepository(
     /** Is the CURRENT transport demonstrably up? (attached, no observed failure, socket loop still alive) */
     private fun transportHealthy(): Boolean =
         linkHealthOverride?.invoke() ?: (connected.value && attachedThisSession && connectJob?.isActive == true)
+
+    /** Transport frames decrypted on either leg since this repository was built — only ever grows, whichever leg
+     *  carried them. Compared across a wait, it says whether ANYTHING came down the link meanwhile (3.2). */
+    private fun downlinkFrames(): Long = downlinkFramesOverride?.invoke() ?: (relay.inboundFrames + directE2E.inboundFrames)
 
     // ── push registration ───────────────────────────────────────────────────────────────────────────
 
@@ -6332,6 +6347,9 @@ class PocketRepository(
                 ?.also { it.requested = true }?.context,
         )
         openDiagnostic?.stage(DiagnosticStage.QUEUE)
+        // what had come down the link before this request went out: the deadline below compares against it
+        // (SLOW-LINK-RESILIENCE 3.2). A local — it belongs to this open and dies with it.
+        val downlinkAtSend = downlinkFrames()
         send(request)
         openObservation?.takeIf { it.requested }?.let { observation ->
             historyDiagnosticDeadline = scope.launch {
@@ -6351,10 +6369,22 @@ class PocketRepository(
         // (1) The link is not Ready: nothing we sent could have arrived, and nothing we resend will
         //     either. Fail now and name the LINK — the phase machinery already owns retry/backoff.
         if (phase.value != ConnPhase.Ready) return failOpen(OpenFailure.LINK, retried = false)
-        // (2) The link claims Ready, so the open may merely have been slow — a big transcript on the far
-        //     side, a loaded daemon, a relay hiccup that ate one frame. Replay the SAME request once,
-        //     SILENTLY: `opening` stays raised and nothing on screen moves, so the user never learns a
-        //     retry happened unless it too fails.
+        // (2) The link claims Ready, yet NOTHING has come down it since the request went out — not this
+        //     open's answer, not the answer to any poll sent meanwhile. Frames arrive in order, so either a
+        //     big frame is still crossing a lossy link with everything else queued behind it, or the link is
+        //     a zombie that swallows whatever we send. A replay helps in neither world: it queues behind the
+        //     same frame (and has the daemon read and send the same window again), or it is swallowed too,
+        //     while the silence watchdog rebuilds a zombie on its own. So no replay: give the answer in
+        //     flight the rest of a 20s budget, then name the LINK (SLOW-LINK-RESILIENCE 3.2).
+        if (downlinkFrames() == downlinkAtSend) {
+            delay(SESSION_OPEN_SILENT_LINK_TIMEOUT_MS)
+            if (gen != openGen || !opening.value) return
+            return failOpen(OpenFailure.LINK, retried = false)
+        }
+        // (3) The link claims Ready and HAS been carrying the daemon's answers, just not this one — so the
+        //     open may merely have been slow: a big transcript on the far side, a loaded daemon, a relay
+        //     hiccup that ate one frame. Replay the SAME request once, SILENTLY: `opening` stays raised and
+        //     nothing on screen moves, so the user never learns a retry happened unless it too fails.
         //
         //     RESUMES ONLY. A brand-new open is NOT idempotent on the daemon: SessionRegistry live-matches
         //     an incoming open on its resumeId, so a second `resumeId == null` request skips that block

@@ -72,6 +72,12 @@ class DirectE2EConnection {
     val deaf = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private var nextId = 0L
 
+    /** Transport frames decrypted on this object's connections, ever — the key-confirmation frame included: only
+     *  grows, never reset by a reconnect. Symmetric with [RelayE2EConnection.inboundFrames]; the repo sums the
+     *  two legs, so it never needs to know which one carried a frame (SLOW-LINK-RESILIENCE 3.2). */
+    @Volatile var inboundFrames: Long = 0L
+        private set
+
     /** True between handshake completion and socket teardown — the repo routes sends here while it holds. */
     @Volatile var connected: Boolean = false
         private set
@@ -145,6 +151,7 @@ class DirectE2EConnection {
                                 continue
                             }
                             deafRun = 0
+                            inboundFrames++ // downlink evidence, counted before decode: an undecodable frame still arrived
                             runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }
                                 .onFailure { Diagnostics.protocolDecodeFailed(it, pt.size.toLong()) }.getOrNull()?.let { inbound.emit(it.body) }
                         }
@@ -202,6 +209,7 @@ class DirectE2EConnection {
             if (Wire.payloadType(f.data) != Wire.TRANSPORT) continue
             val pt = session.open(Wire.payloadBody(f.data))
                 ?: throw DirectUnreachableException("key confirmation failed", keyMismatch = true)
+            inboundFrames++
             return runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()).body }.getOrNull()
         }
     }

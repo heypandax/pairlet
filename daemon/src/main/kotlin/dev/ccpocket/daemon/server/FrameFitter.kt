@@ -32,6 +32,10 @@ import dev.ccpocket.protocol.ToolEvent
  * prompt previews, then its oldest rows. Anything else is sent as it is and
  * reported through [encodeWithin]'s callback, so a new oversized frame type shows up in the daemon log
  * instead of as a silent reconnect loop.
+ *
+ * Before any of that, a history window that FITS the client's cap but is heavy for a lossy link meets a soft
+ * cap ([HISTORY_SOFT_CAP_BYTES]): it ships its newest rows only and leaves the oldest to paging. That step is
+ * lossless by construction — see [softTrimHistory].
  */
 object FrameFitter {
     /** Bytes the transport adds around the JSON: the Wire type byte, then E2ESession's 8-byte counter and 16-byte GCM tag. */
@@ -40,33 +44,129 @@ object FrameFitter {
     /** Headroom kept under the cap: Apple documents its limit as a receive-buffer size, not an exact message size. */
     const val SLACK_BYTES = 8 * 1024
 
+    /**
+     * The soft cap on an encoded history frame (docs/design/SLOW-LINK-RESILIENCE.md 3.3). Not a transport limit:
+     * on the lossy cross-border link between the relay and mainland carriers, loss grows with packet size and a
+     * big frame takes disproportionately long (measured: ~73 KB in 2.3 s, 135 KB in 6–16 s, a 1.48 MB delta never
+     * arrived), while every frame queued behind it on the in-order link waits — session acks, transcriptions,
+     * approvals. An ordinary window (100 rows ≈ 73 KB) never reaches this; one heavy with screenshots or long
+     * outputs does.
+     */
+    const val HISTORY_SOFT_CAP_BYTES = 256 * 1024
+
+    /** The fewest rows a soft-trimmed window keeps. The phone does not yet page up on its own when a window is
+     *  too short to fill the screen (SLOW-LINK-RESILIENCE §4 E), so a thinner window could leave it stuck there. */
+    const val HISTORY_SOFT_MIN_ROWS = 20
+
     private const val MAX_PASSES = 8
 
     /** Does a JSON body of [jsonBytes] bytes fit a client whose cap is [maxFrameBytes] once sealed? */
     fun fits(jsonBytes: Int, maxFrameBytes: Long): Boolean = jsonBytes + SEAL_OVERHEAD_BYTES + SLACK_BYTES <= maxFrameBytes
 
     /**
-     * [env] encoded as the bytes to seal. When the sealed message would exceed [maxFrameBytes], the body is
-     * shrunk (see the class doc) and re-encoded; [onOversize] receives one line per frame that had to be
-     * shrunk or that still does not fit. The common case — a frame under the cap — costs one encode, which
-     * the callers did anyway.
+     * [env] encoded as the bytes to seal. A history window over [HISTORY_SOFT_CAP_BYTES] first sheds its oldest
+     * rows ([softTrimHistory]); [onSoftTrim] receives one content-free line when it does. When the sealed
+     * message would still exceed [maxFrameBytes], the body is shrunk (see the class doc) and re-encoded;
+     * [onOversize] receives one line per frame that had to be shrunk or that still does not fit. The common
+     * case — a frame under both caps — costs one encode, which the callers did anyway.
+     *
+     * [onSoftTrim] sits BEFORE [onOversize] on purpose: the callers pass the hard-cap report as a trailing
+     * lambda, which binds to the last function parameter.
      */
-    fun encodeWithin(env: Envelope, maxFrameBytes: Long, onOversize: (String) -> Unit = {}): ByteArray {
-        val bytes = encode(env)
+    fun encodeWithin(
+        env: Envelope,
+        maxFrameBytes: Long,
+        onSoftTrim: (String) -> Unit = {},
+        onOversize: (String) -> Unit = {},
+    ): ByteArray {
+        val plain = encode(env)
+        val (sending, bytes) = softTrimHistory(env, plain, onSoftTrim) ?: (env to plain)
         if (fits(bytes.size, maxFrameBytes)) return bytes
-        val type = env.body::class.simpleName
-        val shrunk = shrink(env, maxFrameBytes)
+        val type = sending.body::class.simpleName
+        val shrunk = shrink(sending, maxFrameBytes)
         if (shrunk == null) {
             onOversize("$type: ${bytes.size} B is over this client's $maxFrameBytes B frame cap and cannot be shrunk — sent as is")
             return bytes
         }
-        val out = encode(env.copy(body = shrunk))
+        val out = encode(sending.copy(body = shrunk))
         onOversize(
             "$type: ${bytes.size} B is over this client's $maxFrameBytes B frame cap → shrunk to ${out.size} B" +
                 if (fits(out.size, maxFrameBytes)) "" else " (still over — sent as is)",
         )
         return out
     }
+
+    /**
+     * The soft cap (SLOW-LINK-RESILIENCE 3.3) on a [ConvoHistory] (first window or delta) or [ConvoHistoryPage]
+     * whose [encoded] form is over [HISTORY_SOFT_CAP_BYTES]. It allows only the one loss that is fully
+     * recoverable: whole rows from the OLDEST end, until the frame is back under the cap or [HISTORY_SOFT_MIN_ROWS]
+     * remain, anchored as [fitRows] anchors a window that lost rows — `firstSeq` on the first kept row, `hasMore`,
+     * and a delta becomes a full window (a continuation missing its oldest rows would leave a hole the phone cannot
+     * see) — so the phone pages the dropped rows back in. It never touches what is ON a row: shedding pictures and
+     * sub-agent reports ([ReplayBudget.fit]) stays the hard cap's last resort. A window still over the soft cap at
+     * the row floor goes on to the hard-cap check like any other frame.
+     *
+     * Left whole when the first row it would keep carries no cursor (a backend that does not page): there is
+     * nothing to anchor on, so nothing could page the dropped rows back. Unlike [fitRows], which must make the
+     * frame fit and so drops such leading rows too, this step is optional and simply stands down. Null = nothing
+     * trimmed, send [encoded] as it is.
+     */
+    private fun softTrimHistory(env: Envelope, encoded: ByteArray, onSoftTrim: (String) -> Unit): Pair<Envelope, ByteArray>? {
+        if (encoded.size <= HISTORY_SOFT_CAP_BYTES) return null
+        val body = env.body
+        val rows = when (body) {
+            is ConvoHistory -> body.messages
+            is ConvoHistoryPage -> body.messages
+            else -> return null
+        }
+        if (rows.size <= HISTORY_SOFT_MIN_ROWS) return null
+        fun trimmedFrom(cut: Int): Envelope {
+            val kept = rows.drop(cut)
+            val anchor = kept.first().seq
+            return env.copy(
+                body = when (body) {
+                    is ConvoHistory -> body.copy(messages = kept, firstSeq = anchor, hasMore = true, delta = false)
+                    is ConvoHistoryPage -> body.copy(messages = kept, firstSeq = anchor, hasMore = true)
+                    else -> body
+                },
+            )
+        }
+        // Dropping the oldest row takes exactly its own encoding plus one separator out of the frame, so the cut
+        // is found from per-row sizes rather than by re-encoding the whole window once per dropped row (a heavy
+        // window has hundreds of rows) …
+        var cut = 0
+        var estimate = encoded.size.toLong()
+        while (estimate > HISTORY_SOFT_CAP_BYTES && rows.size - cut > HISTORY_SOFT_MIN_ROWS) {
+            estimate -= encodedRowBytes(rows[cut]) + 1
+            cut++
+        }
+        // … and the re-anchored metadata (firstSeq, hasMore, delta), which moves the size by a few bytes either
+        // way, is settled on the real encoding: the fewest rows dropped that bring the frame under the cap
+        var sending = trimmedFrom(cut)
+        var out = encode(sending)
+        while (out.size > HISTORY_SOFT_CAP_BYTES && rows.size - cut > HISTORY_SOFT_MIN_ROWS) {
+            cut++
+            sending = trimmedFrom(cut)
+            out = encode(sending)
+        }
+        while (cut > 1) {
+            val fewer = trimmedFrom(cut - 1)
+            val fewerBytes = encode(fewer)
+            if (fewerBytes.size > HISTORY_SOFT_CAP_BYTES) break
+            cut--
+            sending = fewer
+            out = fewerBytes
+        }
+        if (rows[cut].seq == null) return null
+        onSoftTrim(
+            "${body::class.simpleName}: ${rows.size} rows / ${encoded.size} B over the $HISTORY_SOFT_CAP_BYTES B history " +
+                "soft cap → ${rows.size - cut} rows / ${out.size} B, the oldest $cut left to paging",
+        )
+        return sending to out
+    }
+
+    private fun encodedRowBytes(row: HistoryMessage): Int =
+        PocketJson.encodeToString(HistoryMessage.serializer(), row).encodeToByteArray().size
 
     private fun encode(env: Envelope): ByteArray = PocketJson.encodeToString(Envelope.serializer(), env).encodeToByteArray()
 
