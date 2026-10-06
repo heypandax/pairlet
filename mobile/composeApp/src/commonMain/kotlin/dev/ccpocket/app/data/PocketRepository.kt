@@ -2542,6 +2542,36 @@ class PocketRepository(
     internal var networkSnapshotProvider: () -> NetworkSnapshot? = ::localNetworkSnapshot
     internal var sameMachineClient: Boolean = appUpdateRoute() == AppUpdateRoute.DESKTOP_IN_APP
 
+    /**
+     * #404 / TRANSPORT-AUTO-REPATH-V1 4.3: a planned relay→direct switch only happens when nothing could be lost
+     * or visibly interrupted by the reconnect. Reads existing state only; every clause is one line of the spec's
+     * list, and the desktop side panes count exactly like the main chat.
+     */
+    internal fun repathIdle(): Boolean {
+        val panes = sidePanes.panes
+        // streaming output, main chat and every pane
+        if (streaming.value || thinking.value == true || panes.any { it.streaming.value }) return false
+        // prompts not yet on the wire / stalled, and queued turns
+        if (turnQueued.value || sendStalled.value) return false
+        if (messages.any { it is ChatItem.User && it.pending } ||
+            panes.any { p -> p.messages.any { it is ChatItem.User && it.pending } }) return false
+        // approvals and questions waiting on the user
+        if (pendingAsk.value != null || pendingApprovals.isNotEmpty() || panes.any { it.pendingAsk.value != null }) return false
+        // opening / switching a session, starting a new task
+        if (opening.value || switching.value || switchingSession.value || sessionsOpening.value != null ||
+            newTaskStarting.value || panes.any { it.opening.value }) return false
+        // uploads, image compression, file transfers into the workspace inbox
+        if (pendingImages.any { it.state == ImgState.Compressing } ||
+            pendingFiles.any { it.state == FileUpState.Queued || it.state == FileUpState.Uploading }) return false
+        // voice: recording, transcribing, or its upload
+        if (voice.value !is VoiceState.Idle && voice.value !is VoiceState.Failed || voiceUploading.value) return false
+        // history paging, file view / export
+        if (historyLoadingOlder.value || outstanding(NonSessionRequest.FILE) > 0) return false
+        // project pin sync
+        if (pinLink.syncInFlight) return false
+        return true
+    }
+
     private fun launchTransport(reconnect: Boolean, force: Boolean = false) {
         if (demoMode.value) return // demo mode never touches the network
         // #143: five triggers fire this independently (presence edge, foreground return, retry timer,
