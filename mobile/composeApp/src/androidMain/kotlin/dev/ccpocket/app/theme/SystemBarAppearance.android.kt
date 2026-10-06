@@ -15,7 +15,8 @@ import androidx.core.view.WindowCompat
  * after every recomposition, so a live LIGHT/DARK/SYSTEM change re-tints the bars without a relaunch.
  */
 @Composable
-actual fun SystemBarAppearance(darkTheme: Boolean) {
+actual fun SystemBarAppearance(mode: ThemeMode, darkTheme: Boolean) {
+    // `mode` is unused here: Android keys off the resolved polarity only (iOS needs the pick itself).
     val view = LocalView.current
     if (view.isInEditMode) return // @Preview has no real window
     SideEffect {
