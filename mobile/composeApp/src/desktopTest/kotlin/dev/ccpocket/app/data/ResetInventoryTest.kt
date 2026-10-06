@@ -335,7 +335,7 @@ class ResetInventoryTest {
                 "pinWriterForTest", "memoWriterForTest", "memoStoreForTest", "redeemForTest", "dialForTest", "voiceUploadForTest",
                 "directConnectForTest", "networkSnapshotProvider", "sameMachineClient", "tcpProbeForTest", "repathEnabledOverride")
                 .forEach { put(it, "test seam / injected function") }
-            listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply")
+            listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply", "composerProbe")
                 .forEach { put(it, "shell callback wiring, not state") }
             put("leanHistory", "platform capability (which chat UI is running) / test seam, not session state")
             listOf("stableLinkResetMs", "presenceProbeMs", "managedCallTimeoutMs", "managedListPageTimeoutMs", "managedEnableTimeoutMs",
@@ -693,6 +693,7 @@ class ResetInventoryTest {
             noticeJob                    R R R R R R K R
             voiceStartJob                R R R R R R K R
             interruptJob                 R R R R R R K R
+            voiceBarModeState            R R R R R R K R  # voice input v2: the capture's bar goes with the capture (clearVoice)
             pairFailure                  K K K K K K K K
             pairFailureSeq               K K K K K K K K
             pairVerifying                K K K K K K K K

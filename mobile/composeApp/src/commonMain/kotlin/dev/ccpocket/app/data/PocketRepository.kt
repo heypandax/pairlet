@@ -2023,6 +2023,15 @@ class PocketRepository(
     private val daemonTranscriptRefineAgentsState = mutableStateOf<List<String>>(emptyList())
     val daemonTranscriptRefineAgents: State<List<String>> get() = daemonTranscriptRefineAgentsState
 
+    /** UI hook (voice input v2): the composer on screen reports its live text and IME state. A host that registers
+     *  none — the desktop today — never has an eligible capture, so it keeps today's behaviour (review §10 A6). */
+    var composerProbe: (() -> ComposerProbe)? = null
+
+    /** The current capture's recording bar ([VoiceBarMode]); LEGACY between captures. Set at [startVoice] and
+     *  frozen — it only ever falls from EDIT_SEND to EDIT_DONE, when the capture can no longer send. */
+    private val voiceBarModeState = mutableStateOf(VoiceBarMode.LEGACY)
+    val voiceBarMode: State<VoiceBarMode> get() = voiceBarModeState
+
     private val recorder by lazy { VoiceRecorder() }
     private var usingNative = false
     private var preferRemote = false                         // sticky after a native-engine failure
@@ -7582,12 +7591,40 @@ class PocketRepository(
 
     // ── voice input actions ───────────────────────────────────────────────
 
+    /**
+     * Voice input v2 (docs/design/VOICE-INPUT-V2-REVIEW.md §11): could a dictation be sent from here right now?
+     * Every condition must hold, and anything unknown reads as no: the user chose SEND and accepted the disclosure;
+     * the link is up and Ready on a writable, non-degraded conversation; the computer has a refiner for THIS
+     * session's agent; the composer is empty with no IME composition, nothing is on its way into it, and no
+     * attachment is staged in any state. Asked when a capture starts (its bar), at ✓, when the refined text
+     * arrives and before submitting.
+     */
+    fun voiceSendEligible(): Boolean {
+        if (voiceAfterDictationState.value != VoiceAfterDictation.SEND || !voiceRefineAckedState.value) return false
+        if (!connected.value || phase.value != ConnPhase.Ready || convoId.value == null) return false
+        if (observing.value || observationReadOnly() || sessionDegraded.value) return false
+        val agent = sessionAgent.value ?: return false
+        if (memoAgentWire(agent) !in daemonTranscriptRefineAgentsState.value) return false
+        if (pendingImages.isNotEmpty() || pendingFiles.isNotEmpty()) return false // picking, compressing, uploading, failed or landed
+        if (pendingVoiceText.value != null) return false // text on its way into the composer is composer content
+        val probe = composerProbe?.invoke() ?: return false
+        return probe.text.isBlank() && !probe.composing
+    }
+
+    /** The bar a capture starting now gets: today's unless the user chose SEND (and accepted the disclosure). */
+    private fun voiceBarModeNow(): VoiceBarMode = when {
+        voiceAfterDictationState.value != VoiceAfterDictation.SEND || !voiceRefineAckedState.value -> VoiceBarMode.LEGACY
+        voiceSendEligible() -> VoiceBarMode.EDIT_SEND
+        else -> VoiceBarMode.EDIT_DONE
+    }
+
     /** Mic tap (S1). Picks the engine: iOS native streaming dictation, else record→daemon-whisper. */
     fun startVoice() {
         if (convoId.value == null) return
         if (memoHost.holdsMicrophone) return // one recorder: a memo capture is using the microphone
         val v = voice.value
         if (v !is VoiceState.Idle && v !is VoiceState.Failed && v !is VoiceState.StillWaiting) return
+        voiceBarModeState.value = voiceBarModeNow() // frozen for this capture; it can only fall to EDIT_DONE
         // a new recording abandons whatever the last one was still waiting for: a late transcript of the old
         // capture must never land beside (or instead of) the new one
         voiceTimeout?.cancel()
@@ -7949,6 +7986,7 @@ class PocketRepository(
         voiceAttempts = emptySet() // also fences off any chunk still queued for one of them
         voiceUploading.value = false
         usingNative = false
+        voiceBarModeState.value = VoiceBarMode.LEGACY // no capture, no bar
     }
 
     private fun randomCaptureId(): String =

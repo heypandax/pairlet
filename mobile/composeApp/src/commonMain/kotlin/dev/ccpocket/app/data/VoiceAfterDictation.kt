@@ -19,3 +19,23 @@ enum class VoiceAfterDictation {
         internal fun from(stored: String?): VoiceAfterDictation = if (stored == "send") SEND else COMPOSE
     }
 }
+
+/**
+ * Which recording bar a capture shows (README "后续决定"). Decided at [PocketRepository.startVoice] and frozen for
+ * that capture: it may only fall from [EDIT_SEND] to [EDIT_DONE] when the capture can no longer send, never rise.
+ */
+enum class VoiceBarMode {
+    /** COMPOSE, or SEND without the disclosure accepted: today's bar, item for item — ✕ cancel, ✓ done. */
+    LEGACY,
+
+    /** SEND and this capture can send: keyboard "finish and edit" on the left, the send arrow "finish and send". */
+    EDIT_SEND,
+
+    /** SEND but this capture cannot send (no refiner for the session's agent, offline, a draft or attachment…):
+     *  keyboard "finish and edit" on the left, today's ✓ "done" on the right. */
+    EDIT_DONE,
+}
+
+/** What the composer on screen holds right now: its live text and whether an IME composition is open — never the
+ *  400 ms-debounced persisted draft (review §10 item 7). */
+data class ComposerProbe(val text: String, val composing: Boolean)
