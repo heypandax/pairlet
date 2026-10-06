@@ -1095,6 +1095,8 @@ class DeviceSessions(
         val json = try {
             dev.ccpocket.daemon.server.FrameFitter.encodeWithin(
                 Envelope(nextId.getAndIncrement().toString(), 0L, body = frame), cap,
+                // SLOW-LINK-RESILIENCE 3.3: routine, so info — and not `shrunk`, which means "to the client's frame cap"
+                onSoftTrim = { log.info("history soft cap for ${deviceId.take(8)}…: $it") },
             ) { shrunk = true; log.warn("frame cap for ${deviceId.take(8)}…: $it") }
         } catch (error: Exception) {
             Diagnostics.report(ErrorPath.PAYLOAD_SEND, DiagnosticStage.ENCODE, ErrorCode.UNEXPECTED, error)

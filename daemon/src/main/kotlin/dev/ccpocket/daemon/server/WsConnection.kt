@@ -282,8 +282,11 @@ class WsConnection(
                 }
                 // KTOR-6963: a shipped iOS build drops the whole link on any message over 1 MiB, whatever the
                 // relay allows. Shrink what can be shrunk (history windows, tool images, file bodies) to THIS
-                // connection's declared cap right before sealing — the writer is where the size is final.
-                val bytes = FrameFitter.encodeWithin(env, caps.maxFrameBytes) { log.warn("frame cap: $it") }
+                // connection's declared cap right before sealing — the writer is where the size is final. A heavy
+                // history window first ships its newest rows only (SLOW-LINK-RESILIENCE 3.3): routine, so info.
+                val bytes = FrameFitter.encodeWithin(env, caps.maxFrameBytes, onSoftTrim = { log.info("history soft cap: $it") }) {
+                    log.warn("frame cap: $it")
+                }
                 // the writer is the ONLY sealer — the GCM send counter advances strictly in order
                 val ws: WsFrame = WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, crypto.seal(bytes)))
                 // bounded write: on a zombie phone socket a send stalls forever (TCP buffer fills, no error),
