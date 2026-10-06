@@ -83,6 +83,14 @@ class RelayE2EConnection {
     // the very reconnects it causes (SLOW-LINK-RESILIENCE 3.1); each handshaken link opens its own window
     private val silenceWatch = SilenceWatchdog()
 
+    /** Transport frames decrypted on this object's connections, ever: only grows, never reset by a reconnect.
+     *  Two readings bracket a wait — unchanged means NOTHING came down the link in between, which the repo's
+     *  open deadline tells apart from "the daemon answered other requests, just not this one"
+     *  (SLOW-LINK-RESILIENCE 3.2). Written by the reader; two overlapping readers (#142) can lose an
+     *  increment, never leave the value unchanged across a decrypt. */
+    @Volatile var inboundFrames: Long = 0L
+        private set
+
     /** Stable identity for control frames retained across reconnects. */
     private data class ControlTarget(val relay: String, val accountId: String, val deviceId: String) {
         constructor(paired: PairedDaemon) : this(paired.relay, paired.accountId, paired.deviceId)
@@ -229,6 +237,7 @@ class RelayE2EConnection {
                                 deafRun = 0 // a good decrypt proves the link is not deaf
                                 // …and disarms the silence watchdog: the daemon demonstrably holds our session
                                 silence.onInbound(epochMillis())
+                                inboundFrames++ // downlink evidence, counted before decode: an undecodable frame still arrived
                                 runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }
                                     .onFailure { Diagnostics.protocolDecodeFailed(it, pt.size.toLong()) }.getOrNull()?.let { inbound.emit(it.body) }
                             }

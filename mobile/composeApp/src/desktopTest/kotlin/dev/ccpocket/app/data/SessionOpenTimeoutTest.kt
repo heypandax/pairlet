@@ -36,8 +36,14 @@ import kotlin.test.assertTrue
  * This pins the client half: the deadline now branches on the link, and a RESUME gets one silent replay
  * before anyone is told anything.
  *
+ * Since SLOW-LINK-RESILIENCE 3.2 a Ready link branches once more, on whether ANYTHING came down it after the
+ * request went out. A link carrying the daemon's other answers is the #340 world above, unchanged. A link that
+ * stayed silent is not replayed into — on a link that delivers in order, a replay can only queue behind the
+ * frame already in flight — and, still unanswered at 20s, the open names the LINK.
+ *
  * Time is driven by [TestCoroutineScheduler]; the repo runs with no transport, so [PocketRepository
- * .onSendForTest] records what WOULD go on the wire — which is exactly the assertion.
+ * .onSendForTest] records what WOULD go on the wire — which is exactly the assertion — and
+ * [PocketRepository.downlinkFramesOverride] stands in for the two transports' decrypted-frame counters.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SessionOpenTimeoutTest {
@@ -51,17 +57,30 @@ class SessionOpenTimeoutTest {
         val scheduler = TestCoroutineScheduler()
         val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler))
         val sent = mutableListOf<Frame>()
+
+        /** Transport frames decrypted so far, as the two legs count them (SLOW-LINK-RESILIENCE 3.2). */
+        var downlink = 0L
+
+        /** A Ready link in the foreground is BUSY: the daemon answers the app's approval poll every few seconds,
+         *  so a deadline that looks always finds frames newer than its request. That is the world the #340
+         *  cases were written in, so it stays the default; [silentLink] switches it off, leaving [downlink]. */
+        private var busy = true
+
         val repo = PocketRepository(scope).apply {
             paired.value = PairedDaemon(
                 relay = "wss://test", accountId = "acct-test", daemonPub = "pk", deviceId = "dev", credential = "cred",
             )
             onSendForTest = { sent += it }
+            downlinkFramesOverride = { downlink + if (busy) scheduler.currentTime / POLL_ANSWER_EVERY_MS else 0L }
         }
 
         fun opens() = sent.filterIsInstance<OpenSession>()
 
         /** A link the repo believes is usable — the precondition for the auto-resend branch. */
         fun ready() = repo.apply { phase.value = ConnPhase.Ready }
+
+        /** From here on nothing comes down the link unless a test moves [downlink] by hand. */
+        fun silentLink() { busy = false }
 
         /** Run every worker that is due, then let [ms] of the deadline elapse and settle again. */
         fun elapse(ms: Long) {
@@ -233,5 +252,124 @@ class SessionOpenTimeoutTest {
         } finally {
             h.scope.cancel()
         }
+    }
+
+    // ── SLOW-LINK-RESILIENCE 3.2: a Ready link that has gone silent ──────────────────────────────────
+
+    /** (6) Nothing came down the link after the request: no replay at the first deadline — it could only queue
+     *  behind the frame already in flight, and make the daemon send the same window twice — and, still
+     *  unanswered at 20s in all, the open blames the LINK without having spent its auto-resend. */
+    @Test
+    fun aSilentLinkIsNeverReplayedIntoAndNamesTheLinkAtTwentySeconds() {
+        val h = Harness()
+        try {
+            h.ready()
+            h.silentLink()
+            h.downlink = 41 // what the link carried BEFORE the request proves nothing about this one
+            assertTrue(h.repo.openSession("/w/proj", resumeId = "sid-a"))
+            h.elapse(SESSION_OPEN_TIMEOUT_MS)
+
+            assertEquals(1, h.opens().size, "no OpenSession may be replayed into a silent link")
+            assertTrue(h.repo.opening.value, "the answer may still be in flight: the spinner keeps running")
+            assertFalse(h.repo.openTimedOut.value, "…and nothing is reported at the first deadline")
+
+            h.elapse(SESSION_OPEN_SILENT_LINK_TIMEOUT_MS - 1)
+            assertFalse(h.repo.openTimedOut.value, "20s in all, not a moment less")
+            h.elapse(1)
+
+            assertTrue(h.repo.openTimedOut.value)
+            assertEquals(OpenFailure.LINK, h.repo.openTimedOutReason.value, "a silent link is the link's failure, not the computer's")
+            assertEquals(1, h.opens().size, "still never replayed")
+            val record = diagnostics.single { it.path == ErrorPath.SESSION_OPEN }
+            assertEquals(Outcome.TIMEOUT, record.outcome)
+            assertEquals(Stage.CONNECT, record.stage)
+            assertEquals(0, record.attempt, "retried = false: the auto-resend was never spent")
+            assertFalse(h.repo.opening.value)
+            assertFalse(h.repo.switchingSession.value, "#165: a switch that never landed releases the router")
+        } finally {
+            h.scope.cancel()
+        }
+    }
+
+    /** (7) The case the silent budget exists for: the answer was only stuck behind a big frame, and lands
+     *  before 20s. The session opens as if nothing happened — and the daemon was asked exactly once. */
+    @Test
+    fun aSilentLinkThatDeliversLateStillOpensWithoutAReplay() {
+        val h = Harness()
+        try {
+            h.ready()
+            h.silentLink()
+            assertTrue(h.repo.openSession("/w/proj", resumeId = "sid-a"))
+            h.elapse(SESSION_OPEN_TIMEOUT_MS)
+            h.elapse(7_000) // 15s in: the frame in flight lands, and the answer queued behind it with it
+
+            h.repo.receiveForTest(SessionLive("convo-a", "/w/proj", "sid-a", executing = false))
+            h.elapse(SESSION_OPEN_SILENT_LINK_TIMEOUT_MS)
+
+            assertEquals("convo-a", h.repo.convoId.value, "the late answer opens the session")
+            assertFalse(h.repo.openTimedOut.value, "an answer inside the budget never shows the banner")
+            assertFalse(h.repo.opening.value)
+            assertEquals(1, h.opens().size, "and the daemon was never asked twice")
+        } finally {
+            h.scope.cancel()
+        }
+    }
+
+    /** (8) The silent-link check comes before the brand-new rule: a new open on a silent link was never
+     *  replayable anyway (see (4)), and it now waits the same 20s and names the LINK instead of blaming the
+     *  computer at 8s. */
+    @Test
+    fun aBrandNewOpenOnASilentLinkWaitsTheSameBudgetAndNamesTheLink() {
+        val h = Harness()
+        try {
+            h.ready()
+            h.silentLink()
+            assertTrue(h.repo.openSession("/w/proj")) // brand new — no resumeId
+            h.elapse(SESSION_OPEN_TIMEOUT_MS)
+            assertFalse(h.repo.openTimedOut.value, "not decided at the first deadline on a silent link")
+
+            h.elapse(SESSION_OPEN_SILENT_LINK_TIMEOUT_MS)
+            assertTrue(h.repo.openTimedOut.value)
+            assertEquals(OpenFailure.LINK, h.repo.openTimedOutReason.value)
+            assertEquals(1, h.opens().size, "a new open is never replayed, silent link or not")
+        } finally {
+            h.scope.cancel()
+        }
+    }
+
+    /** (9) The other side of the line: ONE frame of anything after the request is enough to show the link is
+     *  carrying downlink, and then the #340 path runs exactly as before — one replay of the same request, 4s
+     *  more, then the computer is named, with the auto-resend spent. */
+    @Test
+    fun oneDownlinkFrameAfterTheRequestKeepsTheReplayPathExactlyAsBefore() {
+        val h = Harness()
+        try {
+            h.ready()
+            h.silentLink()
+            assertTrue(h.repo.openSession("/w/proj", resumeId = "sid-a"))
+            h.elapse(1) // the open is on the wire, its baseline taken
+            h.downlink++ // the daemon answers something else — a poll, a list — just not this open
+            h.elapse(SESSION_OPEN_TIMEOUT_MS - 1)
+
+            assertEquals(2, h.opens().size, "a link carrying downlink gets the #340 replay")
+            assertEquals(h.opens()[0], h.opens()[1], "…of the SAME request")
+            assertTrue(h.repo.opening.value)
+            assertFalse(h.repo.openTimedOut.value)
+
+            h.elapse(SESSION_OPEN_RETRY_TIMEOUT_MS)
+            assertTrue(h.repo.openTimedOut.value)
+            assertEquals(OpenFailure.COMPUTER, h.repo.openTimedOutReason.value)
+            assertEquals(2, h.opens().size, "one resend, and only one")
+            val record = diagnostics.single { it.path == ErrorPath.SESSION_OPEN }
+            assertEquals(Stage.ATTACH, record.stage)
+            assertEquals(1, record.attempt, "retried = true")
+        } finally {
+            h.scope.cancel()
+        }
+    }
+
+    private companion object {
+        /** The foreground's approval poll cadence (App.kt) — one answer per poll on a busy link. */
+        const val POLL_ANSWER_EVERY_MS = 3_000L
     }
 }
