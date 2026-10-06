@@ -1535,6 +1535,12 @@
     <string name="new_task_timeout">会话没能打开，你写的提示词还在。</string>
     <string name="new_task_send_failed">会话开起来了，但这条提示词没发出去，它还在。</string>
     <string name="new_task_failed">任务没能开始，你写的提示词还在。</string>
+    <!-- 会话内新建会话（new-session-from-chat-v1）：聊天顶栏的「+」打开同一个弹层 -->
+    <string name="new_session_unavailable">新会话，不可用</string>
+    <string name="new_session_attachments_staged">请先发送或移除已添加的附件</string>
+    <string name="new_task_keeps_running">这个对话会继续运行。</string>
+    <string name="new_task_keeps_running_approval">这个对话会继续运行，待批准的请求仍在等你。</string>
+    <string name="new_task_keeps_running_question">这个对话会继续运行，待回答的提问仍在等你。</string>
     <string name="chat_start_defaults_note">模式与模型沿用默认</string>
     <string name="proj_search">搜索项目</string>
     <string name="proj_search_cancel">取消</string>

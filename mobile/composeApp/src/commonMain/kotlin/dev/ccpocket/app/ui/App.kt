@@ -182,6 +182,7 @@ import dev.ccpocket.app.data.VoiceState
 import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.ui.chat.ChatHeader
+import dev.ccpocket.app.ui.chat.NewSessionHeaderButton
 import dev.ccpocket.app.ui.chat.ChatStateBlock
 import dev.ccpocket.app.ui.chat.CONTEXT_SEP
 import dev.ccpocket.app.ui.chat.ContextLine
@@ -2657,6 +2658,33 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     var showWorktrees by remember(repo.convoId.value) { mutableStateOf(false) }
     var lastGitDiffPath by remember(repo.convoId.value) { mutableStateOf<String?>(null) }
     var showScheduleSheet by remember { mutableStateOf(false) } // send long-press → schedule send (issue #137)
+    // ── new session from this chat: the header "+" (new-session-from-chat-v1) ──
+    // The Fast Start sheet's project/agent picks are the Projects FAB's sticky choice (repo.newTaskDir/newTaskAgent).
+    // This chat LENDS them its own conversation's project and agent while its sheet is up and keeps what it borrowed,
+    // to hand back on a plain dismiss here — or, once a task sent from here is delivered, via followNewTaskFromChat.
+    var showNewTask by remember { mutableStateOf(false) }
+    var lentPicks by remember { mutableStateOf<NewTaskPicks?>(null) }
+    var sentFromHere by remember { mutableStateOf(false) } // a task this "+" sent that hasn't settled yet
+    val openNewTask = {
+        repo.noteNewSessionEntry()
+        if (lentPicks == null) lentPicks = NewTaskPicks(repo.newTaskDir.value, repo.newTaskAgent.value)
+        repo.newTaskDir.value = repo.workdir.value
+        repo.newTaskAgent.value = repo.sessionAgent.value ?: repo.sessionDefaultAgent
+        showNewTask = true
+    }
+    val closeNewTask = {
+        showNewTask = false
+        // a send has handed the borrowed picks on: back on delivery, kept beside the held draft on a failure
+        if (!sentFromHere) { lentPicks?.restore(repo); lentPicks = null }
+    }
+    // The task sent from here settled. Failed while this chat is still on screen (the open landed, the send was
+    // refused): reopen the sheet with the draft and the picks as sent — the Projects FAB's rule (#260). A failed OPEN
+    // takes the chat away with the hold, and the draft and picks wait in the repository for the next sheet instead.
+    LaunchedEffect(sentFromHere, repo.newTaskError.value, repo.newTaskStarting.value) {
+        if (!sentFromHere || repo.newTaskStarting.value) return@LaunchedEffect
+        sentFromHere = false
+        if (repo.newTaskError.value != null) showNewTask = true else lentPicks = null
+    }
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
         NavBarPadded {
@@ -2903,7 +2931,26 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 panelInline = false,
                 summaryMaxLines = 1,
             ) {
+                // new session from this chat (new-session-from-chat-v1): left of "⋯", 6dp apart, and still here while
+                // observing, when "⋯" leaves. Reachability reads the session list's own source for this computer
+                // (repo.phase, its connection badge; NewSessionDock itself takes none), and Ready is the open path's
+                // own line between "may arrive" and "cannot arrive" (#340).
+                val newSessionAvailable = repo.phase.value == ConnPhase.Ready
+                NewSessionHeaderButton(
+                    available = newSessionAvailable,
+                    onClick = {
+                        when {
+                            !newSessionAvailable -> repo.noteNewSessionUnavailable()
+                            // photos/files staged in this composer would ride the new session's first prompt (it is sent
+                            // through the same composer state), so the sheet doesn't open over them. The button keeps its
+                            // look: greying it as attachments come and go would make the header flicker.
+                            repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() -> repo.noteNewSessionAttachmentsStaged()
+                            else -> openNewTask()
+                        }
+                    },
+                )
                 if (!repo.observing.value) {
+                    Spacer(Modifier.width(6.dp))
                     // the streaming chip is gone from here: execution state (issue #52) is now the pinned
                     // state block below, which states it in words instead of as one more header badge
                     Box(
@@ -3584,6 +3631,46 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             onAllProjects = { repo.saveDraft(draftKey, input); repo.backToDirectories() },
             onDismiss = { showSessions = false },
         )
+        // the header "+": the Projects FAB's own sheet (#260), its chips prefilled with this conversation's project
+        // and agent, and one calm line on what happens to the chat being left (new-session-from-chat-v1)
+        if (showNewTask) {
+            val dirsSnapshot = repo.directories.toList()
+            val agentFilter = repo.agentFilter.value
+            val dirs = remember(dirsSnapshot, agentFilter) { filterDirectoriesByAgent(dirsSnapshot, agentFilter) }
+            val ask = repo.pendingAsk.value
+            // only what is TRUE of the chat being left: a pending question or approval keeps waiting, a running turn
+            // keeps running — and an idle chat gets no line at all, since nothing of it would "keep running"
+            val leaving = when {
+                ask != null && ask.isQuestion -> Res.string.new_task_keeps_running_question
+                ask != null -> Res.string.new_task_keeps_running_approval
+                repo.streaming.value -> Res.string.new_task_keeps_running
+                else -> null
+            }
+            NewTaskSheet(
+                repo = repo,
+                dirs = dirs, // the Projects list's own source and filter
+                // the folder browser (DirectoryPickerSheet and the two sheets it hands off to) is wired on the
+                // Projects screen only; the chat has no route to it, so here the row just closes the sheet
+                onBrowseOther = closeNewTask,
+                onDismiss = closeNewTask,
+                quietStatus = leaving?.let { stringResource(it) },
+                onStarted = {
+                    // leaving this chat starts here: its draft is saved first — the switcher's contract above
+                    repo.saveDraft(draftKey, input)
+                    sentFromHere = true
+                    val lent = lentPicks
+                    repo.followNewTaskFromChat(onDelivered = { lent?.restore(repo) })
+                },
+            )
+        }
+    }
+}
+
+/** The Projects FAB's Fast Start picks a chat borrowed while its own "+" sheet is up (see [ChatScreen]). */
+private data class NewTaskPicks(val dir: String?, val agent: AgentKind?) {
+    fun restore(repo: PocketRepository) {
+        repo.newTaskDir.value = dir
+        repo.newTaskAgent.value = agent
     }
 }
 

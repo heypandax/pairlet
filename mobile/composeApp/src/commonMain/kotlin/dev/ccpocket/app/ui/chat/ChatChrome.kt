@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -51,6 +52,8 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -73,6 +76,8 @@ import dev.ccpocket.app.resources.chat_context_expanded
 import dev.ccpocket.app.resources.chat_session_info
 import dev.ccpocket.app.resources.chat_tool_failed
 import dev.ccpocket.app.resources.done
+import dev.ccpocket.app.resources.new_session_title
+import dev.ccpocket.app.resources.new_session_unavailable
 import dev.ccpocket.app.resources.st_also_running
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
@@ -203,6 +208,32 @@ fun ChatHeader(
             if (expanded && panelInline) ContextPanelBody(summary, workdir, onSessionInfo)
         }
         Hairline()
+    }
+}
+
+/**
+ * The chat header's "+" (new-session-from-chat-v1): a new session from inside a chat, instead of a walk back out to
+ * the session list's dock or the Projects FAB. It sits left of "⋯" in the same ink and weight and stays as quiet —
+ * no fill, no badge, no label: Send remains the screen's one filled control, the pinned approval its loudest.
+ *
+ * Unreachable, it greys out but keeps its place: the header must not re-flow under a dropped link, and a control
+ * that vanished could not explain itself. So it stays tappable — [onClick] answers with why — while its semantics
+ * say disabled and its name says unavailable, for the reader who cannot see the grey.
+ */
+@Composable
+fun NewSessionHeaderButton(available: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val label = stringResource(if (available) Res.string.new_session_title else Res.string.new_session_unavailable)
+    Box(
+        modifier.size(Metric.touch).clip(CircleShape)
+            .clickable(onClick = onClick)
+            .semantics {
+                role = Role.Button
+                contentDescription = label
+                if (!available) disabled()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.Add, contentDescription = null, tint = if (available) Tok.tx2 else Tok.muted, modifier = Modifier.size(16.dp))
     }
 }
 
