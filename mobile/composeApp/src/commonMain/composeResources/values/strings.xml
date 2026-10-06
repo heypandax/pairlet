@@ -1540,6 +1540,12 @@
     <string name="new_task_timeout">The session never opened. Your prompt is still here.</string>
     <string name="new_task_send_failed">The session opened but wouldn\'t take the prompt. It is still here.</string>
     <string name="new_task_failed">Couldn\'t start the task. Your prompt is still here.</string>
+    <!-- new session from a chat (new-session-from-chat-v1): the chat header's "+" opens this same sheet -->
+    <string name="new_session_unavailable">New session, unavailable</string>
+    <string name="new_session_attachments_staged">Send or remove the attachments first</string>
+    <string name="new_task_keeps_running">This chat keeps running.</string>
+    <string name="new_task_keeps_running_approval">This chat keeps running; its approval is still waiting.</string>
+    <string name="new_task_keeps_running_question">This chat keeps running; its question is still waiting.</string>
     <string name="chat_start_defaults_note">Mode and model follow your defaults</string>
     <string name="proj_search">Search projects</string>
     <string name="proj_search_cancel">Cancel</string>
