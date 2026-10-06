@@ -177,46 +177,56 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { if (category != null) category = null else onBack() }
 
     val page = category
-    Column(Modifier.fillMaxSize().background(Tok.base)) {
-        FirstHopHeader(
-            title = stringResource(page?.let(::settingsCategoryTitleRes) ?: Res.string.settings_title),
-            // one factual line, and only on the landing: which computer these settings are talking to.
-            // Nothing derived, nothing secret — the paired binding's own display name or nothing at all.
-            summary = if (page != null) null else connectedToSummary(repo),
-            onBack = { if (page != null) category = null else onBack() },
-        )
-        Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 28.dp),
-        ) {
-            when (page) {
-                null -> SettingsLanding(
-                    repo,
-                    onCategory = { category = it },
-                    onUsage = { showUsage = true },
-                    onSchedules = { showSchedules = true },
-                )
+    // "After dictation" and its disclosure are bottom sheets: hosted here, over the whole screen and outside the
+    // page's scroll, so the disclosure's two buttons are always on screen
+    var voiceSheet by remember { mutableStateOf<AfterDictationSheet?>(null) }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().background(Tok.base)) {
+            FirstHopHeader(
+                title = stringResource(page?.let(::settingsCategoryTitleRes) ?: Res.string.settings_title),
+                // one factual line, and only on the landing: which computer these settings are talking to.
+                // Nothing derived, nothing secret — the paired binding's own display name or nothing at all.
+                summary = if (page != null) null else connectedToSummary(repo),
+                onBack = { if (page != null) category = null else onBack() },
+            )
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 28.dp),
+            ) {
+                when (page) {
+                    null -> SettingsLanding(
+                        repo,
+                        onCategory = { category = it },
+                        onUsage = { showUsage = true },
+                        onSchedules = { showSchedules = true },
+                    )
 
-                SettingsCategory.GENERAL -> GeneralPage(repo)
-                SettingsCategory.AGENT -> AgentDefaultsPage(repo)
-                SettingsCategory.CONNECTIONS -> ConnectionsPage(
-                    repo,
-                    // switching and pairing both tear this screen down, so they leave Settings first
-                    onSwitch = { target -> onBack(); repo.switchDaemon(target) },
-                    onAdd = { onBack(); repo.beginAddDevice() },
-                    onBridges = { showBridges = true },
-                )
+                    SettingsCategory.GENERAL -> GeneralPage(
+                        repo,
+                        afterDictation = LocalHostsVoiceSendBar.current,
+                        onAfterDictation = { voiceSheet = AfterDictationSheet.CHOICE },
+                    )
+                    SettingsCategory.AGENT -> AgentDefaultsPage(repo)
+                    SettingsCategory.CONNECTIONS -> ConnectionsPage(
+                        repo,
+                        // switching and pairing both tear this screen down, so they leave Settings first
+                        onSwitch = { target -> onBack(); repo.switchDaemon(target) },
+                        onAdd = { onBack(); repo.beginAddDevice() },
+                        onBridges = { showBridges = true },
+                    )
 
-                SettingsCategory.SECURITY -> SecurityPage(repo)
-                SettingsCategory.SUPPORT -> SupportPage(
-                    repo,
-                    onHelp = { showHelp = true },
-                    // Exit -> disconnect to the computer picker (ConnectScreen), where paired computers
-                    // are managed
-                    onExit = { onBack(); repo.disconnect() },
-                )
+                    SettingsCategory.SECURITY -> SecurityPage(repo)
+                    SettingsCategory.SUPPORT -> SupportPage(
+                        repo,
+                        onHelp = { showHelp = true },
+                        // Exit -> disconnect to the computer picker (ConnectScreen), where paired computers
+                        // are managed
+                        onExit = { onBack(); repo.disconnect() },
+                    )
+                }
             }
         }
+        AfterDictationSheets(repo, voiceSheet) { voiceSheet = it }
     }
 }
 
@@ -259,9 +269,10 @@ private fun SettingsLanding(
 
 // ══ General ════════════════════════════════════════════════════════════════════════════════════════
 
-/** Appearance, text size, notifications and — where a native engine exists to choose against — voice. */
+/** Appearance, text size, notifications and voice: the Whisper switch where a native engine exists to choose against,
+ *  and [afterDictation]'s row where the chat hosts the send bar ([onAfterDictation] opens its choice). */
 @Composable
-private fun GeneralPage(repo: PocketRepository) {
+private fun GeneralPage(repo: PocketRepository, afterDictation: Boolean, onAfterDictation: () -> Unit) {
     SectionLabel(stringResource(Res.string.appearance_section))
     // System / Light / Dark segmented control — same shape as the text-size one below (#63)
     Row(
@@ -336,16 +347,23 @@ private fun GeneralPage(repo: PocketRepository) {
     )
     PushStatusRow(repo)
 
-    // Only shown where a native dictation engine exists to choose against (iOS) — elsewhere
-    // whisper is already the only voice path and the toggle would be a no-op.
-    if (NativeDictation.available) {
+    // The Whisper switch only where a native dictation engine exists to choose against (iOS) — elsewhere whisper is
+    // already the only voice path and the toggle would be a no-op. "After dictation" (voice input v2) on the phone
+    // apps, under it; on Android it is the section's one row.
+    val nativeEngine = NativeDictation.available
+    if (nativeEngine || afterDictation) {
         SectionLabel(stringResource(Res.string.voice_section))
-        ToggleRow(
-            label = stringResource(Res.string.voice_use_whisper),
-            sub = stringResource(Res.string.voice_use_whisper_sub),
-            checked = repo.voiceWhisper.value,
-            onChange = { repo.setVoiceWhisper(it) },
-        )
+        if (nativeEngine) {
+            ToggleRow(
+                label = stringResource(Res.string.voice_use_whisper),
+                sub = stringResource(Res.string.voice_use_whisper_sub),
+                checked = repo.voiceWhisper.value,
+                onChange = { repo.setVoiceWhisper(it) },
+            )
+        }
+        if (afterDictation) {
+            AfterDictationRow(repo.effectiveAfterDictation(), topHairline = !nativeEngine, onClick = onAfterDictation)
+        }
     }
 
     // Experimental: voice memo → tasks. Off by default; the switch only enables the entry — it records,

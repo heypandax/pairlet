@@ -685,9 +685,72 @@ fun VoiceSetupChip(issue: VoiceSetupIssue, enabled: Boolean, onRequest: () -> Un
 
 /** S6: mic permission sheet in the PermissionSheet visual language. */
 @Composable
-fun MicPermissionSheet(onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
+fun MicPermissionSheet(onOpenSettings: () -> Unit, onDismiss: () -> Unit) = VoiceDecisionSheet(
+    title = stringResource(Res.string.mic_title),
+    primary = stringResource(Res.string.open_settings), onPrimary = onOpenSettings,
+    secondary = stringResource(Res.string.not_now), onSecondary = onDismiss,
+    onDismiss = onDismiss,
+) {
+    Text(
+        stringResource(Res.string.mic_body),
+        color = Tok.tx2, fontSize = 14.sp, lineHeight = 21.sp,
+    )
+}
+
+/**
+ * Voice input v2: the one-time "correct before sending" disclosure (README "后续决定", review §10 item 9) — what is
+ * sent, to whom, on whose quota, when nothing is sent on its own, and how to turn it off. The S6 sheet's component.
+ * [onTurnOn] is the only way through to "Correct and send": the scrim, back and a downward drag all mean [onNotNow].
+ */
+@Composable
+fun VoiceRefineDisclosureSheet(onTurnOn: () -> Unit, onNotNow: () -> Unit) = VoiceDecisionSheet(
+    title = stringResource(Res.string.voice_refine_disclosure_title),
+    primary = stringResource(Res.string.voice_refine_disclosure_on), onPrimary = onTurnOn,
+    secondary = stringResource(Res.string.voice_refine_disclosure_later), onSecondary = onNotNow,
+    onDismiss = onNotNow,
+) {
+    listOf(
+        Res.string.voice_refine_disclosure_data,
+        Res.string.voice_refine_disclosure_swaps,
+        Res.string.voice_refine_disclosure_off,
+    ).forEachIndexed { i, point ->
+        Row(
+            Modifier.padding(top = if (i == 0) 0.dp else 10.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+        ) {
+            // the dot centres on the point's FIRST line box (ComposerNote's construction, tightCenter per AGENTS.md)
+            val line = 21.sp
+            Box(Modifier.height(with(LocalDensity.current) { line.toDp() }).clearAndSetSemantics {}, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(Tok.accent))
+            }
+            Text(
+                stringResource(point), color = Tok.tx2, fontSize = 14.sp,
+                style = tightCenter(14.sp).copy(lineHeight = line), modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/**
+ * The voice sheets' one layout (S6 and the refine disclosure): a tinted tile, a title, the [body], a filled
+ * [primary] action and a quiet [secondary] one. The explanation scrolls when large type makes it taller than the
+ * screen; the two actions stay on it.
+ */
+@Composable
+private fun VoiceDecisionSheet(
+    title: String,
+    primary: String,
+    onPrimary: () -> Unit,
+    secondary: String,
+    onSecondary: () -> Unit,
+    onDismiss: () -> Unit,
+    body: @Composable () -> Unit,
+) {
     PocketSheet(onDismiss) {
-        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 6.dp)) {
+        Column(
+            Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 12.dp),
+        ) {
             Box(
                 Modifier.size(50.dp).clip(RoundedCornerShape(14.dp))
                     .background(Tok.accent.copy(alpha = 0.12f))
@@ -695,23 +758,21 @@ fun MicPermissionSheet(onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) { Icon(ShieldMicIcon, null, tint = Tok.accent, modifier = Modifier.size(26.dp)) }
             Spacer(Modifier.height(16.dp))
-            Text(stringResource(Res.string.mic_title), color = Tok.tx, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = Tok.tx, fontSize = 19.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(7.dp))
-            Text(
-                stringResource(Res.string.mic_body),
-                color = Tok.tx2, fontSize = 14.sp, lineHeight = 21.sp,
-            )
-            Spacer(Modifier.height(18.dp))
+            body()
+        }
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp)) {
             Box(
                 Modifier.fillMaxWidth().height(50.dp).clip(RoundedCornerShape(12.dp)).background(Tok.accent)
-                    .clickable(onClick = onOpenSettings),
+                    .clickable(onClick = onPrimary),
                 contentAlignment = Alignment.Center,
-            ) { Text(stringResource(Res.string.open_settings), color = Tok.base, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
+            ) { Text(primary, color = Tok.base, fontSize = 16.sp, fontWeight = FontWeight.Bold) }
             Box(
                 Modifier.fillMaxWidth().height(44.dp).padding(top = 6.dp).clip(RoundedCornerShape(12.dp))
-                    .clickable(onClick = onDismiss),
+                    .clickable(onClick = onSecondary),
                 contentAlignment = Alignment.Center,
-            ) { Text(stringResource(Res.string.not_now), color = Tok.tx2, fontSize = 15.sp, fontWeight = FontWeight.Medium) }
+            ) { Text(secondary, color = Tok.tx2, fontSize = 15.sp, fontWeight = FontWeight.Medium) }
         }
     }
 }

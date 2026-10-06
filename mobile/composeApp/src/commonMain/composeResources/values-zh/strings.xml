@@ -293,6 +293,18 @@
     <string name="voice_reason_review">已校对，请检查后发送</string>
     <string name="voice_reason_disconnected">连接已断开，文字已保留，未发送</string>
     <string name="voice_reason_not_sent">未发送，请检查后发送</string>
+    <!-- 语音输入 v2：「语音输入后」设置与首次启用说明 -->
+    <string name="settings_after_dictation">语音输入后</string>
+    <string name="settings_after_dictation_compose">放入输入框</string>
+    <string name="settings_after_dictation_compose_sub">✓ 把文字放进输入框，由你检查后发送。</string>
+    <string name="settings_after_dictation_send">校对后发送</string>
+    <string name="settings_after_dictation_send_sub">✓ 直接发送。发送前，本会话的 Agent 会在你的电脑上把听错的词改回来；改动不能确认为纠错时，文字会放进输入框由你检查。录音条左侧按钮改为「完成并编辑」。</string>
+    <string name="voice_refine_disclosure_title">发送前先校对</string>
+    <string name="voice_refine_disclosure_data">你说完后，原始转写和当前项目的名字、分支名、文件名会发到你配对的电脑，由电脑上你自己配置的 Agent 命令行做一次无工具调用来改错词，用的是你自己的账号额度。</string>
+    <string name="voice_refine_disclosure_swaps">校对只许换词。改动不能确认为纠错、或连接与校对出问题时，文字放进输入框由你检查，不会自动发出。</string>
+    <string name="voice_refine_disclosure_off">随时可以在设置里改回「放入输入框」。</string>
+    <string name="voice_refine_disclosure_on">开启</string>
+    <string name="voice_refine_disclosure_later">暂不</string>
 
     <!-- ── 设置（关于 + 已配对设备）──────────────────────────────── -->
     <string name="settings_title">设置</string>

@@ -293,6 +293,18 @@
     <string name="voice_reason_review">Corrected — check and send</string>
     <string name="voice_reason_disconnected">Connection lost — text kept, not sent</string>
     <string name="voice_reason_not_sent">Not sent — check and send</string>
+    <!-- voice input v2: the "After dictation" setting and its one-time disclosure -->
+    <string name="settings_after_dictation">After dictation</string>
+    <string name="settings_after_dictation_compose">Put in the composer</string>
+    <string name="settings_after_dictation_compose_sub">✓ puts the text in the composer for you to check and send.</string>
+    <string name="settings_after_dictation_send">Correct and send</string>
+    <string name="settings_after_dictation_send_sub">✓ sends. First, this session's agent fixes mis-heard words on your computer; when a change can't be confirmed as a correction, the text goes to the composer for you to check. The bar's left button becomes “Finish and edit”.</string>
+    <string name="voice_refine_disclosure_title">Correct before sending</string>
+    <string name="voice_refine_disclosure_data">After you finish, the raw transcript and this project's name, branch and file names are sent to your paired computer, where the agent CLI you configured runs one tool-less call to fix mis-heard words — on your own account's quota.</string>
+    <string name="voice_refine_disclosure_swaps">Correction may only swap words. When a change can't be confirmed as a correction, or the connection or the correction fails, the text goes to the composer for you to check — nothing is sent on its own.</string>
+    <string name="voice_refine_disclosure_off">You can switch back to “Put in the composer” in Settings at any time.</string>
+    <string name="voice_refine_disclosure_on">Turn on</string>
+    <string name="voice_refine_disclosure_later">Not now</string>
 
     <!-- ── settings (about + paired devices) ─────────────────────── -->
     <string name="settings_title">Settings</string>

@@ -39,6 +39,7 @@ enum class SettingsDest {
     TEXT_SIZE,
     NOTIFICATIONS,
     VOICE_WHISPER,
+    VOICE_AFTER_DICTATION, // voice input v2 — the phone apps only
     VOICE_MEMO,
 
     // ── agent & session defaults ──
@@ -76,7 +77,7 @@ val SettingsDest.category: SettingsCategory?
         SettingsDest.USAGE, SettingsDest.SCHEDULES -> null
 
         SettingsDest.APPEARANCE, SettingsDest.TEXT_SIZE, SettingsDest.NOTIFICATIONS, SettingsDest.VOICE_WHISPER,
-        SettingsDest.VOICE_MEMO ->
+        SettingsDest.VOICE_AFTER_DICTATION, SettingsDest.VOICE_MEMO ->
             SettingsCategory.GENERAL
 
         SettingsDest.DEFAULT_MODE, SettingsDest.DEFAULT_MODEL, SettingsDest.DEFAULT_EFFORT, SettingsDest.FAST_MODE,
