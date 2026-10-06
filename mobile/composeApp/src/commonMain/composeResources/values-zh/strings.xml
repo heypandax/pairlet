@@ -518,6 +518,12 @@
     <string name="opencode_models_loading">正在从 opencode 读取模型…</string>
     <string name="model_models_loading">正在从 %1$s 读取模型…</string>
     <string name="model_models_empty">%1$s 没有报可用模型。</string>
+    <string name="model_catalog_refreshing">正在更新模型列表…</string>
+    <string name="model_catalog_preview">显示这台电脑上次的列表，本次连接尚未核对。</string>
+    <string name="model_catalog_cli_builtin">这台电脑的 Codex 未登录，显示 CLI 内置列表。</string>
+    <string name="model_catalog_last_good">更新失败，显示上次列表。</string>
+    <string name="model_catalog_builtin">使用内置列表。</string>
+    <string name="model_catalog_refresh">刷新模型列表</string>
     <string name="af_hint">可以多选：勾几个就只显示哪几个 agent 的项目与会话，「全部」＝不筛选。各 agent 在列表里仍以各自颜色标注。</string>
     <string name="settings_usage">Token 用量</string>
     <string name="usage_title">用量</string>

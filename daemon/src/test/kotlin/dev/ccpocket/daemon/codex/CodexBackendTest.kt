@@ -546,37 +546,31 @@ class CodexBackendTest {
         val cache = dir.resolve("models_cache.json")
         val config = dir.resolve("config.toml")
         Files.writeString(config, "")
-        Files.writeString(
-            cache,
-            """
-            {
-              "models": [
-                {
-                  "slug": "gpt-5.6-sol",
-                  "visibility": "list",
-                  "upgrade": null,
-                  "supported_reasoning_levels": [{"effort":"max"},{"effort":"ultra"}],
-                  "service_tiers": [{"id":"priority","name":"Fast"}]
-                },
-                {
-                  "slug": "gpt-5.5",
-                  "visibility": "list",
-                  "upgrade": null,
-                  "supported_reasoning_levels": [{"effort":"xhigh"}],
-                  "service_tiers": []
-                }
-              ]
-            }
-            """.trimIndent(),
-        )
-        val modelService = CodexModelService(cache, config)
+        // A confirmed RPC catalog for this real workdir can clamp unsupported launch settings.
+        // A file fallback alone cannot establish those capabilities (covered by CodexModelServiceTest).
+        val rows = Json.parseToJsonElement(
+            """[
+              {"model":"gpt-5.6-sol","supportedReasoningEfforts":[{"reasoningEffort":"max"},{"reasoningEffort":"ultra"}],
+               "serviceTiers":[{"id":"priority","name":"Fast"}]},
+              {"model":"gpt-5.5","supportedReasoningEfforts":[{"reasoningEffort":"xhigh"}],"serviceTiers":[]}
+            ]""",
+        ).jsonArray
+        val modelService = CodexModelService(cache, config, binary = { dir.resolve("codex") }, transport = { _, _ ->
+            CodexCatalogRpc.CatalogOutcome.Success(
+                pages = listOf(rows),
+                account = Json.parseToJsonElement("""{"type":"chatgpt","email":"fixture@example.invalid"}""").jsonObject,
+                accountError = null,
+                userAgent = "codex_cli_rs/0.155.1",
+            )
+        })
+        modelService.fetch(workdir = dir.toString())
 
         val supportedWrites = mutableListOf<String>()
         val supported = CodexBackend(null, modelService)
         supported.attach(
             AgentIo({ supportedWrites += it }, {}),
             AgentSpec(
-                Path.of("/repo"),
+                dir,
                 model = "gpt-5.6-sol",
                 effort = "ultra",
                 serviceTier = "priority",
@@ -596,7 +590,7 @@ class CodexBackendTest {
         rejected.attach(
             AgentIo({ rejectedWrites += it }, {}),
             AgentSpec(
-                Path.of("/repo"),
+                dir,
                 model = "gpt-5.5",
                 effort = "ultra",
                 serviceTier = "priority",

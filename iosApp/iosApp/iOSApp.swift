@@ -308,9 +308,13 @@ struct iOSApp: App {
 
     var body: some Scene {
         WindowGroup {
+            // No `.preferredColorScheme` here: it pinned the WHOLE window dark (a leftover of the dark-only
+            // days), and the Compose side resolves Settings ▸ Appearance ▸ System by reading its own view
+            // controller's trait collection — which inherits that pin. So "follow system" stayed dark through
+            // OS flips and relaunches alike. The window's interface style is now driven from Kotlin
+            // (SystemBarAppearance.ios.kt): pinned for a forced Light/Dark pick, released for System.
             ContentView()
                 .ignoresSafeArea(.all)
-                .preferredColorScheme(.dark)
                 .onOpenURL { url in
                     MainViewControllerKt.handleDeepLink(url: url.absoluteString)
                 }

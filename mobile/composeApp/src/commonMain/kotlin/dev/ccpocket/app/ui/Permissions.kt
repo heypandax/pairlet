@@ -294,6 +294,9 @@ fun StartSessionModeSheet(
     defaultModelFor: (AgentKind) -> String? = { null },
     /** Why [modelsFor]'s rows are only a built-in fallback ([codexCatalogNote]); null = nothing to explain. */
     modelsNoteFor: (AgentKind) -> String? = { null },
+    /** Codex catalog cache: the state of the rows (updating / preview / …) and the manual refresh — see the sheet. */
+    modelsStatusFor: (AgentKind) -> CodexCatalogStatus? = { null },
+    onRefreshModels: ((AgentKind) -> Unit)? = null,
     modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
     /** issue #333 — the daemon's advertised agent presets per agent; empty = no preset row (see the sheet). */
     agentPresetsFor: (AgentKind) -> List<dev.ccpocket.protocol.AgentPresetInfo> = { emptyList() },
@@ -314,6 +317,8 @@ fun StartSessionModeSheet(
     modelsFor = modelsFor,
     defaultModelFor = defaultModelFor,
     modelsNoteFor = modelsNoteFor,
+    modelsStatusFor = modelsStatusFor,
+    onRefreshModels = onRefreshModels,
     modePresetsFor = modePresetsFor,
     agentPresetsFor = agentPresetsFor,
     fullAccessConfirmed = fullAccessConfirmed,

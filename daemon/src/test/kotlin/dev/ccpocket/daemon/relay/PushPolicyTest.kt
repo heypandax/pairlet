@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 /**
  * The pure push gate + copy decisions behind the relay client's notify hooks (issue #138):
  * usage-limit detection on turn-error text, the three turn-push flavors, and the permission-ask
- * push gate (bridge #91 always / owner sessions by watcher + presence).
+ * push (bridge #91 / owner #138 — switch-gated only, since issue #382 was applied to asks).
  */
 class PushPolicyTest {
 
@@ -78,41 +78,47 @@ class PushPolicyTest {
         assertTrue("usage limit reached" in p.body.lowercase(), "got: ${p.body}")
     }
 
-    // ---- ask push gate ----
+    // ---- ask push (issue #382 applied to asks: presence is not an input any more) ----
 
     @Test
-    fun bridge_ask_always_pushes_urgent() {
-        // even watched + peer online: the bridge can't see the ask, and an online phone may be elsewhere
-        val p = PushPolicy.askPush(wd, "sid1", origin = "ci-bot", tool = "Run command", watched = true, peerOnline = true, lanConnected = true)
+    fun bridge_ask_pushes_urgent_as_approval() {
+        val p = PushPolicy.askPushFor(pushEnabled = true, wd, "sid1", origin = "ci-bot", tool = "Run command")
         assertNotNull(p)
         assertTrue(p.urgent)
+        assertEquals("approval", p.kind)
         assertEquals("Approval needed — ci-bot", p.title)
         assertTrue("Run command" in p.body)
+        assertEquals("sid1", p.sessionId)
+        assertEquals(wd.toString(), p.workdir)
     }
 
     @Test
-    fun owner_ask_with_no_watcher_pushes_urgent() {
-        // nobody attached to the conversation: the card reached no client — urgent so the relay's
-        // interactive-socket suppression can't swallow it while the phone sits in a different session
-        val p = PushPolicy.askPush(wd, "sid1", origin = null, tool = "Edit file", watched = false, peerOnline = true, lanConnected = false)
+    fun owner_ask_pushes_urgent_regardless_of_watchers_or_presence() {
+        // The old gate suppressed an owner ask whenever a client was attached to the conversation AND the relay
+        // peer or a LAN client was online — the desktop App satisfies both around the clock, so owner asks never
+        // pushed at all. The policy no longer takes `watched` / peerOnline / lanConnected: the compile-time absence
+        // is the guarantee, and `urgent` keeps the relay's own interactive-device check from swallowing the push
+        // while the phone or the desktop is attached in a different session.
+        val p = PushPolicy.askPushFor(pushEnabled = true, wd, "sid1", origin = null, tool = "Edit file")
         assertNotNull(p)
-        assertTrue(p.urgent)
+        assertTrue(p.urgent, "an owner ask must bypass the relay's interactive-device gate")
+        assertEquals("approval", p.kind)
         assertEquals("Approval needed — cc-pocket", p.title)
+        assertEquals("Edit file is waiting for your decision", p.body)
     }
 
     @Test
-    fun owner_ask_watched_but_phone_gone_pushes_non_urgent() {
-        // a locked phone leaves a stale sink attached — push, but let the relay re-check live sockets
-        val p = PushPolicy.askPush(wd, "sid1", origin = null, tool = "Run command", watched = true, peerOnline = false, lanConnected = false)
-        assertNotNull(p)
-        assertFalse(p.urgent)
+    fun switch_off_pushes_no_ask_at_all() {
+        // prefs.pushEnabled is the ONLY gate — bridge and owner alike, exactly like turnPushFor
+        assertNull(PushPolicy.askPushFor(pushEnabled = false, wd, "sid1", origin = null, tool = "Run command"))
+        assertNull(PushPolicy.askPushFor(pushEnabled = false, wd, "sid1", origin = "ci-bot", tool = "Run command"))
     }
 
     @Test
-    fun owner_ask_with_a_present_watcher_is_suppressed() {
-        // an attached, present client got the ask card on the data plane — no lock-screen double alert
-        assertNull(PushPolicy.askPush(wd, "sid1", origin = null, tool = "Run command", watched = true, peerOnline = true, lanConnected = false))
-        assertNull(PushPolicy.askPush(wd, "sid1", origin = null, tool = "Run command", watched = true, peerOnline = false, lanConnected = true))
+    fun ask_push_carries_the_anchor_it_is_given_before_a_session_exists() {
+        // a request-level bridge approval can land before the first turn mints a session id: the conversation
+        // passes its convoId as the routing anchor and the push must carry it untouched
+        assertEquals("convo-anchor", PushPolicy.askPush(wd, "convo-anchor", origin = "ci-bot", tool = "Run command").sessionId)
     }
 
     // ---- usage-limit reset-moment parse (issue #137: TurnDone.usageLimitResetAt) ----

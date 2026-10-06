@@ -2213,6 +2213,25 @@ data class AgentRepairStart(
 data class FetchModels(
     val agent: AgentKind = AgentKind.CLAUDE, // default keeps older peers on Claude, like every agent field
     val workdir: String? = null,
+    /**
+     * The user pressed refresh: bypass the daemon's catalog reuse window and re-check the backend now (an
+     * in-flight check is joined, never duplicated). Trailing + defaulted: an old daemon drops the unknown
+     * key and answers as it always did; an old app never sends it. This is a Pairlet-side flag only — it is
+     * NOT forwarded as a parameter of any backend RPC (Codex `model/list` has no such parameter).
+     */
+    val forceRefresh: Boolean = false,
+    /**
+     * Client-chosen correlation token, echoed verbatim as [ModelsList.requestId] on EVERY frame this request
+     * produces (the Envelope id does not survive into the handler). A client that changed environment or
+     * binding after sending drops frames whose token it no longer expects — `catalog.scope` alone cannot tell
+     * a late A-answer from a fresh one on the same connection.
+     *
+     * Sending it also OPTS IN to the Codex two-frame delivery (cached rows flagged `catalog.refreshing`, then
+     * the check's outcome). Without it the daemon assumes a client that reconciles capabilities from the
+     * first frame it sees, and answers Codex with ONE frame — the check's result — exactly as older daemons
+     * did. Trailing + defaulted: an old daemon drops the key; an old app never sends it.
+     */
+    val requestId: String? = null,
 ) : ToDaemon
 
 /** daemon -> client: the model list for the requested backend.
@@ -2266,7 +2285,80 @@ data class ModelsList(
      * an older App ignores it. Empty means "not advertised", never "this backend has no presets".
      */
     val agentPresets: List<AgentPresetInfo> = emptyList(),
+    /**
+     * Where [models]/[modelCapabilities] came from and how fresh they are (Codex catalog cache, 2026-10).
+     * Null from an older daemon = "compatibility mode": the client shows the rows but cannot claim they were
+     * confirmed against the current account, and must not persist them as a trusted catalog. Trailing +
+     * defaulted both ways: an older app skips the unknown object.
+     */
+    val catalog: ModelCatalogMeta? = null,
+    /** [FetchModels.requestId] echoed back, on the immediate frame AND on the final one; null when the request
+     *  carried none (or from an older daemon). Trailing + defaulted. */
+    val requestId: String? = null,
 ) : ToPhone
+
+// ── model catalog provenance (Codex catalog cache, 2026-10) ──────────────────────────────────────────
+
+/** [ModelCatalogMeta.source]: the installed CLI's `model/list` answered for a CONFIRMED signed-in account
+ *  (`account/read` returned a ChatGPT account with an identity). The only source whose rows may be persisted
+ *  as "this account's catalog". */
+const val MODEL_CATALOG_SOURCE_DYNAMIC = "dynamic"
+
+/** [ModelCatalogMeta.source]: `model/list` answered, but the account behind it could NOT be confirmed: the
+ *  CLI reported an account without an identity (API-key or Bedrock accounts expose only their `type`), a
+ *  ChatGPT account without an email, `account/read` failed, or the provider needs no OpenAI login. The rows
+ *  are the CLI's answer for this install + provider, scoped by what IS known — never by a guessed identity. */
+const val MODEL_CATALOG_SOURCE_DYNAMIC_UNCONFIRMED = "dynamic-unconfirmed"
+
+/** [ModelCatalogMeta.source]: `model/list` answered, but the CLI reported no account at all — on codex-cli
+ *  0.155.1 that call then serves the CLI's own BUILT-IN list without any error (probed 2026-10-05), so the
+ *  rows are real CLI knowledge but not the account's catalog. */
+const val MODEL_CATALOG_SOURCE_CLI_BUILTIN = "cli-builtin"
+
+/** [ModelCatalogMeta.source]: parsed from the CLI's local `models_cache.json`; [ModelCatalogMeta.upstreamAt]
+ *  carries that file's own `fetched_at` when present. */
+const val MODEL_CATALOG_SOURCE_FILE = "file"
+
+/** [ModelCatalogMeta.source]: a refresh FAILED and the previous successful result is being kept;
+ *  [ModelsList.error] says why. */
+const val MODEL_CATALOG_SOURCE_LAST_GOOD = "last-good"
+
+/** [ModelCatalogMeta.source]: nothing could be read; the rows are Pairlet's own [CODEX_MODEL_IDS]. */
+const val MODEL_CATALOG_SOURCE_BUILTIN = "builtin"
+
+/**
+ * Provenance of one [ModelsList]. Every field is optional/defaulted and [source] is a TOLERANT String (a
+ * value only a newer daemon knows renders as "unknown source", never a decode failure).
+ *
+ * The three timestamps are deliberately distinct and must not be collapsed: [checkedAt] is when THIS daemon
+ * last asked its source, [changedAt] when the semantic content last differed from the previous answer, and
+ * [upstreamAt] when the source itself says the data was fetched from the vendor — null when the source does
+ * not say (the app-server RPC does not). Re-reading an old file never advances [upstreamAt].
+ */
+@Serializable
+data class ModelCatalogMeta(
+    val source: String = "",
+    /**
+     * Opaque, non-reversible marker of the environment the rows belong to (daemon-minted: a hash over the
+     * CLI's reported account type/plan/identity, the CLI build, and the effective `model_provider`/`profile`
+     * as Codex resolves them for the request's workdir — never a token, never an email in clear).
+     * A client keys its persisted cache on it next to the binding identity; a different value means a
+     * different Codex environment, whose old rows are a preview at best. Null = the daemon could not scope
+     * the rows (built-in fallback).
+     */
+    val scope: String? = null,
+    /** Hash of the normalised semantic content (ids, names, visibility, order, efforts, tiers, upgrade hints).
+     *  Equal versions mean "nothing changed": clients update the check time and leave selection/scroll alone. */
+    val contentVersion: String? = null,
+    val checkedAt: Long? = null,
+    val changedAt: Long? = null,
+    val upstreamAt: Long? = null,
+    /** True on an IMMEDIATE answer from the daemon's cache while a background check is still running for the
+     *  same request; a second [ModelsList] with `refreshing=false` follows (success, unchanged or failed). */
+    val refreshing: Boolean = false,
+    /** The CLI build the rows were read from, when known (a version change invalidates client caches). */
+    val cliVersion: String? = null,
+)
 
 /**
  * One advertised agent-preset row (issue #333). [id] is the backend's own stable key (the exact value
@@ -2313,6 +2405,20 @@ data class ModelCapabilities(
     val reasoningEfforts: List<String> = emptyList(),
     val defaultReasoningEffort: String? = null,
     val serviceTiers: List<ModelServiceTier> = emptyList(),
+    // ── Codex catalog cache (2026-10): display/visibility facts keyed by the EXECUTION id [model]. All trailing
+    //    + defaulted; an older peer ignores them and a sparse row still decodes. ──
+    /** Human display name (Codex `displayName`); null = show [model]. Never used to build an execution id. */
+    val displayName: String? = null,
+    /** Hidden from the default picker upstream. Hidden rows stay OUT of [ModelsList.models] but are kept here so
+     *  a saved/active id that the vendor since hid can still be recognised and explained. */
+    val hidden: Boolean = false,
+    /** The backend's own default row (Codex `isDefault`). Informational — never substituted for a null choice. */
+    val isDefault: Boolean = false,
+    /** Upstream's suggested successor (Codex `upgrade` / `upgradeInfo.model`). A HINT: the row stays selectable
+     *  and nothing migrates automatically. */
+    val upgradeTo: String? = null,
+    /** Catalog default service tier id for this model, when the backend declares one. */
+    val defaultServiceTier: String? = null,
 )
 
 /** A selectable backend service tier. For Codex 0.145.0, `priority` is displayed as “Fast”. */

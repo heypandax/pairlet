@@ -46,16 +46,46 @@ class AgentFrameGuardTest {
         }
     }
 
+    /**
+     * The frames a DaemonInfo itself legitimately produces, which are not the user's agent-scoped requests under
+     * test: the ClientCaps re-declaration, and the Codex catalog PREFETCH (Codex catalog cache) — a correlated
+     * `FetchModels(agent=CODEX, requestId=…)` sent only because the daemon just advertised "codex". Everything
+     * else that leaves the repository after the handshake is still subject to the guard, including a plain
+     * FetchModels for an agent the daemon did not advertise.
+     */
+    private fun handshakeOwn(f: Frame) =
+        f is dev.ccpocket.protocol.ClientCaps || (f is FetchModels && f.agent == AgentKind.CODEX && f.requestId != null)
+
     @Test
     fun every_agent_scoped_frame_is_blocked_after_daemon_omits_its_agent() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val sent = mutableListOf<Frame>()
-        val repo = PocketRepository(scope).apply { onSendForTest = { if (it !is dev.ccpocket.protocol.ClientCaps) sent += it } } // the caps re-declaration that answers a DaemonInfo is not an agent-scoped frame
+        val all = mutableListOf<Frame>()
+        val repo = PocketRepository(scope).apply { onSendForTest = { all += it; if (!handshakeOwn(it)) sent += it } }
         try {
             repo.receiveForTest(DaemonInfo(supportedAgents = listOf("claude", "codex")))
+            // the advertisement's own prefetch is the ONLY agent frame the handshake may produce, and it names the
+            // advertised agent — it is not a leak of the guard
+            assertEquals(1, all.count { it is FetchModels }, "exactly one prefetch, for the advertised Codex")
+            assertTrue(all.filterIsInstance<FetchModels>().all { it.agent == AgentKind.CODEX && it.requestId != null })
             zcodeFrames.forEach { repo.sendForTest(it) }
 
             assertTrue(sent.isEmpty(), "no frame may let an unsupported agent fall back to Claude")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** A daemon that does NOT advertise Codex gets no prefetch — the guard applies to the handshake's own frame too. */
+    @Test
+    fun the_codex_prefetch_only_follows_an_advertisement_that_names_codex() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val sent = mutableListOf<Frame>()
+        val repo = PocketRepository(scope).apply { onSendForTest = { if (it !is dev.ccpocket.protocol.ClientCaps) sent += it } }
+        try {
+            repo.receiveForTest(DaemonInfo(supportedAgents = listOf("claude")))
+            repo.receiveForTest(DaemonInfo()) // an older daemon that advertises nothing at all
+            assertTrue(sent.isEmpty(), "no Codex, no prefetch: $sent")
         } finally {
             scope.cancel()
         }
@@ -65,7 +95,7 @@ class AgentFrameGuardTest {
     fun all_agent_usage_request_remains_unscoped() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val sent = mutableListOf<Frame>()
-        val repo = PocketRepository(scope).apply { onSendForTest = { if (it !is dev.ccpocket.protocol.ClientCaps) sent += it } } // the caps re-declaration that answers a DaemonInfo is not an agent-scoped frame
+        val repo = PocketRepository(scope).apply { onSendForTest = { if (!handshakeOwn(it)) sent += it } }
         try {
             repo.receiveForTest(DaemonInfo(supportedAgents = listOf("claude", "codex")))
             repo.sendForTest(FetchUsage(agent = null))

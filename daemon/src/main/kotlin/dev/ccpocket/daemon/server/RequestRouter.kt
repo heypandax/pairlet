@@ -1012,11 +1012,22 @@ class RequestRouter(
             // user's gateway (#167 ②), and a gateway that accepts the connection but never answers would
             // otherwise pin a core-count-limited thread that the session pumps and scheduler share.
             is FetchModels -> scope.launch(Dispatchers.IO) {
+                // Codex answers in up to TWO frames (catalog cache, 2026-10) when the request carries a
+                // `requestId`: the cached list at once — flagged `catalog.refreshing` when a background check
+                // runs for it — then the check's outcome, so a picker that opened on the cached rows always sees
+                // the refresh end (success, unchanged or failed). Both frames echo the id. A request WITHOUT one
+                // (an already-shipped app, which reconciles preferences from the first frame) gets one frame: the
+                // check's result. The workdir scopes the read (Codex project config layers); a manual refresh
+                // (`forceRefresh`) bypasses the reuse window but merges into a running check.
+                if (frame.agent == AgentKind.CODEX) {
+                    codexModels.fetch(frame.forceRefresh, frame.workdir, frame.requestId) { sink.emit(it) }
+                    return@launch
+                }
                 sink.emit(when (frame.agent) {
                     AgentKind.OPENCODE -> openCodeModels.fetch()
                     AgentKind.KIMI -> kimiModels.fetch()
                     AgentKind.ZCODE -> zcodeModels.fetch()
-                    AgentKind.CODEX -> codexModels.fetch()
+                    AgentKind.CODEX -> error("handled above")
                     AgentKind.CLAUDE -> claudeModels.fetch(frame.workdir)
                     // issue #333 lifted the #255 scope-out: dsh's own `llm.models` + `agentPreset.list`
                     // answer without a session, so the picker gets real rows (and the agent-preset row)
