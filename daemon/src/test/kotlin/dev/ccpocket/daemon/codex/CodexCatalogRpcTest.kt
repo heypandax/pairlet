@@ -167,9 +167,19 @@ class CodexCatalogRpcTest {
     fun an_early_exit_and_an_rpc_error_are_reported_as_such_and_leave_no_process() = runBlocking {
         assumeTrue(posix)
         val d1 = Files.createTempDirectory("catalog-rpc")
-        val exits = fake(d1, """  *'"id":1,'*) $initializeReply; exit 0 ;;""")
+        // Exit after the next request has arrived, so this tests EOF while reading. Exiting just
+        // after initialize races with the client's initialized/account writes: Linux can correctly
+        // report a broken pipe instead of EOF, depending on which process is scheduled first.
+        val exits = fake(
+            d1,
+            """
+                *'"id":1,'*) $initializeReply ;;
+                *'"id":2,'*) exit 0 ;;
+            """.trimIndent(),
+        )
         val closed = withTimeout(10_000) { CodexCatalogRpc.read(exits.exe, cwd = d1, timeoutMs = 5_000) }
-        assertTrue("closed the connection" in assertIs<CatalogOutcome.Failure>(closed).reason)
+        val closedReason = assertIs<CatalogOutcome.Failure>(closed).reason
+        assertTrue("closed the connection" in closedReason, closedReason)
         assertTrue(gone(exits.pid()))
 
         val d2 = Files.createTempDirectory("catalog-rpc")
