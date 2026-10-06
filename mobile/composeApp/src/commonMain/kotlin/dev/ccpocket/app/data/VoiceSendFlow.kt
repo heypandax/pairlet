@@ -166,8 +166,13 @@ class VoiceSendFlow {
     private fun start(e: Event.Start): List<Effect> {
         // A reused id (a replayed Start, or one of a finished capture) must not re-arm a capture that may have sent.
         if (!usedIds.add(e.captureId)) return emptyList()
-        // One capture at a time: a new Start supersedes an unfinished one, which can then never send.
-        val out = current?.let { cancelIfRefining(it) + Effect.Finished(it.id) } ?: emptyList()
+        // One capture at a time: a new Start supersedes an unfinished one, which can then never send. Text it
+        // already had is kept, not dropped; a submitted one stays with the app's send recovery.
+        val out = current?.let { old ->
+            val text = old.refined ?: old.original
+            if (text != null && old.phase != Phase.SUBMITTED) toComposer(old, text, null)
+            else cancelIfRefining(old) + Effect.Finished(old.id)
+        } ?: emptyList()
         current = Capture(e.captureId, e.origin, e.sendBar)
         return out
     }

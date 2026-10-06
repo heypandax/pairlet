@@ -355,8 +355,17 @@ class VoiceSendFlowTest {
 
     @Test fun newStartSupersedesAnUnfinishedCapture() {
         val f = refining()
-        assertEquals(listOf(CancelRefine(id), Finished(id)), f.on(Start("cap-2", origin, sendBar = true)))
+        assertEquals(listOf(CancelRefine(id), composer(original), Finished(id)), f.on(Start("cap-2", origin, sendBar = true)))
         assertEquals(emptyList(), f.on(refined()))
+    }
+
+    @Test fun newStartKeepsTheHeldTextAndLeavesASubmittedCaptureAlone() {
+        val held = holding()
+        assertEquals(listOf(composer(refinedText), Finished(id)), held.on(Start("cap-2", origin, sendBar = true)))
+        val sent = holding().also { it.on(HoldElapsed(id, eligibleNow = true)) }
+        assertEquals(listOf(Finished(id)), sent.on(Start("cap-2", origin, sendBar = true)))
+        val recording = flow()
+        assertEquals(listOf(Finished(id)), recording.on(Start("cap-2", origin, sendBar = true)))
     }
 
     // ── property: random sequences ──
