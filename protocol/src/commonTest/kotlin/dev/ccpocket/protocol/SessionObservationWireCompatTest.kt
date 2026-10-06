@@ -18,6 +18,21 @@ private data class PreObservationOpenSession(
     val agent: AgentKind = AgentKind.CLAUDE,
 )
 
+/** The pre-observation `ManagedSessionEntry` reader an already-shipped App decodes rows with (nested unknown objects). */
+@Serializable
+private data class PreObservationManagedEntry(
+    val sessionId: String,
+    val agent: AgentKind? = null,
+    val summary: PreObservationSummary? = null,
+    val group: String? = null,
+)
+
+@Serializable
+private data class PreObservationSummary(val sessionId: String, val title: String, val firstPrompt: String, val messageCount: Int, val cwd: String, val lastModified: Long)
+
+@Serializable
+private data class PreObservationManagedState(val requestId: String? = null, val workdir: String, val items: List<PreObservationManagedEntry>? = null)
+
 /** The pre-observation `pocket/session.live` reader an already-shipped App decodes with. */
 @Serializable
 private data class PreObservationSessionLive(
@@ -124,6 +139,45 @@ class SessionObservationWireCompatTest {
         assertFalse(isValidObservationBinding(binding.copy(parentTaskRef = "x".repeat(OBSERVATION_REF_MAX_CHARS + 1))))
         assertFalse(isValidObservationBinding(binding.copy(parentTaskRef = "bad\u0000ref")))
         assertFalse(isValidObservationBinding(binding.copy(parentTaskRef = "   ")))
+    }
+
+    @Test
+    fun ordinary_frames_carry_no_observation_key_at_all() {
+        // explicitNulls = false: a plain frame's bytes are exactly what an old peer always received
+        assertFalse("observation" in bodyJson(SessionLive("c", "/p")))
+        assertFalse("observation" in PocketJson.encodeToString(SessionSummary("sid", "t", "p", 1, "", 1L)))
+        assertFalse("observation" in PocketJson.encodeToString(ManagedSessionEntry("sid", AgentKind.CODEX)))
+        assertFalse("observation" in bodyJson(ImportSession("r", "/p", AgentKind.CODEX, "sid")))
+    }
+
+    @Test
+    fun an_old_row_reader_skips_the_nested_snapshot_inside_a_managed_page() {
+        val entry = ManagedSessionEntry(
+            "sid", AgentKind.CODEX, summary = SessionSummary("sid", "t", "p", 1, "", 1L, agent = AgentKind.CODEX, observation = SessionObservation(binding, true, progress)),
+            observation = SessionObservation(binding, true, progress),
+        )
+        val old = PocketJson.decodeFromString<PreObservationManagedState>(bodyJson(ManagedSessionsState("r", "/p", items = listOf(entry))))
+        assertEquals("sid", old.items!!.single().sessionId)
+        assertEquals("t", old.items!!.single().summary!!.title)
+    }
+
+    @Test
+    fun bare_json_defaults_are_fail_safe() {
+        val b = PocketJson.decodeFromString<ObservationBinding>("{}")
+        assertTrue(b.readOnly)
+        assertEquals(ObservationAttributions.USER_ASSIGNED, b.attribution)
+        assertEquals(ObservationSources.OPENAI_DOT, b.source)
+        assertNull(b.parentTaskRef)
+        val o = PocketJson.decodeFromString<SessionObservation>("{}")
+        assertNull(o.binding); assertFalse(o.readOnly); assertNull(o.progress)
+        val p = PocketJson.decodeFromString<ObservedProgress>("{}")
+        assertEquals(ObservedStates.UNKNOWN, p.state); assertEquals(ObservedFreshness.UNKNOWN, p.freshness); assertEquals("turn", p.scope)
+    }
+
+    @Test
+    fun an_unknown_agent_on_the_new_request_reads_as_null_never_as_claude() {
+        val f = body("""{"t":"pocket/managed.observe","requestId":"r","workdir":"/p","agent":"future_agent","sessionId":"sid"}""") as SetSessionObservation
+        assertNull(f.agent)
     }
 
     @Test

@@ -457,15 +457,15 @@ class SessionRegistry(
         // else. A take-over of a bound session is refused outright; a store this build cannot read refuses too.
         if (resume != null) {
             val lookup = observationPolicy?.invoke(effectiveAgent, open.workdir, resume) ?: dev.ccpocket.daemon.disk.ObservationLookup.Unbound
-            if (lookup is dev.ccpocket.daemon.disk.ObservationLookup.Unavailable) {
-                log.info("open ${resume.take(8)}… → refused: observation policy unreadable (${lookup.reason})")
-                sink.emit(PocketError(dev.ccpocket.protocol.ObservationErrors.READ_ONLY, controlRefusal(effectiveAgent, open.workdir, resume) ?: "managed store unreadable"))
-                return ""
-            }
+            // a store this build cannot read (corrupt / unknown schema) may hide a binding for ANY member of the
+            // project: fail closed to READ-ONLY, not to nothing — the user can still look at the session, while
+            // control (take-over, rename, and a controllable open) stays refused until the store is repaired
+            val policyUnreadable = lookup is dev.ccpocket.daemon.disk.ObservationLookup.Unavailable
+            if (policyUnreadable) log.info("open ${resume.take(8)}… → observation policy unreadable (${(lookup as dev.ccpocket.daemon.disk.ObservationLookup.Unavailable).reason}): read-only")
             val binding = (lookup as? dev.ccpocket.daemon.disk.ObservationLookup.Bound)?.binding
-            val readOnly = open.observeOnly || binding?.readOnly == true
+            val readOnly = open.observeOnly || binding?.readOnly == true || policyUnreadable
             if (readOnly) {
-                if (open.takeOver && binding?.readOnly == true) {
+                if (open.takeOver && (binding?.readOnly == true || policyUnreadable)) {
                     log.info("open ${resume.take(8)}… → refused: take-over of a read-only bound session")
                     sink.emit(PocketError(dev.ccpocket.protocol.ObservationErrors.READ_ONLY, controlRefusal(effectiveAgent, open.workdir, resume) ?: "read-only"))
                     return ""

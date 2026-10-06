@@ -164,13 +164,24 @@ class SessionRegistryReadOnlyObserveTest {
     }
 
     @Test
-    fun an_unreadable_policy_store_refuses_control_rather_than_degrading_to_writable() = runBlocking<Unit> {
+    fun an_unreadable_policy_store_degrades_to_read_only_never_to_writable() = runBlocking<Unit> {
         writeRollout(ended = true)
         policy = ObservationLookup.Unavailable("undecodable")
         val r = registry()
         val c = Capture()
-        assertEquals("", r.open(OpenSession(workdir, sid, agent = AgentKind.CODEX), sink("dev:phone", c)))
-        assertEquals(ObservationErrors.READ_ONLY, assertNotNull(c.last<PocketError>()).code)
+        // a plain open still SHOWS the session — as a read-only view, since a binding may be hiding in the store
+        val convoId = r.open(OpenSession(workdir, sid, agent = AgentKind.CODEX), sink("dev:phone", c), peerSupportsObservation = true)
+        assertTrue(convoId.isNotEmpty(), "${c.frames}")
+        assertTrue(r.observing(convoId))
+        assertFalse(r.isLiveSession(sid))
+        val live = awaitLive(c)
+        assertTrue(live.observing)
+        assertTrue(assertNotNull(live.observation).readOnly)
+        assertNull(live.observation?.binding)
+        // control stays refused
+        val t = Capture()
+        assertEquals("", r.open(OpenSession(workdir, sid, agent = AgentKind.CODEX, takeOver = true), sink("dev:phone2", t)))
+        assertEquals(ObservationErrors.READ_ONLY, assertNotNull(t.last<PocketError>()).code)
         assertNotNull(r.renameSession(workdir, sid, "x"))
     }
 

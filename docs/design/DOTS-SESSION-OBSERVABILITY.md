@@ -351,7 +351,7 @@ P1 完成需要同时满足：真实 Dot 本地子任务身份已对应、明确
 
 - 来源／归属／状态／新鲜度均为字符串词汇（`ObservationSources`、`ObservationAttributions`、`ObservedStates`、`ObservedFreshness`），未知值由 `normalize` 映射到 unknown；没有给既有 enum 增值。
 - `ManagedMember.observation` 为空时不写入文件（schema 1 字节不变）；存在绑定时文件写为 `schemaVersion = 2`，旧 daemon 读到后按既有规则判为 `STORE_CORRUPT`（只读，不改写），不会丢绑定但也不会执行新策略——这是第 4.6 节已说明的回退限制。
-- 只读分支位于 `SessionRegistry.openClaimed` 最前（在 reattach、writer 探测、resume／fork 之前）；store 不可读时打开与改名均拒绝（`session_read_only`），不回退成可写。
+- 只读分支位于 `SessionRegistry.openClaimed` 最前（在 reattach、writer 探测、resume／fork 之前）；store 不可读（损坏／未知 schema）时普通打开退化为只读观察（无绑定、`notice` 提示），接管与改名拒绝（`session_read_only`），不回退成可写。
 - `takeOver` 对已绑定会话返回 `PocketError(session_read_only)`；prompt／interrupt／审批／模式切换按 convoId 路由，观察 convo 不在可控表中，天然拒绝；rewind 需要可控 convo，同理。
 - 列表进度由 `SessionObservationProjector` 从扫描 memo 读取（不二次解析），观察 tick 复用同一 memo；新鲜度变化（60 秒）即使文件未变也会重新宣告。
 - 旧客户端：只读打开仍收到 `observing = true` + `notice`，不收到 `observation` 快照（按连接能力剥离）；其“在这里继续”请求被服务端拒绝。
