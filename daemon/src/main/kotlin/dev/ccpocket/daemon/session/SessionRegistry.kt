@@ -455,12 +455,19 @@ class SessionRegistry(
         // yields an independent observe subscription on the EXISTING native record — even when this daemon drives
         // the same session (that conversation is untouched and this client gets no handle on it) — and nothing
         // else. A take-over of a bound session is refused outright; a store this build cannot read refuses too.
+        if (open.observeOnly && resume == null) {
+            // the contract: observeOnly needs an existing record; it never creates a session
+            sink.emit(PocketError(dev.ccpocket.protocol.ObservationErrors.OBSERVE_UNAVAILABLE, "observeOnly needs an existing session id — nothing was created"))
+            return ""
+        }
         if (resume != null) {
             val lookup = observationPolicy?.invoke(effectiveAgent, open.workdir, resume) ?: dev.ccpocket.daemon.disk.ObservationLookup.Unbound
             // a store this build cannot read (corrupt / unknown schema) may hide a binding for ANY member of the
             // project: fail closed to READ-ONLY, not to nothing — the user can still look at the session, while
-            // control (take-over, rename, and a controllable open) stays refused until the store is repaired
-            val policyUnreadable = lookup is dev.ccpocket.daemon.disk.ObservationLookup.Unavailable
+            // control (take-over, rename, and a controllable open) stays refused until the store is repaired.
+            // EXCEPT for a conversation this very daemon is driving right now: it cannot be bound (binding is
+            // refused while live), and demoting its reconnect to a tail would orphan a running turn and its asks.
+            val policyUnreadable = lookup is dev.ccpocket.daemon.disk.ObservationLookup.Unavailable && !isLiveSession(resume)
             if (policyUnreadable) log.info("open ${resume.take(8)}… → observation policy unreadable (${(lookup as dev.ccpocket.daemon.disk.ObservationLookup.Unavailable).reason}): read-only")
             val binding = (lookup as? dev.ccpocket.daemon.disk.ObservationLookup.Bound)?.binding
             val readOnly = open.observeOnly || binding?.readOnly == true || policyUnreadable
@@ -495,7 +502,9 @@ class SessionRegistry(
                 val obs = ObserveSession(
                     convoId, open.workdir, resume, file, sink, scope,
                     agent = effectiveAgent, sinceSeq = open.lastEventSeq,
-                    readOnly = true, binding = binding, observationCapable = peerSupportsObservation,
+                    // the caller's own policy (observeOnly / unreadable store) is fixed; the binding is re-read
+                    readOnly = open.observeOnly || policyUnreadable, binding = binding, observationCapable = peerSupportsObservation,
+                    policy = observationPolicy?.let { p -> { p(effectiveAgent, open.workdir, resume) } },
                 )
                 mutex.withLock { observes[convoId] = obs }
                 obs.start()
@@ -627,6 +636,7 @@ class SessionRegistry(
                         convoId, open.workdir, resume, file!!, sink, scope,
                         agent = effectiveAgent, sinceSeq = open.lastEventSeq,
                         observationCapable = peerSupportsObservation,
+                        policy = observationPolicy?.let { p -> { p(effectiveAgent, open.workdir, resume) } },
                     )
                     mutex.withLock { observes[convoId] = obs }
                     obs.start()
@@ -662,6 +672,16 @@ class SessionRegistry(
         c.presetResumeAnchor(resume)
         beforeColdInsert?.invoke()
         mutex.withLock { convos[convoId] = c }
+        // Bind/open race (review finding): a bind that checked "not live" just before this insert may have landed
+        // meanwhile. Re-read the policy now that the conversation is visible — the bind side re-checks liveness
+        // after ITS write — so one of the two always sees the other; a bound session never gets a controllable convo.
+        if (resume != null && controlRefusal(effectiveAgent, open.workdir, resume) != null) {
+            log.info("open ${resume.take(8)}… → bound read-only while opening; withdrawing the controllable conversation")
+            val tomb = mutex.withLock { convos.remove(convoId); tombstoneLocked(c) }
+            try { runCatching { c.close() } } finally { finishClose(tomb) }
+            sink.emit(PocketError(dev.ccpocket.protocol.ObservationErrors.READ_ONLY, controlRefusal(effectiveAgent, open.workdir, resume) ?: "read-only"))
+            return ""
+        }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
         // MIGHT still be writing this transcript. Fork (branch to a fresh id, dodging a two-writer clobber) ONLY
         // when [externallyActive] confirms it — fresh mtime AND a claude process alive outside the daemon (the

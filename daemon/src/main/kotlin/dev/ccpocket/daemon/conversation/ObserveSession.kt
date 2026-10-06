@@ -51,9 +51,14 @@ class ObserveSession(
      *  yet) — an old client omits the field and keeps today's full-window tick behavior: feeding a
      *  delta to a client that treats every ConvoHistory as a full window would wipe its scrollback. */
     private val sinceSeq: Long? = null,
-    /** Read-only by policy (a persisted binding or a one-shot `observeOnly`), not merely "a writer was seen". */
+    /** Read-only by the CALLER's policy (a one-shot `observeOnly`, or an unreadable store at open time), on top of
+     *  whatever the persisted binding says — the binding itself is re-read while the view is open (see [policy]). */
     val readOnly: Boolean = false,
     private val binding: ObservationBinding? = null,
+    /** The persisted binding lookup, re-evaluated every [POLICY_RECHECK_TICKS] ticks so a bind / unbind made while
+     *  this view is open changes what it announces (review finding: a view bound after opening kept offering
+     *  "Continue here"). Null = the binding given at construction is final. */
+    private val policy: (() -> dev.ccpocket.daemon.disk.ObservationLookup)? = null,
     /** The peer declared [dev.ccpocket.protocol.ClientCaps.supportsSessionObservationV1]: announce the snapshot. */
     private val observationCapable: Boolean = false,
     /** The session's CURRENT native file, re-resolved every tick; null = keep [file]. Defaults to the Codex
@@ -80,6 +85,31 @@ class ObserveSession(
     /** The last progress announced — a changed freshness (CURRENT → STALE at 60 s) re-announces without a file write. */
     private var lastProgress: ObservedProgress? = null
 
+    /** The binding as last read (starts from the constructor's); confined to the tail coroutine. */
+    @Volatile
+    private var currentBinding: ObservationBinding? = binding
+
+    /** The store was unreadable at the last policy check: read-only until it is readable again. */
+    @Volatile
+    private var policyUnreadable: Boolean = false
+
+    /** Read-only right now: the caller's policy, or the binding as last read, or an unreadable store. */
+    val readOnlyNow: Boolean get() = readOnly || currentBinding?.readOnly == true || policyUnreadable
+
+    private var policyTick = 0
+
+    /** Re-read the persisted binding; true when what this view announces changed. */
+    private fun refreshPolicy(): Boolean {
+        val lookup = policy?.let { runCatching { it() }.getOrNull() } ?: return false
+        val before = readOnlyNow to currentBinding
+        when (lookup) {
+            is dev.ccpocket.daemon.disk.ObservationLookup.Bound -> { currentBinding = lookup.binding; policyUnreadable = false }
+            dev.ccpocket.daemon.disk.ObservationLookup.Unbound -> { currentBinding = null; policyUnreadable = false }
+            is dev.ccpocket.daemon.disk.ObservationLookup.Unavailable -> policyUnreadable = true
+        }
+        return before != (readOnlyNow to currentBinding)
+    }
+
     fun start() {
         scope.launch {
             runCatching {
@@ -102,7 +132,11 @@ class ObserveSession(
                     // a file that SHRANK was truncated or replaced (not appended): line numbers past the cut would
                     // skip or repeat rows — restart from a full window, like a switch
                     if (lastSize >= 0 && size in 0 until lastSize) sentCursor = null
+                    // the binding can change under an open view (bind / unbind from the session sheet): re-read it
+                    // on a coarse cadence (a small JSON file) and re-announce when the policy moved
+                    val policyChanged = if (policy != null && policyTick++ % POLICY_RECHECK_TICKS == 0) refreshPolicy() else false
                     val changed = mtime != lastMtime || size != lastSize
+                    if (policyChanged && !changed) emitLive(current)
                     if (changed) {
                         lastMtime = mtime
                         lastSize = size
@@ -171,9 +205,9 @@ class ObserveSession(
                 convoId, workdir, sessionId, observing = true,
                 model = state.model, contextWindow = window, contextUsed = state.contextUsed, agent = agent, title = title,
                 // an old peer still learns the policy from the notice (it cannot decode the snapshot)
-                notice = if (readOnly) READ_ONLY_NOTICE else null,
-                observation = if (observationCapable && (readOnly || binding != null || progress != null)) {
-                    SessionObservation(binding = binding, readOnly = readOnly, progress = progress)
+                notice = if (readOnlyNow) READ_ONLY_NOTICE else null,
+                observation = if (observationCapable && (readOnlyNow || currentBinding != null || progress != null)) {
+                    SessionObservation(binding = currentBinding, readOnly = readOnlyNow, progress = progress)
                 } else null,
             ),
         )
@@ -263,5 +297,9 @@ class ObserveSession(
     companion object {
         /** [SessionLive.notice] of a read-only view: what an OLD peer (no snapshot) sees instead of "Continue here". */
         const val READ_ONLY_NOTICE = "read-only: this session is driven elsewhere and only observed here"
+
+        /** Ticks between binding re-reads (≈ 7.5 s at the default tick): a bind made from the sheet shows up in
+         *  well under a refresh, without a store read on every tail tick. */
+        const val POLICY_RECHECK_TICKS = 5
     }
 }

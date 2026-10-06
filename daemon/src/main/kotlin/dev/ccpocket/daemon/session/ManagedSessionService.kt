@@ -326,14 +326,18 @@ class ManagedSessionService internal constructor(
                 preflight(frame.requestId, frame.workdir, Scope(agent, false), frame.sessionId)?.let { return@withLock it to null }
                 observationRefusal(frame.requestId, frame.workdir, agent, frame.sessionId, frame.observation)?.let { return@withLock it to null }
                 val s = scanOf(validateWorkdir(frame.workdir)!!, agent)
-                finish(frame.requestId, frame.workdir, agent, frame.sessionId, s, store.import(frame.workdir, agent, frame.sessionId, s, frame.observation))
+                val out = store.import(frame.workdir, agent, frame.sessionId, s, frame.observation)
+                bindRaceCheck(frame.requestId, frame.workdir, agent, frame.sessionId, frame.observation, out)?.let { return@withLock it to null }
+                finish(frame.requestId, frame.workdir, agent, frame.sessionId, s, out)
             }
             is SetSessionObservation -> {
                 if (!isValidManagedWorkdir(frame.workdir)) return@withLock refusal(frame.requestId, frame.workdir, Scope(frame.agent, false), ManagedSessionErrors.INVALID_WORKDIR) to null
                 val agent = frame.agent ?: return@withLock invalidAgent(frame.requestId, frame.workdir) to null
                 preflight(frame.requestId, frame.workdir, Scope(agent, false), frame.sessionId)?.let { return@withLock it to null }
                 observationRefusal(frame.requestId, frame.workdir, agent, frame.sessionId, frame.binding)?.let { return@withLock it to null }
-                finish(frame.requestId, frame.workdir, agent, frame.sessionId, null, store.setObservation(frame.workdir, agent, frame.sessionId, frame.binding))
+                val out = store.setObservation(frame.workdir, agent, frame.sessionId, frame.binding)
+                bindRaceCheck(frame.requestId, frame.workdir, agent, frame.sessionId, frame.binding, out)?.let { return@withLock it to null }
+                finish(frame.requestId, frame.workdir, agent, frame.sessionId, null, out)
             }
             is RemoveManagedSession -> {
                 if (!isValidManagedWorkdir(frame.workdir)) return@withLock refusal(frame.requestId, frame.workdir, Scope(frame.agent, false), ManagedSessionErrors.INVALID_WORKDIR) to null
@@ -347,6 +351,22 @@ class ManagedSessionService internal constructor(
 
     private fun invalidAgent(requestId: String, workdir: String) =
         refusal(requestId, workdir, Scope(null, false), ManagedSessionErrors.INVALID_REQUEST, message = "missing or unknown agent")
+
+    /**
+     * The other half of the bind/open race (review finding): a controllable open that read "unbound" just before our
+     * write re-checks the policy after inserting its conversation, and WE re-check liveness after our write. If the
+     * session went live meanwhile the binding is withdrawn again and the request refused — so no committed state ever
+     * pairs a read-only binding with a controllable conversation. Null = no race.
+     */
+    private suspend fun bindRaceCheck(
+        requestId: String, workdir: String, agent: AgentKind, sessionId: String, binding: dev.ccpocket.protocol.ObservationBinding?, out: ManagedMutation,
+    ): ManagedSessionsState? {
+        if (binding == null || out !is ManagedMutation.Committed || !out.changed) return null
+        if (!runCatching { liveSession(sessionId) }.getOrDefault(false)) return null
+        log.info("bind ${sessionId.take(8)}… raced a controllable open; withdrawing the binding")
+        store.setObservation(workdir, agent, sessionId, null)
+        return refusal(requestId, workdir, Scope(agent, false), ManagedSessionErrors.OBSERVATION_CONFLICT, message = "this computer started driving the session while binding it; try again once that conversation is closed").copy(sessionId = sessionId)
+    }
 
     /** Why a (new) binding on [sessionId] is refused before the store is touched: structurally invalid, or this daemon
      *  currently drives the session (the conversation stays as it is — nothing is interrupted or demoted). */

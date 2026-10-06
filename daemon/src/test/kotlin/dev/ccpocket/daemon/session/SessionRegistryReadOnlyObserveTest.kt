@@ -186,6 +186,33 @@ class SessionRegistryReadOnlyObserveTest {
     }
 
     @Test
+    fun observe_only_without_a_session_id_creates_nothing() = runBlocking<Unit> {
+        val c = Capture()
+        assertEquals("", registry().open(OpenSession(workdir, null, agent = AgentKind.CODEX, observeOnly = true), sink("dev:phone", c)))
+        assertEquals(ObservationErrors.OBSERVE_UNAVAILABLE, assertNotNull(c.last<PocketError>()).code)
+    }
+
+    @Test
+    fun a_binding_made_while_a_view_is_open_flips_it_read_only_and_back() = runBlocking<Unit> {
+        writeRollout(ended = true)
+        policy = ObservationLookup.Unbound
+        val r = registry()
+        val c = Capture()
+        // an observeOnly view starts read-only by the caller's policy with no binding…
+        val convoId = r.open(OpenSession(workdir, sid, agent = AgentKind.CODEX, observeOnly = true), sink("dev:phone", c), peerSupportsObservation = true)
+        assertTrue(convoId.isNotEmpty())
+        assertNull(awaitLive(c).observation?.binding)
+        // …the user binds it from the sheet: the open view announces the binding without being reopened
+        policy = ObservationLookup.Bound(binding)
+        withTimeout(15_000) { while (c.last<SessionLive>()?.observation?.binding != binding) delay(100) }
+        assertTrue(assertNotNull(c.last<SessionLive>()?.observation).readOnly)
+        // …and unbinding drops it again (the view stays read-only: observeOnly was the caller's own policy)
+        policy = ObservationLookup.Unbound
+        withTimeout(15_000) { while (c.last<SessionLive>()?.observation?.binding != null) delay(100) }
+        assertTrue(assertNotNull(c.last<SessionLive>()?.observation).readOnly)
+    }
+
+    @Test
     fun a_bridge_cannot_open_a_read_only_view() = runBlocking<Unit> {
         writeRollout(ended = true)
         policy = ObservationLookup.Bound(binding)

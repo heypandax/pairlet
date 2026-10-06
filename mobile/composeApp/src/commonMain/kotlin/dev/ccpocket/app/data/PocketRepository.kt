@@ -7797,10 +7797,10 @@ class PocketRepository(
                 }
                 sessionObservationError.value = error
                 if (error == null) {
-                    // the open view's own snapshot follows on its next announce; the list is re-read now
+                    // the list is re-read now; an open observe view re-reads the binding itself (within ~8 s) and
+                    // re-announces, so its bar flips to read-only / back without reopening. A bound session can
+                    // never be an open CONTROLLABLE chat here: the daemon refused the bind while it was live.
                     refreshManagedList(workdir)
-                    // a bound session must not stay open as a controllable chat: the daemon refused the bind if it
-                    // was live here, so an open chat on it is at most a read-only view already — nothing to close
                 }
             } finally {
                 sessionObservationBusy.value = false
