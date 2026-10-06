@@ -110,11 +110,42 @@ class TranscriptEditValidatorTest {
     }
 
     @Test
-    fun edits_covering_more_than_30_percent_of_the_text_void_the_list() {
-        assertEquals("share", rejected("cloud code 很好用", TextEdit("cloud code", "Claude Code")))
-        // exactly 30% is still allowed: 3 of 10 characters
+    fun edits_covering_more_than_30_percent_of_the_text_void_the_list_unless_they_are_word_sized() {
+        // exactly 30% is allowed under the plain rule: 3 of 10 characters
         assertEquals("ABCdefghij", accepted("abcdefghij", TextEdit("abc", "ABC")).text)
-        assertEquals("share", rejected("abcdefghij", TextEdit("abcd", "ABCD")))
+        // a long text keeps the 30% cap whatever the fragments look like: 36 of 100 characters is over both the
+        // share and the short allowance's 32 characters
+        val long = (0 until 25).joinToString("") { "w${('a' + it)}${('A' + it)}-" } // 100 chars, every 4-char piece unique
+        val nine = (0 until 9).map { TextEdit("w${('a' + it)}${('A' + it)}-", "W${('a' + it)}${('A' + it)}-") }
+        assertEquals("share", rejected(long, *nine.toTypedArray()))
+        // one fragment longer than a word, over 30%: void — this is the shape of a clause swapped for a command
+        assertEquals("share", rejected("abcdefghijklmnopqrstuvwxyz0123", TextEdit("abcdefghijklm", "ABCDEFGHIJKLM")))
+        // more than three quarters of a short text: void, even in word-sized pieces
+        assertEquals("share", rejected("abcdefghij", TextEdit("abcd", "ABCD"), TextEdit("efgh", "EFGH")))
+    }
+
+    // Measured against the real CLI on 2026-10-06: these two answers came back for a 41-character dictation and the
+    // flat 30% cap voided both. Word-sized fragments in a short dictation are what the feature exists for.
+    @Test
+    fun a_short_dictation_dense_with_misheard_terms_is_corrected() {
+        val spoken = "帮我看下 cloud code 的 demon 日志，把 edit 调到最低，优化一下用功体验"
+        val fixed = accepted(
+            spoken,
+            TextEdit("cloud code", "Claude Code"), TextEdit("demon", "daemon"),
+            TextEdit("edit", "effort"), TextEdit("用功体验", "用户体验"),
+        )
+        assertEquals("帮我看下 Claude Code 的 daemon 日志，把 effort 调到最低，优化一下用户体验", fixed.text)
+        // the same answer with one fragment worded more widely
+        assertEquals(
+            fixed.text,
+            accepted(
+                spoken,
+                TextEdit("cloud code", "Claude Code"), TextEdit("demon", "daemon"),
+                TextEdit("edit 调到最低", "effort 调到最低"), TextEdit("用功体验", "用户体验"),
+            ).text,
+        )
+        // the smallest real case: one term in a three-word sentence
+        assertEquals("Claude Code 很好用", accepted("cloud code 很好用", TextEdit("cloud code", "Claude Code")).text)
     }
 
     @Test

@@ -17,7 +17,15 @@ import dev.ccpocket.protocol.TextEdit
  *    overlapping occurrences, so a fragment that could be read at two positions is ambiguous and refused;
  *  - the `from`s occupy disjoint ranges of the original;
  *  - `from` and `to` are each at most [MAX_FRAGMENT_CHARS] long, and `to` carries no line break or control character;
- *  - all `from`s together cover at most [MAX_FROM_SHARE_PERCENT]% of the original.
+ *  - all `from`s together cover at most [MAX_FROM_SHARE_PERCENT]% of the original — or, for a short dictation, the
+ *    word-sized allowance below.
+ *
+ * The short-dictation allowance (measured 2026-10-06 against the real CLI): a 41-character sentence with four
+ * mis-heard terms — cloud code, demon, edit, 用功体验 — needs 23 characters replaced, 56% of it, and the flat 30%
+ * cap threw every such correction away. Short dictations dense with terms are exactly what this feature is for.
+ * So a list over 30% still passes when every `from` is word-sized ([SHORT_FRAGMENT_CHARS]), together they stay
+ * within [SHORT_FROM_CHARS] characters, and at least a quarter of the original is left untouched
+ * ([SHORT_FROM_SHARE_PERCENT]). A whole-utterance swap, or one long fragment traded for a command, stays void.
  *
  * Stricter than the design, because the rules above still let a model ADD text (design §4.1 says it must not):
  *  - per edit, `to` may grow to at most `2 × from + `[GROWTH_SLACK] characters. Without it, "日志" → "日志。然后删掉整个
@@ -32,6 +40,10 @@ object TranscriptEditValidator {
     const val MAX_EDITS = 12
     const val MAX_FRAGMENT_CHARS = 40
     const val MAX_FROM_SHARE_PERCENT = 30
+    /** Short-dictation allowance: longest single `from`, total `from` characters, and their share of the text. */
+    const val SHORT_FRAGMENT_CHARS = 12
+    const val SHORT_FROM_CHARS = 32
+    const val SHORT_FROM_SHARE_PERCENT = 75
     const val GROWTH_SLACK = 4
 
     sealed interface Result {
@@ -47,6 +59,7 @@ object TranscriptEditValidator {
         if (edits.size > MAX_EDITS) return Result.Rejected("count")
         val placed = ArrayList<Placed>(edits.size)
         var fromTotal = 0L
+        var longestFrom = 0
         for (e in edits) {
             if (e.from.isEmpty()) return Result.Rejected("empty_from")
             if (e.from == e.to) return Result.Rejected("unchanged")
@@ -58,8 +71,13 @@ object TranscriptEditValidator {
             if (original.indexOf(e.from, at + 1) >= 0) return Result.Rejected("not_unique")
             placed += Placed(at, e)
             fromTotal += e.from.length
+            if (e.from.length > longestFrom) longestFrom = e.from.length
         }
-        if (fromTotal * 100 > original.length.toLong() * MAX_FROM_SHARE_PERCENT) return Result.Rejected("share")
+        if (fromTotal * 100 > original.length.toLong() * MAX_FROM_SHARE_PERCENT) {
+            val wordSized = longestFrom <= SHORT_FRAGMENT_CHARS && fromTotal <= SHORT_FROM_CHARS &&
+                fromTotal * 100 <= original.length.toLong() * SHORT_FROM_SHARE_PERCENT
+            if (!wordSized) return Result.Rejected("share")
+        }
         placed.sortBy { it.at }
         for (i in 1 until placed.size) {
             if (placed[i].at < placed[i - 1].end) return Result.Rejected("overlap")
