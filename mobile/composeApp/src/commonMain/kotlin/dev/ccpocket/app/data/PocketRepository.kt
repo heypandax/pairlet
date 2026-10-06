@@ -32,6 +32,9 @@ import dev.ccpocket.app.net.DirectUnreachableException
 import dev.ccpocket.app.net.DirectEligibility
 import dev.ccpocket.app.net.NetworkSnapshot
 import dev.ccpocket.app.net.directEligibility
+import dev.ccpocket.app.net.RepathController
+import dev.ccpocket.app.net.RepathTrigger
+import dev.ccpocket.app.net.tcpReachable
 import dev.ccpocket.app.net.localNetworkSnapshot
 import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.DeadLinkException
@@ -2152,11 +2155,15 @@ class PocketRepository(
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
     private fun handleControl(f: Frame) {
         when (f) {
-            is Attached -> { diagnosticConnectionId = f.connectionId?.validated(); Diagnostics.connection(diagnosticConnectionId, f.peerConnectionId?.validated()); attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; armLinkStableReset(); ensurePushLink(); startListWait(); recomputePhase() }
+            is Attached -> { diagnosticConnectionId = f.connectionId?.validated(); Diagnostics.connection(diagnosticConnectionId, f.peerConnectionId?.validated()); attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; armLinkStableReset(); ensurePushLink(); startListWait(); recomputePhase()
+                // #404: settles a planned switch's outcome; on relay arms the backoff timer, on direct stops it
+                repath.onAttached(direct = transportName() != "relay") }
             // Only re-handshake on a genuine offline->online transition. The relay re-broadcasts
             // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
-            is PeerPresence -> { Diagnostics.connection(diagnosticConnectionId, f.connectionId?.validated()); val wasOffline = daemonOffline; daemonOffline = !f.online; if (f.online && wasOffline) onComputerBackOnline(); recomputePhase() }
+            is PeerPresence -> { Diagnostics.connection(diagnosticConnectionId, f.connectionId?.validated()); val wasOffline = daemonOffline; daemonOffline = !f.online; if (f.online && wasOffline) onComputerBackOnline(); recomputePhase()
+                // #404: the edge only REQUESTS an evaluation (5 s, after the #145 probe window) — never a teardown here
+                if (f.online && wasOffline) repath.request(RepathTrigger.PeerOnline) }
             // a refused credential (revoked / expired pairing) ends this binding's right to its transcripts too
             is AuthError -> { pairingInvalid = true; sessionCache.clear(); forgetPersistedCatalog(paired.value); retryJob?.cancel(); recomputePhase() }
             else -> {}
@@ -2542,6 +2549,40 @@ class PocketRepository(
     internal var networkSnapshotProvider: () -> NetworkSnapshot? = ::localNetworkSnapshot
     internal var sameMachineClient: Boolean = appUpdateRoute() == AppUpdateRoute.DESKTOP_IN_APP
 
+    /** #404 test seams: the bounded TCP probe, and a forced on/off in place of the platform default. */
+    internal var tcpProbeForTest: (suspend (String, Int) -> Boolean)? = null
+    internal var repathEnabledOverride: Boolean? = null
+
+    /**
+     * #404 idle relay→direct re-path (TRANSPORT-AUTO-REPATH-V1 4.5). Desktop defaults on (loopback is always
+     * dialable, no network-ownership question); phones default off until verified on a device across Wi‑Fi and
+     * cellular (4.7) — SecureStore [K_REPATH_AUTO] "on"/"off" overrides either default. Reset on disconnect.
+     */
+    private val repath = RepathController(
+        scope = scope,
+        now = { epochMillis() },
+        enabled = {
+            repathEnabledOverride ?: when (SecureStore.getString(K_REPATH_AUTO)) {
+                "on" -> true
+                "off" -> false
+                else -> sameMachineClient
+            }
+        },
+        isOnRelay = {
+            transportName() == "relay" && sessionActive.value && connected.value && attachedThisSession &&
+                !demoMode.value && !pairingInvalid && paired.value != null
+        },
+        directUrl = { paired.value?.let { p -> p.directUrl?.takeIf { it != badDirectUrl[p.accountId] } } },
+        coolingDown = { paired.value?.let { epochMillis() < (directCooldownUntil[it.accountId] ?: 0L) } == true },
+        eligible = { directEligibility(it, networkSnapshotProvider(), sameMachineClient) == DirectEligibility.Dial },
+        probe = { h, p -> tcpProbeForTest?.invoke(h, p) ?: tcpReachable(h, p, RepathController.PROBE_TIMEOUT_MS) },
+        isIdle = { repathIdle() },
+        // the planned switch is an ordinary reconnect (retire-before-dial #142, direct-first with the #403 budget,
+        // same-attempt relay fallback + cooldown, #147 reattach) under a fresh Ready-hold so success shows no banner
+        switchNow = { startReconnectGrace(restart = true); launchTransport(reconnect = true, force = true) },
+        report = { t, r -> Telemetry.track(TelEvent.TransportRepath, mapOf(TelKey.Source to t.wire, TelKey.Result to r.wire)) },
+    )
+
     /**
      * #404 / TRANSPORT-AUTO-REPATH-V1 4.3: a planned relay→direct switch only happens when nothing could be lost
      * or visibly interrupted by the reconnect. Reads existing state only; every clause is one line of the spec's
@@ -2814,6 +2855,7 @@ class PocketRepository(
             // list; wedged link → the bounded send trips DeadLink in ≤10s instead of ~25s of fake Ready.
             refreshDirectoriesSilently()
             pinLink.onForeground() // #362: re-fetch heals a missed pin push; a blocked outbox may try again
+            if (transportName() == "relay") repath.request(RepathTrigger.Foreground) // #404
         }
     }
 
@@ -2885,6 +2927,7 @@ class PocketRepository(
         openJob?.cancel(); openJob = null
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); deafJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel(); linkStableJob?.cancel(); presenceProbeJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; deafJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null; linkStableJob = null; presenceProbeJob = null
+        repath.reset() // #404: every way off a computer (exit, unpair, switch) voids pending evaluations and the timer
         clearPromptLifecycleState() // pending bubbles and every related deadline leave with messages below
         // frames queued for the binding we're leaving must not leak into the next link (both transports
         // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
@@ -3951,6 +3994,7 @@ class PocketRepository(
                 paired.value?.let { p ->
                     if (p.directUrl != f.lanUrl && (f.lanUrl == null || f.lanUrl != badDirectUrl[p.accountId])) {
                         rememberDirectUrl(p.accountId, f.lanUrl)
+                        if (f.lanUrl != null) repath.request(RepathTrigger.DirectUrlChanged) // #404
                     }
                     // adopt the daemon's real computer name as this binding's default display name (issue #62);
                     // a user-set nickname still wins in displayName(). Independent of the directUrl guard above.
@@ -8487,6 +8531,7 @@ class PocketRepository(
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
         const val K_ACCENT_THEME = "appearance_accent_theme"  // SecureStore: AccentTheme name (POCKET/CODEX; issue #204)
+        const val K_REPATH_AUTO = "repath_auto" // SecureStore: "on" / "off" overrides the #404 idle re-path default (desktop on, phone off)
         const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
         const val K_FILES_HIDDEN_PREFIX = "files_show_hidden:" // SecureStore: "files_show_hidden:<workdir>" → "1" = 文件浏览显示 . 开头的隐藏项
         const val FILE_TREE_LIMIT = 2_000                      // 文件浏览每层的条目上限（= daemon listPathEntries 的硬上限）

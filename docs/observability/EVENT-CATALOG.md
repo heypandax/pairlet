@@ -63,6 +63,7 @@
 | prompt_response_recovered | 同一失败/超时提示后来收到首个真实输出 | 最多一次恢复，不修改主结果或重发提示；正常后台 waiting 不计失败恢复 |
 | turn_result | 对应 turn 的终态 | 协议完成不等于 AI 正确解决需求；没有终态且无退出证据为 unknown |
 | approval_apply_result | 对应裁决被 Agent 实际应用或确认失败 | 点击/发送/应用分别观察，用户拒绝是正常业务结果，等待不算内部故障 |
+| transport_repath | relay 上一次空闲回切评估的结论（#404）：`source` 为触发来源 peer_online/foreground/direct_url_changed/timer，`result` 为 switched_direct/fell_back_relay/deferred_busy/probe_failed/ineligible/cooling_down/recently_switched | 一次评估一条；只记枚举，不带地址、设备或会话标识；不在 relay 上或没有直连地址时不评估也不记 |
 | connection_recovery_result | 本轮恢复操作达到可继续使用的状态，或失败/取消/未知 | 直连→relay 是同一恢复；后台挂起、切电脑、旧代际回包不能污染本次结果 |
 | feature_exposed / feature_used | 固定五功能实际可用且呈现 / 用户主动使用；第二批功能只有 feature_used，见第 7 节 | 按实际曝光会话去重，不按 Compose 重组计数；完成复用对应业务结果 |
 | value_reached | 用户主动操作成功看到内容、收到真实 Agent 响应或完成已应用审批 | 每种成功动作一次；排除 demo/internal、后台心跳、自动重连、无人查看的后台任务 |
