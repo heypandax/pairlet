@@ -240,6 +240,22 @@ class TranscriptEditValidatorTest {
             assertEquals(listOf(e), r.edits)
             assertTrue(r.autoSend, "auto-sends: $e")
         }
+        // context the model repeated on both sides is cut away at word boundaries before the term and case rules
+        for (e in listOf(
+            TextEdit("cloud 的输出", "Claude 的输出"), TextEdit("把 edit 调到最低", "把 effort 调到最低"),
+            TextEdit("看看demon日志", "看看daemon日志"),
+        )) {
+            assertTrue(single(e).autoSend, "auto-sends: $e")
+        }
+        // … never inside a word, and never down to an insertion or a deletion
+        for (e in listOf(
+            TextEdit("recloud", "reClaude"), TextEdit("的输出", "Claude 的输出"), TextEdit("relay 的输出", "daemon 的输出"),
+            TextEdit("v1.2-edit", "v1.2-effort"),
+        )) {
+            val r = single(e)
+            assertEquals(listOf(e), r.edits, "still applied: $e")
+            assertFalse(r.autoSend, "no auto-send: $e")
+        }
         // … but a destructive word the speaker's fragment did not carry goes to the composer
         val shan = single(TextEdit("山", "删"))
         assertEquals(1, shan.edits.size)

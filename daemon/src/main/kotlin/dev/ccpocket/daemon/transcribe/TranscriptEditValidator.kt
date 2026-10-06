@@ -47,8 +47,9 @@ import dev.ccpocket.protocol.TextEdit
  *  - every applied edit must be allow-listed for `autoSend` to stay set: a case/space-only change, a `to` that is a
  *    glossary term verbatim (unless `from` is a glossary term too: trading one known name for another, main for
  *    dev, is not a recognition fix), or a near-homophone — after the common prefix and suffix are stripped, two Han cores of
- *    equal length whose characters pairwise share a reading under [Pinyin.near]. An edit that is none of these is
- *    still applied; the user sees it in the composer;
+ *    equal length whose characters pairwise share a reading under [Pinyin.near]. The first two also hold when they hold
+ *    once the context the model repeated on both sides is cut away at word boundaries ("cloud 的输出" → "Claude
+ *    的输出"). An edit that is none of these is still applied; the user sees it in the composer;
  *  - an applied edit whose `to` brings in a destructive word its `from` lacks (删, 清空, 重置, delete, force, rm, …)
  *    clears `autoSend` too, even when allow-listed: a correct 山 → 删 is the user's to confirm.
  *
@@ -142,11 +143,46 @@ object TranscriptEditValidator {
     }
 
     /** Case/space-only, a glossary term verbatim (case-sensitive) replacing something that is not itself a
-     *  glossary term, or a near-homophone of Han characters. */
+     *  glossary term, or a near-homophone of Han characters — on the fragments as given, or on their [core]. */
     internal fun allowListed(edit: TextEdit, glossary: List<String>): Boolean =
-        edit.from.filterNot(Char::isWhitespace).equals(edit.to.filterNot(Char::isWhitespace), ignoreCase = true) ||
-            (edit.to.trim() in glossary && glossary.none { it.equals(edit.from.trim(), ignoreCase = true) }) ||
+        caseOrTerm(edit.from, edit.to, glossary) ||
+            core(edit)?.let { (from, to) -> caseOrTerm(from, to, glossary) } == true ||
             nearHomophone(edit.from, edit.to)
+
+    private fun caseOrTerm(from: String, to: String, glossary: List<String>): Boolean =
+        from.filterNot(Char::isWhitespace).equals(to.filterNot(Char::isWhitespace), ignoreCase = true) ||
+            (to.trim() in glossary && glossary.none { it.equals(from.trim(), ignoreCase = true) })
+
+    /**
+     * What [edit] really changes, without the context a model repeats on both sides to make its `from` unique
+     * (measured against the real CLI: "cloud 的输出" → "Claude 的输出"). The shared prefix and suffix are cut only
+     * at word boundaries, so "cloud code" → "Claude Code" keeps its whole words. Null when nothing is shared, or
+     * when either side would be left blank — an insertion or a deletion is not a recognition fix.
+     */
+    private fun core(edit: TextEdit): Pair<String, String>? {
+        val a = edit.from
+        val b = edit.to
+        var prefix = 0
+        while (prefix < a.length && prefix < b.length && a[prefix] == b[prefix]) prefix++
+        while (prefix > 0 && (splitsWord(a, prefix) || splitsWord(b, prefix))) prefix--
+        var suffix = 0
+        while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] == b[b.length - 1 - suffix]) suffix++
+        while (suffix > 0 && (splitsWord(a, a.length - suffix) || splitsWord(b, b.length - suffix))) suffix--
+        if (prefix == 0 && suffix == 0) return null
+        val from = a.substring(prefix, a.length - suffix)
+        val to = b.substring(prefix, b.length - suffix)
+        return if (from.isBlank() || to.isBlank()) null else from to to
+    }
+
+    /** True when cutting [s] at [index] would split a Latin word, a number, or a surrogate pair. */
+    private fun splitsWord(s: String, index: Int): Boolean {
+        if (index <= 0 || index >= s.length) return false
+        val before = s[index - 1]
+        val after = s[index]
+        return (wordChar(before) && wordChar(after)) || (before.isHighSurrogate() && after.isLowSurrogate())
+    }
+
+    private fun wordChar(c: Char): Boolean = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_' || c == '-' || c == '.'
 
     /** [edit]'s `to` carries a destructive word that its `from` does not. */
     internal fun destructive(edit: TextEdit): Boolean {
