@@ -20,6 +20,7 @@ import dev.ccpocket.observability.SafeMetrics
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
@@ -72,6 +73,7 @@ import dev.ccpocket.app.lock.createBiometrics
 import dev.ccpocket.app.theme.AccentTheme
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.sameDirPath
+import dev.ccpocket.app.ui.appendVoiceTranscript
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
@@ -240,6 +242,8 @@ import dev.ccpocket.protocol.WorkflowRun
 import dev.ccpocket.protocol.WorkflowUpdate
 import dev.ccpocket.protocol.ToolPhase
 import dev.ccpocket.protocol.Transcript
+import dev.ccpocket.protocol.TranscriptRefine
+import dev.ccpocket.protocol.TranscriptRefined
 import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.CancelTurn
@@ -849,6 +853,33 @@ class PocketRepository(
         SecureStore.putString(K_VOICE_ENGINE, if (on) "whisper" else "")
     }
 
+    // Voice input v2 (docs/design/VOICE-INPUT-V2-REVIEW.md §11): what ✓ does after dictation, per device. COMPOSE —
+    // today's bar, the text lands unrefined — for everyone until the user turns SEND on in Settings, which first
+    // needs the one-time disclosure ([voiceRefineAcked]).
+    private val voiceAfterDictationState = mutableStateOf(VoiceAfterDictation.from(SecureStore.getString(K_VOICE_AFTER_DICTATION)))
+    val voiceAfterDictation: State<VoiceAfterDictation> get() = voiceAfterDictationState
+
+    /** Set what ✓ does. SEND is refused (false, nothing changes) until [acknowledgeVoiceRefineDisclosure] — the UI
+     *  shows the disclosure sheet first, then calls acknowledge + set. Leaving SEND mid-capture makes that capture
+     *  edit-only. */
+    fun setVoiceAfterDictation(v: VoiceAfterDictation): Boolean {
+        if (v == VoiceAfterDictation.SEND && !voiceRefineAckedState.value) return false
+        if (v == voiceAfterDictationState.value) return true
+        voiceAfterDictationState.value = v
+        SecureStore.putString(K_VOICE_AFTER_DICTATION, v.wire)
+        if (v == VoiceAfterDictation.COMPOSE) voiceDowngrade(VoiceDowngrade.EligibilityLost)
+        return true
+    }
+
+    /** The "correct before sending" disclosure was accepted on this device. One-way; another device asks again. */
+    private val voiceRefineAckedState = mutableStateOf(SecureStore.getString(K_VOICE_REFINE_ACK) == "1")
+    val voiceRefineAcked: State<Boolean> get() = voiceRefineAckedState
+    fun acknowledgeVoiceRefineDisclosure() {
+        if (voiceRefineAckedState.value) return
+        SecureStore.putString(K_VOICE_REFINE_ACK, "1")
+        voiceRefineAckedState.value = true
+    }
+
     /** App Lock (issue #109): the biometric gate state machine + its persisted enable/auto-lock prefs. Lazy so
      *  the desktop root and the repo unit tests — neither of which mounts the gate — never build the platform
      *  prompt (createBiometrics()); it is constructed the first time App() reads it on Android/iOS. */
@@ -1039,6 +1070,8 @@ class PocketRepository(
         to ?: return
         val from = composerKey() ?: return
         if (from == to) return
+        // a dictation started under the old key follows its composer: text it cannot send lands under the new one
+        voiceCapture?.let { if (it.draftKey == from) it.draftKey = to }
         val text = draftFor(from)
         if (text.isNotBlank() && draftFor(to).isBlank()) { saveDraft(to, text); clearDraft(from) }
     }
@@ -1989,6 +2022,46 @@ class PocketRepository(
     // The UI (App.kt) appends it after the current draft, drops the caret at the end and takes focus, then
     // clears this back to null.
     val pendingVoiceText = mutableStateOf<String?>(null)
+
+    /** Voice input v2: the agents (wire names) whose transcript refiner the connected computer can launch right now,
+     *  from its [DaemonInfo]. Empty = no refiner, or an older daemon; reset with the rest of the daemon's truth on
+     *  [disconnect]. A local launchability check on the computer, never a promise that the account is signed in. */
+    private val daemonTranscriptRefineAgentsState = mutableStateOf<List<String>>(emptyList())
+    val daemonTranscriptRefineAgents: State<List<String>> get() = daemonTranscriptRefineAgentsState
+
+    /** UI hook (voice input v2): the composer on screen reports its live text and IME state. A host that registers
+     *  none — the desktop today — never has an eligible capture, so it keeps today's behaviour (review §10 A6). */
+    var composerProbe: (() -> ComposerProbe)? = null
+
+    /** The current capture's recording bar ([VoiceBarMode]); LEGACY between captures. Set at [startVoice] and
+     *  frozen — it only ever falls from EDIT_SEND to EDIT_DONE, when the capture can no longer send. */
+    private val voiceBarModeState = mutableStateOf(VoiceBarMode.LEGACY)
+    val voiceBarMode: State<VoiceBarMode> get() = voiceBarModeState
+
+    /** Why the last dictation landed in the composer instead of being sent (the reason line); null = none. Sticky:
+     *  it stays until [clearVoiceComposerReason] — the UI calls it on the first edit, a send or leaving the chat;
+     *  this repository also clears it on an accepted send and on leaving. The landing itself is not an edit. */
+    private val voiceComposerReasonState = mutableStateOf<VoiceComposerReason?>(null)
+    val voiceComposerReason: State<VoiceComposerReason?> get() = voiceComposerReasonState
+    fun clearVoiceComposerReason() { voiceComposerReasonState.value = null }
+
+    /** Voice input v2: the one owner of "send this dictation, or hand it to the composer". One long-lived instance,
+     *  a Start per capture — its supersede and replayed-id guards span captures. This repository is its host: the
+     *  recorder, the transcript wait, the timers and every frame stay here. */
+    private val voiceFlow = VoiceSendFlow()
+    /** Host-side bookkeeping of the capture [voiceFlow] is running; null between captures. */
+    private var voiceCapture: VoiceCapture? = null
+    private var voiceRefineDeadline: Job? = null // [REFINE_BUDGET_MS] from the refine request; cancelled by its answer
+    private var voiceHoldJob: Job? = null        // [PREVIEW_HOLD_MS] highlight hold before the refined text is sent
+    /** Monotonic milliseconds, for the ✓ → refined latency bucket. A test seam: tests read their virtual clock. */
+    internal var voiceNowMs: () -> Long = { voiceClockOrigin.elapsedNow().inWholeMilliseconds }
+    /** Test seams: stand in for the platform engines, so a test drives [startVoice] … [stopVoice] without a
+     *  microphone — the native one's event stream, and the recorder's captured audio (its start becomes a no-op). */
+    internal var nativeDictationForTest: (() -> Flow<DictationEvent>)? = null
+    internal var recordForTest: (suspend () -> RecordedAudio)? = null
+    /** Test seam: runs right before a refined dictation is submitted, so a test can make that submit refuse. */
+    internal var beforeVoiceSubmitForTest: (() -> Unit)? = null
+
     private val recorder by lazy { VoiceRecorder() }
     private var usingNative = false
     private var preferRemote = false                         // sticky after a native-engine failure
@@ -2880,6 +2953,7 @@ class PocketRepository(
                 ?: StatusMsg(Res.string.status_disconnected)
             return
         }
+        onVoiceLinkLost() // voice input v2: a dictation waiting to be sent lands in the composer instead
         if (appIsForeground.value && connectionRecovery == null)
             connectionRecovery = ProductOutcome(TelEvent.ConnectionRecoveryResult, productDimensions())
         val reason = when (err) {
@@ -2945,6 +3019,8 @@ class PocketRepository(
         sidePanes.panes.forEach { it.openObservation?.background() }
         connectionRecovery?.finish(ProductResult.WAITING, coverage = Coverage.PARTIAL)
         connectionRecovery = null
+        // voice input v2: a dictation never sends while the app is away — whatever it has lands in the composer
+        voiceDowngrade(VoiceDowngrade.Backgrounded)
     }
 
     fun onAppForeground() {
@@ -3103,6 +3179,7 @@ class PocketRepository(
         daemonDiagnostics = false
         daemonOwnsPromptRecovery = false // ditto: an older next daemon still needs the legacy fallback
         daemonLeanHistory.value = false // ditto: an older next daemon's history pages are not byte-bounded
+        daemonTranscriptRefineAgentsState.value = emptyList() // voice input v2: the next machine re-advertises its refiners
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
@@ -3159,7 +3236,7 @@ class PocketRepository(
         // satellite) stops listening to its computer's shared pins; the next start or switch rebinds
         pinLink.release()
         demoConnecting.value = false
-        abandonVoice()
+        abandonVoice(linkGone = true) // the outboxes were drained above: nothing more may be queued for this computer
         status.value = StatusMsg(Res.string.status_disconnected)
         Telemetry.track(TelEvent.Disconnected)
     }
@@ -3270,6 +3347,8 @@ class PocketRepository(
         themeMode.value = from.themeMode.value
         accentTheme.value = from.accentTheme.value
         voiceWhisper.value = from.voiceWhisper.value
+        voiceAfterDictationState.value = from.voiceAfterDictationState.value
+        voiceRefineAckedState.value = voiceRefineAckedState.value || from.voiceRefineAckedState.value // one-way, like fullAccessConfirmed
         // #362: pins are NOT copied from the outgoing primary — each computer has its own; rebound below
         // #165: NOT copied from the outgoing primary — the working set is per-computer, and this promote is
         // precisely the moment the machine changes. Load this satellite's own instead.
@@ -3540,7 +3619,10 @@ class PocketRepository(
         ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true, maxFrameBytes = dev.ccpocket.app.net.RelayE2EConnection.MAX_FRAME_BYTES, supportsVoiceMemo = true, supportsSessionObservationV1 = true,
             // lean history (SLOW-LINK-RESILIENCE §6): both are promises about what the chat UI does, so they
             // follow the UI that is running — see [leanHistory]
-            supportsImagePreviews = leanHistory, supportsShortHistoryWindow = leanHistory)
+            supportsImagePreviews = leanHistory, supportsShortHistoryWindow = leanHistory,
+            // voice input v2: this build decodes pocket/transcript.refined. Declaring it asks for nothing — a refine
+            // only runs when this phone sends a TranscriptRefine, which needs the user's SEND setting
+            supportsTranscriptRefine = true)
 
     /**
      * Declare the capabilities again, on the session that just proved itself live.
@@ -4137,6 +4219,13 @@ class PocketRepository(
                 daemonDiagnostics = f.supportsDiagnostics
                 daemonOwnsPromptRecovery = f.supportsPromptRecovery
                 daemonLeanHistory.value = f.supportsLeanHistory
+                // voice input v2: the agents whose transcript refiner this computer can launch. Unconditional, incl.
+                // the empty list of an older daemon; a re-announcement of the same list changes nothing, a different
+                // one ends a waiting capture's send — its eligibility was decided on the old list
+                if (f.transcriptRefineAgents != daemonTranscriptRefineAgentsState.value) {
+                    daemonTranscriptRefineAgentsState.value = f.transcriptRefineAgents
+                    voiceDowngrade(VoiceDowngrade.EligibilityLost)
+                }
                 // #360: this link's managed-list capability. Losing it (or its agent set changing) retires every
                 // pending managed reply and every accepted list, back to the legacy rows.
                 val managedAgentsNow = if (f.supportsManagedSessions) managedAgentsOf(f.managedAgents) else emptySet()
@@ -4218,7 +4307,12 @@ class PocketRepository(
                 // #333: unconditional too — this is a read-back of what the backend says the session IS,
                 // so a session that has none must clear a value left over from the previous one.
                 sessionAgentPreset.value = f.agentPreset
-                f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
+                f.agent?.let {
+                    val changed = it != sessionAgent.value
+                    sessionAgent.value = it // daemon truth for the backend badge
+                    // voice input v2: a waiting capture's refiner was chosen for the agent it started under
+                    if (changed) voiceDowngrade(VoiceDowngrade.EligibilityLost)
+                }
                 val liveAgent = f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
                 // daemon truth verbatim: filtering the REPORTED model through the compat guard nulled
                 // legitimate ids (codex "o3", gateway "vendor/model") and wiped the header — the guard
@@ -4642,6 +4736,8 @@ class PocketRepository(
             is ImageContent -> if (f.convoId == convoId.value) onImageContent(f)
             is CommandList -> if (f.convoId == convoId.value) replace(slashCommands, f.commands)
             is Transcript -> onTranscript(f)
+            // voice input v2 — matched on the capture and the conversation its refine request went to, inside
+            is TranscriptRefined -> onTranscriptRefined(f)
             // file upload receipt (issue #90) — matched on captureId inside; convo guard like CommandList
             is FileUploaded -> if (f.convoId == convoId.value) onFileUploaded(f)
             is ShellResult -> if (f.convoId == convoId.value) {
@@ -6655,6 +6751,7 @@ class PocketRepository(
     fun attachImages(raw: List<ByteArray>) {
         val room = MAX_IMAGES - pendingImages.size
         if (room <= 0) return
+        if (raw.isNotEmpty()) voiceDowngrade(VoiceDowngrade.ComposerChanged) // voice input v2: never sent alongside a dictation
         raw.take(room).forEach { original ->
             val id = pendingIdSeq++
             pendingImages.add(PendingImage(id, original, ImgState.Compressing))
@@ -6689,6 +6786,7 @@ class PocketRepository(
      *  upload ONE at a time — chunks of a 200 MB file must not starve asks/heartbeats on the socket. */
     fun attachFiles(picked: List<PickedFile>) {
         val room = MAX_FILES - pendingFiles.size
+        if (picked.isNotEmpty() && room > 0) voiceDowngrade(VoiceDowngrade.ComposerChanged) // voice input v2, as for photos
         picked.take(room.coerceAtLeast(0)).forEach { p ->
             val id = pendingIdSeq++
             val tooBig = p.size > MAX_UPLOAD_BYTES || p.bytes.size > MAX_UPLOAD_BYTES
@@ -6834,7 +6932,14 @@ class PocketRepository(
      *  or the degraded-session gate (issue #65): the first send into a session whose recent turns were
      *  all API failures is intercepted with an explanation (each such send just bloats the transcript);
      *  sending again goes through. Callers keep the composer text on false. */
-    fun sendPrompt(text: String): Boolean = sendPrompt(text, includeAttachments = true)
+    fun sendPrompt(text: String): Boolean {
+        // voice input v2: a message of the user's own while a dictation still waits — that capture can no longer
+        // send; its text lands in the composer after this one (§11)
+        voiceDowngrade(VoiceDowngrade.ComposerChanged)
+        val sent = sendPrompt(text, includeAttachments = true)
+        if (sent) voiceComposerReasonState.value = null // the reason line lives until the first send
+        return sent
+    }
 
     /** An explicit setup action sends its own request, leaving the composer's draft and attachments alone.
      * Bind the click to the displayed failure and conversation; a stale/double click cannot send elsewhere. */
@@ -6875,7 +6980,7 @@ class PocketRepository(
         degradedSendArmed = false // consumed — the next prompt into a still-degraded session gates again
         // sending dismisses the error chip, and the slow-transcript note with it (a late result must not
         // reappear in the composer after the user moved on and sent something else)
-        if (voice.value is VoiceState.Failed || voice.value is VoiceState.StillWaiting) clearVoice()
+        if (voice.value is VoiceState.Failed || voice.value is VoiceState.StillWaiting) { dropVoiceCapture(); clearVoice() }
         val images = ready.map { ImageData("image/jpeg", Base64.Default.encode(it)) }
         // landed files ride as `@path` references appended to the prompt — the #75 mechanism, so the
         // agent Reads the inbox file by path; the daemon never re-parses anything upload-specific
@@ -7537,12 +7642,51 @@ class PocketRepository(
 
     // ── voice input actions ───────────────────────────────────────────────
 
+    /**
+     * Voice input v2 (docs/design/VOICE-INPUT-V2-REVIEW.md §11): could a dictation be sent from here right now?
+     * Every condition must hold, and anything unknown reads as no: the user chose SEND and accepted the disclosure;
+     * the link is up and Ready on a writable, non-degraded conversation; the computer has a refiner for THIS
+     * session's agent; the composer is empty with no IME composition, nothing is on its way into it, and no
+     * attachment is staged in any state. Asked when a capture starts (its bar), at ✓, when the refined text
+     * arrives and before submitting.
+     */
+    fun voiceSendEligible(): Boolean {
+        if (voiceAfterDictationState.value != VoiceAfterDictation.SEND || !voiceRefineAckedState.value) return false
+        if (!connected.value || phase.value != ConnPhase.Ready || convoId.value == null) return false
+        if (observing.value || observationReadOnly() || sessionDegraded.value) return false
+        val agent = sessionAgent.value ?: return false
+        if (memoAgentWire(agent) !in daemonTranscriptRefineAgentsState.value) return false
+        if (pendingImages.isNotEmpty() || pendingFiles.isNotEmpty()) return false // picking, compressing, uploading, failed or landed
+        if (pendingVoiceText.value != null) return false // text on its way into the composer is composer content
+        val probe = composerProbe?.invoke() ?: return false
+        return probe.text.isBlank() && !probe.composing
+    }
+
+    /** The bar a capture starting now gets: today's unless the user chose SEND (and accepted the disclosure). */
+    private fun voiceBarModeNow(): VoiceBarMode = when {
+        voiceAfterDictationState.value != VoiceAfterDictation.SEND || !voiceRefineAckedState.value -> VoiceBarMode.LEGACY
+        voiceSendEligible() -> VoiceBarMode.EDIT_SEND
+        else -> VoiceBarMode.EDIT_DONE
+    }
+
     /** Mic tap (S1). Picks the engine: iOS native streaming dictation, else record→daemon-whisper. */
     fun startVoice() {
         if (convoId.value == null) return
         if (memoHost.holdsMicrophone) return // one recorder: a memo capture is using the microphone
         val v = voice.value
-        if (v !is VoiceState.Idle && v !is VoiceState.Failed && v !is VoiceState.StillWaiting) return
+        if (v !is VoiceState.Idle && v !is VoiceState.Failed && v !is VoiceState.StillWaiting &&
+            v !is VoiceState.Refining && v !is VoiceState.Preview) return
+        val key = composerKey() ?: return // text that is not sent must have a composer to come back to
+        // voice input v2: the bar is decided now and frozen. A previous capture whose text is about to land in the
+        // composer (superseded while refining or previewing) leaves the composer non-empty: this one cannot send.
+        val superseding = voiceFlow.phase == VoiceSendFlow.Phase.REFINING || voiceFlow.phase == VoiceSendFlow.Phase.HOLDING
+        val mode = voiceBarModeNow().let { if (superseding && it == VoiceBarMode.EDIT_SEND) VoiceBarMode.EDIT_DONE else it }
+        val id = randomCaptureId() // the capture's one id, both engines; a whisper recording's first send travels under it
+        val origin = VoiceOrigin(voiceComputerId(), key)
+        // one capture at a time: an unfinished one is superseded — it can never send, and text it had lands
+        voiceEvent(VoiceSendFlow.Event.Start(id, origin, sendBar = mode == VoiceBarMode.EDIT_SEND))
+        voiceCapture = VoiceCapture(id, origin, mode)
+        voiceBarModeState.value = mode
         // a new recording abandons whatever the last one was still waiting for: a late transcript of the old
         // capture must never land beside (or instead of) the new one
         voiceTimeout?.cancel()
@@ -7550,12 +7694,49 @@ class PocketRepository(
         voiceUploading.value = false
         clearNotice()
         voiceLevels.clear()
-        if (NativeDictation.available && !preferRemote && !voiceWhisper.value) startNativeVoice() else startRemoteVoice()
+        val native = NativeDictation.available || nativeDictationForTest != null
+        if (native && !preferRemote && !voiceWhisper.value) startNativeVoice() else startRemoteVoice()
     }
 
-    /** ✓ done (S2 → S3). */
+    /** ✓ done (S2 → S3): the text lands in the composer — today's bar, and a send bar's ✓ when it cannot send. */
     fun stopVoice() {
         if (voice.value !is VoiceState.Recording) return
+        if (voiceBarModeState.value == VoiceBarMode.EDIT_SEND) voiceBarModeState.value = VoiceBarMode.EDIT_DONE
+        voiceEvent(VoiceSendFlow.Event.TapDone)
+        finishRecording()
+    }
+
+    /**
+     * Voice input v2: the send bar's ✓ "finish and send". Ends the recording exactly like [stopVoice]; the final
+     * transcript is then refined on the computer and sent only when the daemon allows it and the capture is still
+     * eligible — otherwise it lands in the composer, with a reason line where one applies. A capture that is not
+     * eligible right now (or a bar that is not a send bar) is plain ✓ done.
+     */
+    fun finishAndSendVoice() {
+        if (voice.value !is VoiceState.Recording) return
+        val eligible = voiceBarModeState.value == VoiceBarMode.EDIT_SEND && voiceSendEligible()
+        if (eligible) voiceCapture?.tapSendAtMs = voiceNowMs()
+        else if (voiceBarModeState.value == VoiceBarMode.EDIT_SEND) voiceBarModeState.value = VoiceBarMode.EDIT_DONE
+        voiceEvent(VoiceSendFlow.Event.TapSend(eligibleNow = eligible))
+        finishRecording()
+    }
+
+    /**
+     * Voice input v2: the send bar's leading control — "finish and edit" while recording, "edit instead" while
+     * waiting. The text goes to the composer and is never sent: a recording ends as on ✓; while the refine is out
+     * the original lands at once (the refined text, once it is being previewed) and the refine is cancelled; a
+     * transcript still on its way lands when it arrives.
+     */
+    fun finishAndEditVoice() {
+        if (voiceBarModeState.value == VoiceBarMode.EDIT_SEND) voiceBarModeState.value = VoiceBarMode.EDIT_DONE
+        val recording = voice.value is VoiceState.Recording
+        voiceEvent(VoiceSendFlow.Event.TapEdit)
+        if (recording) finishRecording()
+    }
+
+    /** The recorder's half of every way a recording ends with its text kept (✓, edit, the cap): stop the engine and
+     *  wait for the transcript — the native Final, or the whisper upload's answer. Where it goes is [voiceFlow]'s. */
+    private fun finishRecording() {
         voiceTicker?.cancel()
         levelsJob?.cancel()
         voice.value = VoiceState.Transcribing
@@ -7567,25 +7748,25 @@ class PocketRepository(
                 // #266: a thrown stop() (mic stolen, route change, engine error) is a real FAILURE and must
                 // be retryable — collapsing it into "no speech" told the user they stayed silent. Only an
                 // empty successful capture is genuine silence.
-                val result = runCatching { recorder.stop() }
+                val result = runCatching { recordForTest?.invoke() ?: recorder.stop() }
                 val audio = result.getOrNull()
                 when {
-                    result.isFailure -> voice.value = VoiceState.Failed(Res.string.voice_record_failed)
-                    audio == null || audio.bytes.isEmpty() -> {
-                        showNotice(Res.string.voice_no_speech)
-                        clearVoice()
-                    }
+                    result.isFailure -> voiceFailed(VoiceState.Failed(Res.string.voice_record_failed))
+                    audio == null || audio.bytes.isEmpty() -> voiceFinal("") // "no speech", as before
                     else -> {
                         keptAudio = audio
-                        uploadCapture(audio)
+                        uploadCapture(audio, firstSend = true)
                     }
                 }
             }
         }
     }
 
-    /** ✕ cancel (S2/S3) — discard everything, back to the idle composer. */
-    fun cancelVoice() = stopCapture(notifyDaemon = true)
+    /** ✕ cancel (S2/S3) — discard everything, back to the idle composer. Also cancels a refine in flight. */
+    fun cancelVoice() {
+        voiceEvent(VoiceSendFlow.Event.TapCancel)
+        stopCapture(notifyDaemon = true)
+    }
 
     /** Tear down capture jobs + engine and reset to Idle; [notifyDaemon] also aborts an in-flight remote transcription. */
     private fun stopCapture(notifyDaemon: Boolean) {
@@ -7642,9 +7823,12 @@ class PocketRepository(
         beginTicker()
         dictationJob = scope.launch {
             try {
-                NativeDictation.start().collect { ev ->
+                (nativeDictationForTest?.invoke() ?: NativeDictation.start()).collect { ev ->
                     when (ev) {
-                        is DictationEvent.Partial -> { liveFinal.value = ev.final; livePartial.value = ev.partial }
+                        is DictationEvent.Partial -> {
+                            liveFinal.value = ev.final; livePartial.value = ev.partial
+                            voiceEvent(VoiceSendFlow.Event.Partial(ev.final + ev.partial)) // kept if the chat is left mid-capture
+                        }
                         is DictationEvent.Level -> pushLevel(ev.level)
                         is DictationEvent.Final -> onNativeFinal(ev.text)
                         is DictationEvent.Error -> onNativeError(dictationRes(ev.kind), ev.message)
@@ -7652,6 +7836,7 @@ class PocketRepository(
                 }
             } catch (_: VoicePermissionDenied) {
                 voiceTicker?.cancel()
+                dropVoiceCapture()
                 clearVoice()
                 micPermissionSheet.value = true
             } catch (_: CancellationException) {
@@ -7672,16 +7857,17 @@ class PocketRepository(
         voice.value = VoiceState.Recording(0)
         voiceStartJob = scope.launch {
             try {
-                recorder.start()
+                if (recordForTest == null) recorder.start()
             } catch (c: CancellationException) {
                 runCatching { recorder.cancel() } // abandoned during the start window — tear the recorder down
                 throw c
             } catch (_: VoicePermissionDenied) {
+                dropVoiceCapture()
                 voice.value = VoiceState.Idle
                 micPermissionSheet.value = true
                 return@launch
             } catch (t: Throwable) {
-                voice.value = VoiceState.Failed(Res.string.voice_record_failed)
+                voiceFailed(VoiceState.Failed(Res.string.voice_record_failed))
                 return@launch
             }
             beginTicker()
@@ -7693,7 +7879,7 @@ class PocketRepository(
                 recorder.interruptions.collect {
                     if (voice.value is VoiceState.Recording) {
                         voiceTicker?.cancel(); levelsJob?.cancel()
-                        voice.value = VoiceState.Failed(Res.string.voice_interrupted)
+                        voiceFailed(VoiceState.Failed(Res.string.voice_interrupted))
                     }
                 }
             }
@@ -7710,21 +7896,32 @@ class PocketRepository(
                 elapsed += 200
                 if (voice.value !is VoiceState.Recording) break
                 voice.value = VoiceState.Recording(elapsed)
-                if (elapsed >= VOICE_MAX_MS) { stopVoice(); break } // cap reached = same as tapping ✓
+                if (elapsed >= VOICE_MAX_MS) { capVoice(); break }
             }
         }
     }
 
+    /** The 90 s limit. The recording ends as on ✓ today, but the cap never authorises a send: on a send bar it is
+     *  the leading "finish and edit" (§11) — the text lands in the composer. */
+    private fun capVoice() {
+        if (voice.value !is VoiceState.Recording) return
+        if (voiceBarModeState.value == VoiceBarMode.EDIT_SEND) voiceBarModeState.value = VoiceBarMode.EDIT_DONE
+        voiceEvent(VoiceSendFlow.Event.CapReached)
+        finishRecording()
+    }
+
     private fun onNativeFinal(text: String) {
         voiceTimeout?.cancel()
-        deliverTranscript(text)
+        voiceFinal(text)
     }
 
     private fun onNativeError(res: StringResource, detail: String?) {
-        if (voice.value is VoiceState.Idle) return // teardown noise after completion
+        val v = voice.value
+        // teardown noise after completion — or after the transcript is in and being refined
+        if (v is VoiceState.Idle || v is VoiceState.Refining || v is VoiceState.Preview) return
         voiceTicker?.cancel(); voiceTimeout?.cancel()
         preferRemote = true // this device's native engine is flaky — retry path uses the daemon
-        voice.value = VoiceState.Failed(res, detail)
+        voiceFailed(VoiceState.Failed(res, detail))
         liveFinal.value = ""; livePartial.value = ""
     }
 
@@ -7734,11 +7931,13 @@ class PocketRepository(
         DictationFail.RECOGNITION -> Res.string.voice_dictation_failed
     }
 
-    /** Base64 the whole capture once, slice the STRING into frame-sized chunks (daemon re-joins then decodes). */
+    /** Base64 the whole capture once, slice the STRING into frame-sized chunks (daemon re-joins then decodes).
+     *  The recording's [firstSend] travels under the capture's own id (minted at [startVoice]); a retry re-sends the
+     *  same audio under a fresh id, as before — the daemon drops chunks of an id it has already assembled. */
     @OptIn(ExperimentalEncodingApi::class)
-    private fun uploadCapture(audio: RecordedAudio) {
+    private fun uploadCapture(audio: RecordedAudio, firstSend: Boolean = false) {
         val c = convoId.value ?: run { clearVoice(); return }
-        val id = randomCaptureId()
+        val id = voiceCapture?.id?.takeIf { firstSend && it !in voiceAttempts } ?: randomCaptureId()
         captureId = id
         voiceAttempts = voiceAttempts + id // a retry keeps the earlier send of the same recording acceptable
         voiceTimeout?.cancel()
@@ -7753,7 +7952,7 @@ class PocketRepository(
                 if (captureId == id) {
                     voiceUploading.value = false
                     voiceAttempts = emptySet()
-                    voice.value = VoiceState.Failed(Res.string.voice_daemon_unreachable)
+                    voiceFailed(VoiceState.Failed(Res.string.voice_daemon_unreachable))
                 }
                 return@launch
             }
@@ -7819,7 +8018,12 @@ class PocketRepository(
         voiceTimeout = scope.launch {
             delay(TRANSCRIBE_TIMEOUT_MS)
             if (captureId != id) return@launch
-            if (voice.value is VoiceState.Transcribing) voice.value = VoiceState.StillWaiting
+            if (voice.value is VoiceState.Transcribing) {
+                voice.value = VoiceState.StillWaiting
+                // voice input v2: the plain composer is back on screen (S3′) and offers a retry, so a send bar's ✓
+                // no longer stands — whatever transcript arrives now lands in the composer, never sends
+                voiceDowngrade(VoiceDowngrade.EligibilityLost)
+            }
             delay(TRANSCRIBE_GIVE_UP_MS - TRANSCRIBE_TIMEOUT_MS)
             val v = voice.value
             if (captureId == id && (v is VoiceState.StillWaiting || v is VoiceState.Transcribing)) giveUpTranscript()
@@ -7830,7 +8034,7 @@ class PocketRepository(
     private fun giveUpTranscript() {
         voiceUploading.value = false
         voiceAttempts = emptySet()
-        voice.value = VoiceState.Failed(Res.string.voice_no_response)
+        voiceFailed(VoiceState.Failed(Res.string.voice_no_response))
     }
 
     private fun onTranscript(f: Transcript) {
@@ -7844,14 +8048,14 @@ class PocketRepository(
         if (v !is VoiceState.Transcribing && v !is VoiceState.StillWaiting) return
         if (f.ok) {
             voiceTimeout?.cancel()
-            deliverTranscript(f.text) // clears every send: a second transcript of this recording is dropped
+            voiceFinal(f.text) // clears every send: a second transcript of this recording is dropped
             return
         }
         voiceAttempts = voiceAttempts - f.captureId
         if (voiceAttempts.isNotEmpty()) return // another send of this recording may still answer
         voiceTimeout?.cancel()
         voiceUploading.value = false
-        voice.value = VoiceState.Failed(Res.string.voice_transcribe_failed, f.error)
+        voiceFailed(VoiceState.Failed(Res.string.voice_transcribe_failed, f.error))
     }
 
     /** Native engine only: stop() → Final guard. The remote engine waits with [armTranscriptWait]. */
@@ -7860,9 +8064,217 @@ class PocketRepository(
         voiceTimeout = scope.launch {
             delay(ms)
             if (voice.value is VoiceState.Transcribing) {
-                voice.value = VoiceState.Failed(Res.string.voice_no_response)
+                voiceFailed(VoiceState.Failed(Res.string.voice_no_response))
             }
         }
+    }
+
+    // ── voice input v2: hosting VoiceSendFlow (docs/design/VOICE-INPUT-V2-REVIEW.md §11) ─────────────────
+
+    /** A final transcript of the current capture, from either engine (the native Final, a whisper answer, or "" for
+     *  a silent recording). Without a capture of the flow's — a state staged by hand — it lands as it always did. */
+    private fun voiceFinal(text: String) {
+        if (voiceCapture == null) { deliverTranscript(text); return }
+        // a send bar asks once more before a refine goes out: a capture that could not send now must not spend a
+        // refine on the computer (the link went down without a drop event, the session was degraded meanwhile…)
+        if (voiceBarModeState.value == VoiceBarMode.EDIT_SEND && !voiceSendEligible()) voiceDowngrade(VoiceDowngrade.EligibilityLost)
+        voiceEvent(VoiceSendFlow.Event.TranscriptFinal(text))
+    }
+
+    /** The capture failed (either engine): today's failure state and retry. From here it can never send — a retry's
+     *  transcript lands in the composer. */
+    private fun voiceFailed(failed: VoiceState.Failed) {
+        voice.value = failed
+        if (voiceBarModeState.value == VoiceBarMode.EDIT_SEND) voiceBarModeState.value = VoiceBarMode.EDIT_DONE
+        voiceEvent(VoiceSendFlow.Event.TranscriptFailed)
+    }
+
+    /** The capture ended with nothing to keep (the microphone refused, a dismissed wait): close it in the flow. */
+    private fun dropVoiceCapture() {
+        if (voiceCapture != null) voiceEvent(VoiceSendFlow.Event.TapCancel)
+    }
+
+    /** Something a send-bar capture depended on changed: from here it can only land in the composer. Today's bar
+     *  (LEGACY) is never touched — it behaves exactly as before. */
+    private fun voiceDowngrade(cause: VoiceDowngrade) {
+        val capture = voiceCapture ?: return
+        if (capture.mode == VoiceBarMode.LEGACY) return
+        if (voiceBarModeState.value == VoiceBarMode.EDIT_SEND) voiceBarModeState.value = VoiceBarMode.EDIT_DONE
+        voiceEvent(VoiceSendFlow.Event.Downgrade(cause))
+    }
+
+    /** The link dropped mid-capture. Text that exists lands at once as "disconnected, kept, not sent"; a capture with
+     *  no text yet carries on as today — its audio rides the outbox across the reconnect, a native recogniser does
+     *  not need the link — but can no longer send. */
+    private fun onVoiceLinkLost() {
+        val phase = voiceFlow.phase
+        val textExists = phase == VoiceSendFlow.Phase.REFINING || phase == VoiceSendFlow.Phase.HOLDING
+        voiceDowngrade(if (textExists) VoiceDowngrade.Disconnected else VoiceDowngrade.EligibilityLost)
+    }
+
+    private fun voiceEvent(event: VoiceSendFlow.Event, leaving: Boolean = false, linkGone: Boolean = false) =
+        applyVoiceEffects(voiceFlow.on(event), leaving, linkGone)
+
+    /**
+     * Carry out [voiceFlow]'s effects in order. [leaving]: the capture's conversation is being left, so no text may
+     * land in the composer on screen. [linkGone]: the link to this computer is being dropped for good — a frame
+     * queued now would flush into whichever computer is dialled next.
+     */
+    private fun applyVoiceEffects(effects: List<VoiceSendFlow.Effect>, leaving: Boolean = false, linkGone: Boolean = false) {
+        for (e in effects) when (e) {
+            is VoiceSendFlow.Effect.RequestRefine -> requestVoiceRefine(e.captureId, e.text)
+            is VoiceSendFlow.Effect.CancelRefine -> if (!linkGone) {
+                // best effort: frees the computer's refine slot sooner; a result already on its way is ignored
+                val c = voiceCapture?.refineConvo ?: convoId.value
+                if (c != null) scope.launch { runCatching { send(AudioCancel(c, e.captureId)) } }
+            }
+            is VoiceSendFlow.Effect.ShowRefining -> {
+                // the transcript is in: nothing of the transcription is waited for any longer
+                voiceTimeout?.cancel(); voiceAttempts = emptySet(); voiceUploading.value = false; keptAudio = null
+                voice.value = VoiceState.Refining(e.original, sessionAgent.value?.let(::memoAgentWire).orEmpty())
+            }
+            is VoiceSendFlow.Effect.ShowPreview -> {
+                voice.value = VoiceState.Preview(e.text, e.ranges)
+                voiceCapture?.let { armVoiceHold(it.id) }
+            }
+            is VoiceSendFlow.Effect.SubmitSend -> submitVoice(e.captureId, e.text)
+            is VoiceSendFlow.Effect.ToComposer -> {
+                voiceCapture?.outcome = VoiceRefineTelemetry.toComposer(e.reason)
+                clearVoice()
+                landVoiceText(e.origin, e.text, e.reason, leaving)
+            }
+            // the caller (cancel, leaving, a refused microphone) tears down as it always has
+            VoiceSendFlow.Effect.Discard -> voiceCapture?.outcome = VoiceRefineTelemetry.DISCARDED
+            VoiceSendFlow.Effect.NoSpeech -> { showNotice(Res.string.voice_no_speech); clearVoice() }
+            VoiceSendFlow.Effect.TranscribeFailed -> {} // the failure state and its retry are already up ([voiceFailed])
+            is VoiceSendFlow.Effect.Finished -> endVoiceCapture(e.captureId)
+        }
+    }
+
+    /** Ask the computer to refine the final transcript, and start the phone's own budget for the answer — from the
+     *  transcript being ready, independent of the daemon's own timeout answer (§11). */
+    private fun requestVoiceRefine(id: String, text: String) {
+        val capture = voiceCapture?.takeIf { it.id == id }
+        val c = convoId.value
+        capture?.refineConvo = c
+        capture?.refineRequested = true
+        Telemetry.track(TelEvent.VoiceRefine, mapOf(TelKey.Outcome to VoiceRefineTelemetry.REQUESTED))
+        if (c != null) {
+            // agentHint is THIS session's agent: the daemon falls back to it only when it does not know the session's
+            // own agent yet (a session with no running process) — never the phone's global default (§11)
+            val agent = sessionAgent.value?.let(::memoAgentWire)
+            scope.launch { send(TranscriptRefine(c, id, text, locale = voiceLocaleTag(), agentHint = agent)) }
+        }
+        voiceRefineDeadline?.cancel()
+        voiceRefineDeadline = scope.launch {
+            delay(REFINE_BUDGET_MS)
+            voiceCapture?.takeIf { it.id == id }?.deadlineFired = true
+            voiceEvent(VoiceSendFlow.Event.RefineDeadline(id))
+        }
+    }
+
+    /** The highlight hold before a refined text with corrections is sent; eligibility is asked again at its end. */
+    private fun armVoiceHold(id: String) {
+        voiceHoldJob?.cancel()
+        voiceHoldJob = scope.launch {
+            delay(PREVIEW_HOLD_MS)
+            voiceEvent(VoiceSendFlow.Event.HoldElapsed(id, eligibleNow = voiceSendEligible()))
+        }
+    }
+
+    /** The refined dictation is cleared to go: the ordinary send path, without the composer's attachments. Its answer
+     *  settles the capture — refused (a degraded session's gate…), the text lands in the composer instead. */
+    private fun submitVoice(id: String, text: String) {
+        beforeVoiceSubmitForTest?.invoke()
+        val accepted = sendVoicePrompt(text)
+        if (accepted) voiceCapture?.takeIf { it.id == id }?.outcome = VoiceRefineTelemetry.AUTO_SENT
+        voiceEvent(VoiceSendFlow.Event.SendResult(id, accepted))
+    }
+
+    /** The refined-dictation entry into the send path: attachment-free, so nothing staged in the composer can ride
+     *  along. Accepted = submitted; from there the prompt's own delivery recovery owns it (same promptId). */
+    internal fun sendVoicePrompt(text: String): Boolean = sendPrompt(text, includeAttachments = false)
+
+    /**
+     * Text that is not sent goes back to the user. Into the composer on screen when it is still the capture's own —
+     * today's [pendingVoiceText] path (App.kt appends it, places the caret at the end, raises the keyboard) — with
+     * [reason] as the sticky reason line. Otherwise (the conversation was left, the computer changed) appended, once
+     * and without a reason, to the draft of the conversation the capture STARTED in, never to whatever is open now.
+     */
+    private fun landVoiceText(origin: VoiceOrigin, text: String, reason: VoiceComposerReason?, leaving: Boolean) {
+        val key = voiceCapture?.takeIf { it.origin == origin }?.draftKey ?: origin.composerKey
+        val here = !leaving && convoId.value != null && origin.computerId == voiceComputerId() && key == composerKey()
+        if (here) {
+            pendingVoiceText.value = text
+            voiceComposerReasonState.value = reason
+        } else {
+            saveDraft(key, appendVoiceTranscript(draftFor(key), text))
+        }
+    }
+
+    /** The flow is done with capture [id]: drop its bookkeeping and timers, and leave a waiting or preview state. */
+    private fun endVoiceCapture(id: String) {
+        val capture = voiceCapture
+        if (capture != null && capture.id != id) return
+        if (capture?.refineRequested == true) trackVoiceRefineOutcome(capture)
+        resetVoiceHost()
+        val v = voice.value
+        if (v is VoiceState.Refining || v is VoiceState.Preview) clearVoice()
+    }
+
+    /** The one terminal `voice_refine` of a dictation that asked for a refine: what became of it, how many corrections
+     *  the answer carried, how long ✓ waited for it — buckets only ([VoiceRefineTelemetry]). */
+    private fun trackVoiceRefineOutcome(capture: VoiceCapture) {
+        val params = mutableMapOf<TelKey, Any>(TelKey.Outcome to (capture.outcome ?: VoiceRefineTelemetry.toComposer(null)))
+        capture.refinedEdits?.let { params[TelKey.Edits] = VoiceRefineTelemetry.editsBucket(it) }
+        val latency = if (capture.deadlineFired) VoiceRefineTelemetry.LATENCY_TIMEOUT
+        else capture.refinedAfterMs?.let(VoiceRefineTelemetry::latencyBucket)
+        latency?.let { params[TelKey.LatencyMs] = it }
+        Telemetry.track(TelEvent.VoiceRefine, params)
+    }
+
+    private fun resetVoiceHost() {
+        voiceCapture = null
+        voiceRefineDeadline?.cancel(); voiceRefineDeadline = null
+        voiceHoldJob?.cancel(); voiceHoldJob = null
+        voiceBarModeState.value = VoiceBarMode.LEGACY
+    }
+
+    /** The answer to this phone's refine request. Only the current capture's, from the conversation the request went
+     *  to, while it is out; a late one (after the deadline, an edit, a downgrade) or another capture's is dropped. */
+    private fun onTranscriptRefined(f: TranscriptRefined) {
+        val capture = voiceCapture ?: return
+        if (f.captureId != capture.id || f.convoId != capture.refineConvo || voiceFlow.phase != VoiceSendFlow.Phase.REFINING) return
+        // answered: the 10 s budget may no longer end this capture — the highlight hold would otherwise run into it
+        // and land the original as "timed out" (review §11, constraints for the UI)
+        voiceRefineDeadline?.cancel()
+        capture.refinedAfterMs = capture.tapSendAtMs?.let { voiceNowMs() - it }
+        if (f.ok) capture.refinedEdits = f.edits.size
+        voiceEvent(VoiceSendFlow.Event.Refined(f.captureId, f.ok, f.text, f.edits, f.error, f.autoSend, eligibleNow = voiceSendEligible()))
+    }
+
+    /** The computer a capture belongs to: its binding's account id — the per-computer key the working set and the pins
+     *  use. Without a binding (the demo, tests) there is only one computer to speak of. */
+    private fun voiceComputerId(): String = paired.value?.accountId ?: VOICE_NO_BINDING
+
+    /** The tag the refiner's instructions follow: the one the app's own strings are resolved by (Compose's current
+     *  locale). The app has no shared dictation tag — iOS dictation reads the preferred languages itself, whisper
+     *  takes none. */
+    private fun voiceLocaleTag(): String? =
+        runCatching { androidx.compose.ui.text.intl.Locale.current.toLanguageTag() }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    /** Host-side bookkeeping of one voice input v2 capture — what [VoiceSendFlow] itself does not track. */
+    private class VoiceCapture(val id: String, val origin: VoiceOrigin, val mode: VoiceBarMode) {
+        /** Where text goes when the capture's conversation is gone: [origin]'s draft key, following the in-place
+         *  re-key of a brand-new session to its real id ([migrateDraft]) like the composer itself does. */
+        var draftKey: String = origin.composerKey
+        var refineConvo: String? = null   // the conversation the refine request went to
+        var tapSendAtMs: Long? = null     // ✓ on the send bar, for the latency bucket
+        var refineRequested = false
+        var refinedAfterMs: Long? = null  // ✓ → the daemon's answer
+        var refinedEdits: Int? = null
+        var deadlineFired = false
+        var outcome: String? = null       // [VoiceRefineTelemetry]'s name for how it ended
     }
 
     private fun pushLevel(l: Float) {
@@ -7904,6 +8316,7 @@ class PocketRepository(
         voiceAttempts = emptySet() // also fences off any chunk still queued for one of them
         voiceUploading.value = false
         usingNative = false
+        voiceBarModeState.value = VoiceBarMode.LEGACY // no capture, no bar
     }
 
     private fun randomCaptureId(): String =
@@ -8360,11 +8773,21 @@ class PocketRepository(
         listSessions(dirKey) // freshen that project's list so the back trip doesn't show the old one's
     }
 
-    /** Leaving the chat or losing the connection invalidates any in-flight capture. */
-    private fun abandonVoice() {
+    /** Leaving the chat or losing the connection invalidates any in-flight capture. [linkGone]: the link to this
+     *  computer is dropped for good ([disconnect]), so not even a refine cancel may be queued. */
+    private fun abandonVoice(linkGone: Boolean = false) {
+        voiceCapture?.let { capture ->
+            // today's bar drops an unfinished capture, exactly as before; a send-bar capture cancels its refine and
+            // keeps the text it already has in the draft of the conversation it started in (§11)
+            val event = if (capture.mode == VoiceBarMode.LEGACY) VoiceSendFlow.Event.TapCancel
+            else VoiceSendFlow.Event.Downgrade(VoiceDowngrade.LeftConversation)
+            voiceEvent(event, leaving = true, linkGone = linkGone)
+        }
         stopCapture(notifyDaemon = false) // the session is going away — an AudioCancel would be moot
+        resetVoiceHost()
         micPermissionSheet.value = false
         clearNotice()
+        voiceComposerReasonState.value = null // the reason line belongs to the composer being left
     }
 
     /** The open chat is a read-only observe view by POLICY (a bound member or an observe-only open): no take-over. */
@@ -8594,6 +9017,12 @@ class PocketRepository(
         const val TRANSCRIBE_TIMEOUT_MS = 15_000L
         const val TRANSCRIBE_GIVE_UP_MS = 90_000L
         const val NATIVE_FINAL_TIMEOUT_MS = 8_000L   // native engine: stop() → Final guard
+        // voice input v2 (review §11): the phone's own budget for a refine, from the final transcript — it never waits
+        // on the daemon's 12 s timeout answer — and how long corrected words stay highlighted before the text is sent
+        const val REFINE_BUDGET_MS = 10_000L
+        const val PREVIEW_HOLD_MS = 700L
+        /** [VoiceOrigin.computerId] when there is no binding (the demo, tests): one computer, nothing to tell apart. */
+        internal const val VOICE_NO_BINDING = "local"
         /** Lean history: how many fetched full pictures are kept at once — what one viewer session pages through. */
         /** How long after an older-history request the same page is not asked for again. Just under the chat
          *  list's own retry interval (`HISTORY_PAGE_RETRY_MS`, 30 s), so that retry goes through. */
@@ -8660,6 +9089,8 @@ class PocketRepository(
         const val K_ACCENT_THEME = "appearance_accent_theme"  // SecureStore: AccentTheme name (POCKET/CODEX; issue #204)
         const val K_REPATH_AUTO = "repath_auto" // SecureStore: "off" disables the #404 idle re-path (on by default on every platform)
         const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
+        const val K_VOICE_AFTER_DICTATION = "voice_after_dictation" // SecureStore: "send" = ✓ refines then sends (voice input v2); anything else = into the composer
+        const val K_VOICE_REFINE_ACK = "voice_refine_ack"     // SecureStore flag: "1" = the voice-refine disclosure was accepted on this device
         const val K_FILES_HIDDEN_PREFIX = "files_show_hidden:" // SecureStore: "files_show_hidden:<workdir>" → "1" = 文件浏览显示 . 开头的隐藏项
         const val FILE_TREE_LIMIT = 2_000                      // 文件浏览每层的条目上限（= daemon listPathEntries 的硬上限）
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
@@ -8671,6 +9102,9 @@ class PocketRepository(
 }
 
 private const val REFRESH_SPINNER_SAFETY_MS = 4_000L // spinner never outlives a lost reply by more than this
+
+/** Origin of [PocketRepository.voiceNowMs]: a monotonic clock, so a latency bucket never jumps with the wall clock. */
+private val voiceClockOrigin = kotlin.time.TimeSource.Monotonic.markNow()
 
 /** #142: cancel the previous connection's job and WAIT (bounded) until it has actually finished — its
  *  socket closed and its writers off the shared outboxes — before the next connection dials. cancel()
