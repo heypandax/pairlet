@@ -3,6 +3,7 @@ package dev.ccpocket.daemon
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
+import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DeviceHello
 import dev.ccpocket.protocol.Directories
@@ -23,6 +24,8 @@ import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.ToolEvent
+import dev.ccpocket.protocol.TranscriptRefine
+import dev.ccpocket.protocol.TranscriptRefined
 import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.e2e.E2ECrypto
 import dev.ccpocket.protocol.e2e.E2ESession
@@ -57,6 +60,7 @@ class TestClient private constructor(
     @Volatile private var convoId: String? = null
     @Volatile private var askId: String? = null
     @Volatile private var mode: PermissionMode = PermissionMode.DEFAULT
+    private var refineDeclared = false
     private var nextId = 0L
 
     fun run() = runBlocking { runRelay() }
@@ -172,6 +176,17 @@ class TestClient private constructor(
                     val m = arg?.let { runCatching { PocketJson.decodeFromString<PermissionMode>("\"$it\"") }.getOrNull() }
                     if (m != null) { mode = m; println("mode = $arg (applies to next open)") } else println("usage: mode <default|acceptEdits|auto|plan|dontAsk|bypassPermissions>")
                 }
+                // voice input v2: proofread [arg] as if it were a dictation — the open conversation's agent decides the
+                // refiner (Claude as the hint otherwise). The daemon answers only a connection that declared the cap.
+                "refine" -> if (arg == null) println("usage: refine <text>") else {
+                    if (!refineDeclared) { send(ClientCaps(supportsTranscriptRefine = true)); refineDeclared = true }
+                    send(
+                        TranscriptRefine(
+                            convoId = convoId ?: "test-client", captureId = "tc-${System.currentTimeMillis()}", text = arg,
+                            locale = java.util.Locale.getDefault().toLanguageTag(), agentHint = "claude",
+                        ),
+                    )
+                }
                 else -> println("unknown: $cmd")
             }
         }
@@ -187,6 +202,10 @@ class TestClient private constructor(
             is PermissionAsk -> { askId = body.askId; println("\n[33m[ASK] ${body.inputPreview}[0m   -> type: allow / deny") }
             is TurnDone -> println("\n[2m[done] in=${body.usage?.inputTokens ?: 0} out=${body.usage?.outputTokens ?: 0}[0m")
             is PocketError -> println("\n[31m[error:${body.code}] ${body.message}[0m")
+            is TranscriptRefined -> println(
+                if (body.ok) "\n[refined] agent=${body.agent} edits=${body.edits.joinToString { "${it.from} → ${it.to}" }}\n  ${body.text}"
+                else "\n[refined] ${body.error} (agent=${body.agent ?: "-"})",
+            )
             else -> println("\n[frame] $body")
         }
     }
@@ -201,6 +220,6 @@ class TestClient private constructor(
         private fun FIELD(name: String) = Regex(""""$name"\s*:\s*"([^"]*)"""")
 
         private const val HELP =
-            "commands: dirs | ls <wd> | open <wd> [resumeId] | say <text> | cd <wd> | allow | deny [reason] | mode <m> | quit"
+            "commands: dirs | ls <wd> | open <wd> [resumeId] | say <text> | cd <wd> | allow | deny [reason] | mode <m> | refine <text> | quit"
     }
 }

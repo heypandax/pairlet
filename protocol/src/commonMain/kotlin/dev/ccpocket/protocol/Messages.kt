@@ -1403,6 +1403,14 @@ data class DaemonInfo(
      * the client shows no observation entry and never sends `observeOnly` (it would be silently ignored).
      */
     val supportsSessionObservationV1: Boolean = false,
+    /**
+     * Capability advertisement (voice input v2, see TranscriptRefine.kt): the [AgentKind] wire names whose one-shot
+     * transcript refiner this daemon can launch right now, e.g. `["claude"]`. A LOCAL check — the CLI is present and
+     * launchable — never a promise that its account is signed in. EMPTY is the ordinary answer on a machine without
+     * one; ABSENT (older daemon) decodes to empty. Either way the phone sends no [TranscriptRefine] and its ✓ keeps
+     * landing dictation in the composer.
+     */
+    val transcriptRefineAgents: List<String> = emptyList(),
 ) : ToPhone
 
 @Serializable
@@ -2219,6 +2227,9 @@ data class ClientCaps(
     // rows, managed entries and SessionLive. The daemon leaves those fields null for a connection that did not
     // declare it (such a peer still gets the legacy `observing` + notice for a read-only open).
     val supportsSessionObservationV1: Boolean = false,
+    // voice input v2 (trailing optional): this connection decodes pocket/transcript.refined. The daemon neither runs a
+    // refine for, nor sends that frame to, a connection that did not declare it (see TranscriptRefine.kt).
+    val supportsTranscriptRefine: Boolean = false,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────

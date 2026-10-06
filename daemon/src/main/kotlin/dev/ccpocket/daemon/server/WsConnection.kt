@@ -214,6 +214,9 @@ class WsConnection(
                                 // router owns the answer because it owns the readers; absent (an older
                                 // daemon) decodes to empty = "Claude only, legacy behaviour".
                                 quotaAgents = router.quotaAgentWires(),
+                                // voice input v2: the agents whose transcript refiner can launch here — same source
+                                // as the relay copy (DeviceSessions)
+                                transcriptRefineAgents = router.transcriptRefineAgentWires(),
                             ).withVoiceMemo(router.voiceMemoCapability()),
                         ),
                     )
@@ -352,8 +355,14 @@ class WsConnection(
                     // voice memo → tasks: in receive order as well, like the relay's inline route — a start must be
                     // registered before its first chunk, or that chunk is answered "unknown job", dropped, and the
                     // upload then waits out its idle timeout holding the device's only slot.
+                    // voice input v2: a transcript refine likewise — it only registers the run (the model runs on the
+                    // service's scope), so once this returns, the AudioCancel that withdraws it (read later, dispatched
+                    // below) cannot overtake it and leave a model running for nobody. AudioCancel itself deliberately
+                    // stays on the concurrent path: inline, it could overtake its capture's own last AudioChunk (still
+                    // concurrent), miss the buffer and let a cancelled dictation be transcribed and answered.
                     if (env.body is dev.ccpocket.protocol.VoiceMemoStart || env.body is dev.ccpocket.protocol.VoiceMemoAudio ||
-                        env.body is dev.ccpocket.protocol.VoiceMemoGet || env.body is dev.ccpocket.protocol.VoiceMemoCancel
+                        env.body is dev.ccpocket.protocol.VoiceMemoGet || env.body is dev.ccpocket.protocol.VoiceMemoCancel ||
+                        env.body is dev.ccpocket.protocol.TranscriptRefine
                     ) {
                         try {
                             router.handle(env.body, sink, caps = caps, deviceId = gatedDeviceId)
