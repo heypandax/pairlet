@@ -130,11 +130,12 @@ object ReplaySlicer {
      *  path (daemon → HK relay → phone, store-and-forward per message) at tens of KB/s, i.e. seconds per
      *  window; 192 KB is the size it proposed for the first screen, the rest paging in on demand.
      *
-     *  NOT applied to any client yet. Every shipped phone build pages older history only from a
-     *  `snapshotFlow` on "list parked at the top", which emits on CHANGE: a window too short to scroll is
-     *  "at the top" from the first frame on, never changes, and so never pages (ui/App.kt, the
-     *  `loadOlderHistory` effect). A narrower first window makes that dead end reachable; enabling it waits
-     *  for a client that pages a short window and says so. */
+     *  NOT applied to any client, and no longer the mechanism that will be. What a client can take is declared
+     *  per CONNECTION, while a window is fanned out to every client attached to the conversation — so the cut
+     *  that actually ships lives at the per-connection sealer: `FrameFitter.Lean` bounds a declared client's
+     *  first window at `LEAN_FIRST_WINDOW_BYTES`, after its pictures have become previews (so the budget
+     *  measures what really travels). See docs/design/SLOW-LINK-RESILIENCE.md §6. This slice-level parameter
+     *  stays for a caller that knows its one consumer; nothing passes it today. */
     const val FIRST_WINDOW_BYTES = 192L * 1024
 
     /** Rows a narrowed first window keeps even when they alone exceed [FIRST_WINDOW_BYTES]: never an empty

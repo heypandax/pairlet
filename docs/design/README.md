@@ -23,7 +23,7 @@
 | 后端 | [Codex 多 Agent](CODEX-MULTI-AGENT.md)、[DSH ACP](DSH-ACP-TRANSPORT.md)、[DSH 提问桥接](DSH-ASK-BRIDGE.md)、[Kimi 设计](kimi-backend-design.md) |
 | Dot 进度接入 | [Dot 会话与执行进度接入方案](DOTS-SESSION-OBSERVABILITY.md)（P1 通用只读观察已实施：只读绑定、observeOnly、进度快照与手机／桌面入口；Dot 来源字段未证实，绑定只能由用户手工关联，真实 Dot 样例验收待做） |
 | 模型目录 | [Codex 模型目录缓存与更新实施方案](CODEX-MODEL-CATALOG-CACHE.md)（已实施并合入本地 main，2026-10-06；含缓存、目录同步、版本语义、验收条件与实施边界；真机验收待做） |
-| 慢链路 | [慢链路韧性：丢包线路上的会话打开与转写](SLOW-LINK-RESILIENCE.md)（第一期不改协议：看门狗自适应、静默链路不重放打开、历史帧软上限，已实现并合入本地 main；压缩与小首窗后置） |
+| 慢链路 | [慢链路韧性：丢包线路上的会话打开与转写](SLOW-LINK-RESILIENCE.md)（第一期不改协议：看门狗自适应、静默链路不重放打开、历史帧软上限，已实现并合入本地 main；第二期改协议：首屏按字节的小窗口加自动补页、图片先发预览再按需取原图，已在分支实现；压缩后置） |
 | 传输路径 | [客户端自动选路 v1：直连预算、资格预检与空闲回切](TRANSPORT-AUTO-REPATH-V1.md)（#403 直连预算与资格预检、#404 空闲回切均已合入本地 main；手机端回切默认关闭，待真机验收） |
 | 工作区 | [Git 面板](GIT-PANEL.md)、[Worktree](WORKTREE-MANAGEMENT.md)、[回退与 fork](REWIND-FORK.md)、[桌面分屏](SPLIT-PANES.md) |
 | 输入 | [语音输入 v2：说完即发＋发送前校对](VOICE-INPUT-REFINE-SEND.md)（2026-10-06 设计板已评审；daemon 与协议实施中，手机端待实施；UI 交接与评审决定见 [Voice Refine Send v1](claude-design-handoff/voice-refine-send-v1/README.md)）、[语音输入 v1 技术方案](VOICE-INPUT.md)、[语音备忘总体方案](VOICE-MEMO-TO-TASK.md)、[代码设计](VOICE-MEMO-CODE-DESIGN.md)、[UI 交接](claude-design-handoff/voice-memo-tasks/README.md)（UI v2.1 已验收，旧 v1 稿不采用；实现状态以代码为准） |

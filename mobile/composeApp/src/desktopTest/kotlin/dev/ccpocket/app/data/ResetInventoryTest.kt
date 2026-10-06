@@ -230,7 +230,7 @@ class ResetInventoryTest {
             gatewayBaseUrl = "http://gw", bridgeControl = true, daemonVersion = "9.9.9", latestVersion = "9.9.10",
             supportedAgents = listOf("claude", "codex"), supportsUsageAgentFilter = true, supportsPromptRecovery = true,
             quotaAgents = listOf("claude", "codex"), supportsDiagnostics = true,
-            supportsManagedSessions = true, managedAgents = listOf("claude"),
+            supportsManagedSessions = true, managedAgents = listOf("claude"), supportsLeanHistory = true,
         ))
         r.receiveForTest(Directories(listOf(
             DirectoryEntry(path = "/inv/w", name = "w", isDir = true),
@@ -337,6 +337,7 @@ class ResetInventoryTest {
                 .forEach { put(it, "test seam / injected function") }
             listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply")
                 .forEach { put(it, "shell callback wiring, not state") }
+            put("leanHistory", "platform capability (which chat UI is running) / test seam, not session state")
             listOf("stableLinkResetMs", "presenceProbeMs", "managedCallTimeoutMs", "managedListPageTimeoutMs", "managedEnableTimeoutMs",
                 "managedLoadingMaxMs", "promptReceiptTimeoutMs", "promptTurnTimeoutMs", "firstPromptTimeoutMs", "sessionsOpenTimeoutMs")
                 .forEach { put(it, "test seam: timeout configuration") }
@@ -644,9 +645,15 @@ class ResetInventoryTest {
             historyHasMore               R R R R R R R R
             historyLoadingOlder          R R R R R R R R
             historyPageDeadline          R R R R R R R R
+            historyPageCooldown          R R R R R R R R
             historyPageAnchor            R R R R R R R R
             lastHistoryPrependCount      R R R R R R R R
             historyPrependGen            K K K K K K K K
+            historyWindowGen             K K K K K K K K  # a counter, like the row above
+            fullImages                   R R R R R R R R  # lean history: fetched full pictures go with the transcript they belong to
+            fullImageOrder               R R R R R R R R
+            fullImagePending             R R R R R R R R
+            fullImageUnavailable         R R R R R R R R
             promptRetry                  R R R R R R R R
             promptResendArmed            R R R R R R R R
             promptPending                R R R R R R R R
@@ -704,6 +711,7 @@ class ResetInventoryTest {
             daemonAgentsKnown            R R K K K K K K
             daemonUsageAgentFilter       R R K K K K K K
             daemonOwnsPromptRecovery     R R K K K K K K
+            daemonLeanHistory            R R K K K K K K  # a daemon capability: cleared with the binding, like the row above
             newTaskDraft                 K K K K K K K K
             newTaskDir                   K K K K K K K K
             newTaskAgent                 K K K K K K K K

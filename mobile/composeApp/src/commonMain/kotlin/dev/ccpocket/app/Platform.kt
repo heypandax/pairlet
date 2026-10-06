@@ -34,3 +34,12 @@ expect fun appUpdateRoute(): AppUpdateRoute
  * Enabled per-launch only (iOS: launch arg `-ccpPreview YES`); never affects normal users.
  */
 expect fun isPreviewMode(): Boolean
+
+/**
+ * Does this app's chat UI handle LEAN history (docs/design/SLOW-LINK-RESILIENCE.md §6) — page a window that
+ * does not fill the screen on its own, and fetch a picture's full version when a preview is opened? That is
+ * what `ClientCaps.supportsShortHistoryWindow` / `supportsImagePreviews` promise the daemon, so the answer has
+ * to come from the UI that renders the chat: the phone/tablet screens do both; the desktop's split columns do
+ * not page at all yet, so the desktop app keeps the full windows and full-size pictures.
+ */
+expect fun supportsLeanHistory(): Boolean

@@ -92,6 +92,9 @@ object TranscriptMerge {
                             preview = if (extendsEither(l.preview, rt.preview)) longer(l.preview, rt.preview) else l.preview,
                             ok = rt.ok ?: l.ok,
                             output = rt.output ?: l.output,
+                            // the live card keeps its own pictures; what only the replay knows is WHERE the row
+                            // sits in the transcript — the cursor a previewed picture is read back from
+                            seq = rt.seq ?: l.seq,
                         ),
                     )
                     li++; ri++
@@ -168,7 +171,7 @@ object TranscriptMerge {
      */
     private fun resolveUser(l: ChatItem.User, r: ChatItem.User): ChatItem.User =
         (
-            if (l.images.isEmpty()) l.copy(pending = false, images = r.images, imagesTruncated = r.imagesTruncated)
+            if (l.images.isEmpty()) l.copy(pending = false, images = r.images, imageRefs = r.imageRefs, imagesTruncated = r.imagesTruncated)
             else l.copy(pending = false)
             )
             // The LOCAL bubble wins everywhere else, but it can never have transcript coordinates of its
@@ -254,8 +257,14 @@ object TranscriptMerge {
         if (!userTextsMatch(local, replay)) return false
         if (local.text.isNotBlank() || local.files.isNotEmpty()) return true
         if (local.images.isEmpty() || replay.images.size != local.images.size) return false
-        return local.images.indices.all { local.images[it].contentEquals(replay.images[it]) }
+        return local.images.indices.all { sameImage(local.images[it], replay.images[it], replay.imageRefs.getOrNull(it)) }
     }
+
+    /** Is the replayed picture the one this bubble holds? Byte for byte when the replay carries the picture
+     *  itself; by its ref when the daemon sent a PREVIEW (lean history) — the ref is the identity of the full
+     *  picture's bytes, which is exactly what the bubble holds, so the proof is as strong as before. */
+    private fun sameImage(local: ByteArray, replay: ByteArray, replayRef: String?): Boolean =
+        if (replayRef != null) dev.ccpocket.protocol.ImageRefs.of(local) == replayRef else local.contentEquals(replay)
 
     private fun userTextsMatch(local: ChatItem.User, replay: ChatItem.User): Boolean =
         local.compactSummary == replay.compactSummary &&

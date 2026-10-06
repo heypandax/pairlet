@@ -203,6 +203,7 @@ class WsConnection(
                                 supportedAgents = DAEMON_SUPPORTED_AGENT_WIRES,
                                 supportsUsageAgentFilter = true, // issue #258: this build honors FetchUsage.agent
                                 supportsPromptRecovery = true,
+                                supportsLeanHistory = true, // SLOW-LINK-RESILIENCE §6: previews + byte-bounded history for declared connections
                                 supportsDiagnostics = true, // #122: acked prompts stay ledgered until agent consumption
                                 supportsProjectPins = true, // #362: this build owns the per-computer project-pin list
                                 // #360: managed session list, for the agents the router can actually serve
@@ -287,7 +288,7 @@ class WsConnection(
                 // relay allows. Shrink what can be shrunk (history windows, tool images, file bodies) to THIS
                 // connection's declared cap right before sealing — the writer is where the size is final. A heavy
                 // history window first ships its newest rows only (SLOW-LINK-RESILIENCE 3.3): routine, so info.
-                val bytes = FrameFitter.encodeWithin(env, caps.maxFrameBytes, onSoftTrim = { log.info("history soft cap: $it") }) {
+                val bytes = FrameFitter.encodeWithin(env, caps.maxFrameBytes, caps.lean(), onSoftTrim = { log.info("history window: $it") }) {
                     log.warn("frame cap: $it")
                 }
                 // the writer is the ONLY sealer — the GCM send counter advances strictly in order

@@ -1346,6 +1346,14 @@ class Conversation(
         to.emit(ConvoHistoryPage(convoId, slice.messages, firstSeq = slice.firstSeq, hasMore = slice.hasMore))
     }
 
+    /** The replayed rows that sit at transcript cursor [seq] — what a client saw on the row it is asking about
+     *  (lean history: reading a picture's full version back off the transcript). Empty when there is no
+     *  transcript yet, the backend does not page, or the read failed. */
+    fun historyRowsAt(seq: Long): List<dev.ccpocket.protocol.HistoryMessage> {
+        val sid = sessionId ?: openedResumeId ?: return emptyList()
+        return backend.replayPage(workdir.toString(), sid, seq + 1, ROWS_AT_CURSOR).messages.filter { it.seq == seq }
+    }
+
     /** Tell the phone which slash commands its composer can autocomplete (workdir-dependent). */
     private suspend fun emitCommands() {
         sink.emit(CommandList(convoId, SlashCommandScanner.scan(workdir, agent = backend.kind)))

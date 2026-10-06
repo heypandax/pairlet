@@ -1,6 +1,8 @@
 package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.disk.ReplayBudget
+import dev.ccpocket.daemon.media.ImagePreviews
+import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.ConvoHistoryPage
@@ -9,6 +11,7 @@ import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.HistoryMessage
+import dev.ccpocket.protocol.ImageContent
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.ToolEvent
@@ -35,7 +38,13 @@ import dev.ccpocket.protocol.ToolEvent
  *
  * Before any of that, a history window that FITS the client's cap but is heavy for a lossy link meets a soft
  * cap ([HISTORY_SOFT_CAP_BYTES]): it ships its newest rows only and leaves the oldest to paging. That step is
- * lossless by construction — see [softTrimHistory].
+ * lossless by construction — see [trimOldestRows].
+ *
+ * And before THAT, for a connection that declared it ([Lean]): pictures become tile-sized previews
+ * ([ImagePreviews]), and a history frame is bounded by a much smaller byte budget — the first screen, not the
+ * last hundred rows. Both are lossless too: the full picture and the older rows are one request away. This is
+ * the per-connection stage on purpose. A window is fanned out to every attached client, and only here is it
+ * known which of them asked for the lean shape.
  */
 object FrameFitter {
     /** Bytes the transport adds around the JSON: the Wire type byte, then E2ESession's 8-byte counter and 16-byte GCM tag. */
@@ -60,6 +69,34 @@ object FrameFitter {
 
     private const val MAX_PASSES = 8
 
+    /**
+     * The lean shape one connection asked for (`ClientCaps.supportsImagePreviews` /
+     * `supportsShortHistoryWindow`, docs/design/SLOW-LINK-RESILIENCE.md §6). [OFF] — every connection that
+     * declared nothing — leaves this fitter exactly as it was.
+     */
+    data class Lean(val imagePreviews: Boolean = false, val shortHistoryWindow: Boolean = false) {
+        companion object { val OFF = Lean() }
+    }
+
+    /**
+     * The byte budget of a FIRST history window for a connection that pages on its own: the first screen and a
+     * few screens of scroll-back, not the last hundred rows. Measured on the cross-border link this exists for,
+     * 73 KB took 2.3 s on a good moment and a 390 KB window never arrived at all; an ordinary row is ~0.7 KB and
+     * a picture preview 5–20 KB, so 32 KB is some thirty to forty rows. The rest pages in behind it.
+     */
+    const val LEAN_FIRST_WINDOW_BYTES = 32 * 1024
+
+    /** A reattach DELTA up to this size goes out whole — it is exactly the rows the client is missing. A
+     *  bigger one is a long absence: it becomes a first window ([LEAN_FIRST_WINDOW_BYTES]) the client swaps in. */
+    const val LEAN_DELTA_BYTES = 64 * 1024
+
+    /** One older-history page for such a connection: the rows nearest the window, the rest on the next page. */
+    const val LEAN_PAGE_BYTES = 64 * 1024
+
+    /** The fewest rows a lean frame keeps whatever they weigh: never an empty first screen, never a page that
+     *  makes no progress. The client fills a short window by paging, which is why this can be so low. */
+    const val LEAN_MIN_ROWS = 8
+
     /** Does a JSON body of [jsonBytes] bytes fit a client whose cap is [maxFrameBytes] once sealed? */
     fun fits(jsonBytes: Int, maxFrameBytes: Long): Boolean = jsonBytes + SEAL_OVERHEAD_BYTES + SLACK_BYTES <= maxFrameBytes
 
@@ -76,11 +113,16 @@ object FrameFitter {
     fun encodeWithin(
         env: Envelope,
         maxFrameBytes: Long,
+        lean: Lean = Lean.OFF,
         onSoftTrim: (String) -> Unit = {},
         onOversize: (String) -> Unit = {},
     ): ByteArray {
-        val plain = encode(env)
-        val (sending, bytes) = softTrimHistory(env, plain, onSoftTrim) ?: (env to plain)
+        // previews first: every budget below should measure the frame as it will actually travel
+        val shaped = if (lean.imagePreviews) withPreviews(env) else env
+        val plain = encode(shaped)
+        val (sending, bytes) = (if (lean.shortHistoryWindow) leanTrimHistory(shaped, plain, onSoftTrim) else null)
+            ?: softTrimHistory(shaped, plain, onSoftTrim)
+            ?: (shaped to plain)
         if (fits(bytes.size, maxFrameBytes)) return bytes
         val type = sending.body::class.simpleName
         val shrunk = shrink(sending, maxFrameBytes)
@@ -97,29 +139,100 @@ object FrameFitter {
     }
 
     /**
+     * [env] with its pictures as previews ([ImagePreviews]) — history rows and a live tool result alike. A
+     * prompt attachment gets the larger preview (its bubble shows it bigger); everything else is a tool result.
+     * The same envelope comes back when there is nothing to change, which is nearly always.
+     */
+    private fun withPreviews(env: Envelope): Envelope {
+        fun rows(convoId: String, rows: List<HistoryMessage>): List<HistoryMessage>? {
+            if (rows.none { it.images.isNotEmpty() }) return null
+            var changed = false
+            val out = rows.map { row ->
+                if (row.images.isEmpty()) return@map row
+                val edge = if (row.role == ChatRole.USER) ImagePreviews.USER_EDGE else ImagePreviews.TOOL_EDGE
+                val images = ImagePreviews.shape(convoId, row.images, edge)
+                if (images === row.images) row else { changed = true; row.copy(images = images) }
+            }
+            return if (changed) out else null
+        }
+        return when (val body = env.body) {
+            is ConvoHistory -> rows(body.convoId, body.messages)?.let { env.copy(body = body.copy(messages = it)) } ?: env
+            is ConvoHistoryPage -> rows(body.convoId, body.messages)?.let { env.copy(body = body.copy(messages = it)) } ?: env
+            is ToolEvent -> {
+                val images = ImagePreviews.shape(body.convoId, body.images, ImagePreviews.TOOL_EDGE)
+                if (images === body.images) env else env.copy(body = body.copy(images = images))
+            }
+            else -> env
+        }
+    }
+
+    /**
+     * The lean budget (docs/design/SLOW-LINK-RESILIENCE.md §6) for a connection that pages a short window on
+     * its own: a first window over [LEAN_FIRST_WINDOW_BYTES], a delta over [LEAN_DELTA_BYTES] (which then
+     * becomes a first window) or an older page over [LEAN_PAGE_BYTES] keeps its newest rows only. Same lossless
+     * cut as the soft cap — see [trimOldestRows]. Null = nothing trimmed.
+     */
+    private fun leanTrimHistory(env: Envelope, encoded: ByteArray, onTrim: (String) -> Unit): Pair<Envelope, ByteArray>? {
+        val (trigger, target) = when (val body = env.body) {
+            is ConvoHistory -> if (body.delta) LEAN_DELTA_BYTES to LEAN_FIRST_WINDOW_BYTES else LEAN_FIRST_WINDOW_BYTES to LEAN_FIRST_WINDOW_BYTES
+            is ConvoHistoryPage -> LEAN_PAGE_BYTES to LEAN_PAGE_BYTES
+            else -> return null
+        }
+        if (encoded.size <= trigger) return null
+        return trimOldestRows(env, encoded, target, LEAN_MIN_ROWS, skipUnanchored = true, label = "lean history budget", onTrim = onTrim)
+    }
+
+    /**
      * The soft cap (SLOW-LINK-RESILIENCE 3.3) on a [ConvoHistory] (first window or delta) or [ConvoHistoryPage]
-     * whose [encoded] form is over [HISTORY_SOFT_CAP_BYTES]. It allows only the one loss that is fully
-     * recoverable: whole rows from the OLDEST end, until the frame is back under the cap or [HISTORY_SOFT_MIN_ROWS]
-     * remain, anchored as [fitRows] anchors a window that lost rows — `firstSeq` on the first kept row, `hasMore`,
-     * and a delta becomes a full window (a continuation missing its oldest rows would leave a hole the phone cannot
-     * see) — so the phone pages the dropped rows back in. It never touches what is ON a row: shedding pictures and
-     * sub-agent reports ([ReplayBudget.fit]) stays the hard cap's last resort. A window still over the soft cap at
-     * the row floor goes on to the hard-cap check like any other frame.
-     *
-     * Left whole when the first row it would keep carries no cursor (a backend that does not page): there is
-     * nothing to anchor on, so nothing could page the dropped rows back. Unlike [fitRows], which must make the
-     * frame fit and so drops such leading rows too, this step is optional and simply stands down. Null = nothing
-     * trimmed, send [encoded] as it is.
+     * whose [encoded] form is over [HISTORY_SOFT_CAP_BYTES] — for every connection, lean or not. See
+     * [trimOldestRows] for the cut. Left whole when the first row it would keep carries no cursor (a backend
+     * that does not page): unlike [fitRows], which must make the frame fit and so drops such leading rows too,
+     * this step is optional and simply stands down.
      */
     private fun softTrimHistory(env: Envelope, encoded: ByteArray, onSoftTrim: (String) -> Unit): Pair<Envelope, ByteArray>? {
         if (encoded.size <= HISTORY_SOFT_CAP_BYTES) return null
+        return trimOldestRows(env, encoded, HISTORY_SOFT_CAP_BYTES.toInt(), HISTORY_SOFT_MIN_ROWS, skipUnanchored = false,
+            label = "history soft cap", onTrim = onSoftTrim)
+    }
+
+    /**
+     * Bring a history frame under [capBytes] by the one loss that is fully recoverable: whole rows from the
+     * OLDEST end, until the frame is under the cap or [minRows] remain, anchored as [fitRows] anchors a window
+     * that lost rows — `firstSeq` on the first kept row, `hasMore`, and a delta becomes a full window (a
+     * continuation missing its oldest rows would leave a hole the phone cannot see) — so the phone pages the
+     * dropped rows back in. It never touches what is ON a row: shedding pictures and sub-agent reports
+     * ([ReplayBudget.fit]) stays the hard cap's last resort. A frame still over the cap at the row floor goes
+     * on to the next check like any other.
+     *
+     * Two things keep the cut lossless:
+     *  - it never falls INSIDE one source line. Paging answers rows strictly before `firstSeq`, so a window that
+     *    began on the second row of a line would orphan the first (an assistant line can yield several rows,
+     *    all with the same cursor). The cut moves to the older edge of that line — one row group heavier than
+     *    the cap asked for, never lighter than the floor.
+     *  - the first kept row must carry a cursor, or nothing could page the dropped rows back. With
+     *    [skipUnanchored] the cut moves past leading rows that have none (a compact summary — it is on the older
+     *    page too, by its line) while that keeps the floor; without it, or when no row has a cursor at all (a
+     *    backend that does not page), the frame is left whole.
+     *
+     * Null = nothing trimmed, send [encoded] as it is.
+     */
+    private fun trimOldestRows(
+        env: Envelope,
+        encoded: ByteArray,
+        capBytes: Int,
+        minRows: Int,
+        skipUnanchored: Boolean,
+        label: String,
+        onTrim: (String) -> Unit,
+    ): Pair<Envelope, ByteArray>? {
+        if (encoded.size <= capBytes) return null
         val body = env.body
         val rows = when (body) {
             is ConvoHistory -> body.messages
             is ConvoHistoryPage -> body.messages
             else -> return null
         }
-        if (rows.size <= HISTORY_SOFT_MIN_ROWS) return null
+        if (rows.size <= minRows) return null
         fun trimmedFrom(cut: Int): Envelope {
             val kept = rows.drop(cut)
             val anchor = kept.first().seq
@@ -131,36 +244,47 @@ object FrameFitter {
                 },
             )
         }
+        val maxCut = rows.size - minRows
         // Dropping the oldest row takes exactly its own encoding plus one separator out of the frame, so the cut
         // is found from per-row sizes rather than by re-encoding the whole window once per dropped row (a heavy
         // window has hundreds of rows) …
         var cut = 0
         var estimate = encoded.size.toLong()
-        while (estimate > HISTORY_SOFT_CAP_BYTES && rows.size - cut > HISTORY_SOFT_MIN_ROWS) {
+        while (estimate > capBytes && cut < maxCut) {
             estimate -= encodedRowBytes(rows[cut]) + 1
             cut++
         }
         // … and the re-anchored metadata (firstSeq, hasMore, delta), which moves the size by a few bytes either
         // way, is settled on the real encoding: the fewest rows dropped that bring the frame under the cap
-        var sending = trimmedFrom(cut)
-        var out = encode(sending)
-        while (out.size > HISTORY_SOFT_CAP_BYTES && rows.size - cut > HISTORY_SOFT_MIN_ROWS) {
+        var out = encode(trimmedFrom(cut))
+        while (out.size > capBytes && cut < maxCut) {
             cut++
-            sending = trimmedFrom(cut)
-            out = encode(sending)
+            out = encode(trimmedFrom(cut))
         }
         while (cut > 1) {
-            val fewer = trimmedFrom(cut - 1)
-            val fewerBytes = encode(fewer)
-            if (fewerBytes.size > HISTORY_SOFT_CAP_BYTES) break
+            val fewerBytes = encode(trimmedFrom(cut - 1))
+            if (fewerBytes.size > capBytes) break
             cut--
-            sending = fewer
             out = fewerBytes
         }
-        if (rows[cut].seq == null) return null
-        onSoftTrim(
-            "${body::class.simpleName}: ${rows.size} rows / ${encoded.size} B over the $HISTORY_SOFT_CAP_BYTES B history " +
-                "soft cap → ${rows.size - cut} rows / ${out.size} B, the oldest $cut left to paging",
+        // never inside one source line: back to that line's older edge
+        fun splitsLine(k: Int) = k in 1 until rows.size && rows[k].seq != null && rows[k].seq == rows[k - 1].seq
+        var aligned = cut
+        while (splitsLine(aligned)) aligned--
+        // a first kept row needs a cursor to page from
+        if (rows[aligned].seq == null) {
+            if (!skipUnanchored) return null
+            var next = aligned
+            while (next <= maxCut && rows[next].seq == null) next++
+            if (next > maxCut || splitsLine(next)) return null
+            aligned = next
+        }
+        if (aligned == 0) return null
+        if (aligned != cut) { cut = aligned; out = encode(trimmedFrom(cut)) }
+        val sending = trimmedFrom(cut)
+        onTrim(
+            "${body::class.simpleName}: ${rows.size} rows / ${encoded.size} B over the $capBytes B $label " +
+                "→ ${rows.size - cut} rows / ${out.size} B, the oldest $cut left to paging",
         )
         return sending to out
     }
@@ -209,6 +333,10 @@ object FrameFitter {
             body.copy(diff = SessionFilesService.clipLinesToJsonBytes(diff, room), truncated = true)
         }
         is Sessions -> fitSessions(env, maxFrameBytes, body)
+        // lean history: the full picture behind a preview. A prompt attachment is served as the transcript
+        // holds it (up to ReplayBudget.MAX_IMAGE_BASE64_BYTES), which a connection with a small declared cap
+        // cannot take — it keeps its preview and is told the picture is unavailable, rather than losing its link
+        is ImageContent -> body.image?.let { body.copy(image = null, error = ImageContent.ERROR_UNAVAILABLE) }
         else -> null
     }
 

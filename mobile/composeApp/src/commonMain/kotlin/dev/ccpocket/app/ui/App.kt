@@ -119,6 +119,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.TextUnit
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import dev.ccpocket.app.media.rememberFileAttacher
 import dev.ccpocket.app.media.rememberImageAttacher
@@ -167,7 +168,13 @@ import dev.ccpocket.app.SupportContext
 import dev.ccpocket.app.supportPlatformLabel
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ChatRow
+import dev.ccpocket.app.ui.chat.HISTORY_PAGE_RETRY_MS
+import dev.ccpocket.app.ui.chat.HistoryPageAsk
+import dev.ccpocket.app.ui.chat.SHORT_WINDOW_AUTO_PAGES
+import dev.ccpocket.app.ui.chat.SHORT_WINDOW_AUTO_PAGES_LEGACY
+import dev.ccpocket.app.ui.chat.ShortWindowPaging
 import dev.ccpocket.app.ui.chat.KeepChatReadingPosition
+import dev.ccpocket.app.ui.chat.wantsOlderHistory
 import dev.ccpocket.app.ui.chat.ProcessBlockHeader
 import dev.ccpocket.app.ui.chat.ProcessMemberSegment
 import dev.ccpocket.app.ui.chat.joinPreviousSegment
@@ -2635,7 +2642,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     val draftKey = repo.composerKey()
     val composer = remember(repo.composerEpoch.value) { ComposerState(repo.draftFor(draftKey)) }
     val input = composer.text // reads track the field; writes go through composer's explicit methods
-    var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
+    var viewer by remember { mutableStateOf<Pair<ChatImages, Int>?>(null) } // tapped images → full-screen
     var videoViewer by remember { mutableStateOf<dev.ccpocket.app.data.SentFile?>(null) } // tapped sent video → player (issue #98)
     var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer
     var showSessions by remember { mutableStateOf(false) } // stack chip → cross-project session switcher (issue #165)
@@ -2849,12 +2856,53 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     // again, paging the entire session in while the view fought to stay at the bottom (issue #165).
     // "Parked at the top" means: at index 0, and either the reader scrolled away from the bottom to get
     // there, or the window is too short to scroll at all (where there is no other way to ask).
-    LaunchedEffect(repo.convoId.value) {
+    //
+    // Lean history (SLOW-LINK-RESILIENCE §6) made the second case real: the daemon may open a session with
+    // only the newest rows that fit a byte budget, which can be less than a screenful. The old collector
+    // watched the position alone, and a list that cannot scroll never changes position — it reported "at the
+    // top" once, before the transcript had even arrived, and never again. So the decision now also reads what
+    // it depends on ([wantsOlderHistory]), and is taken again after every page that lands: a window still too
+    // short keeps paging until it fills the screen, runs out of history, or spends its budget ([ShortWindowPaging]).
+    // Keyed on the window generation too: a full window that replaces this conversation's history (a reattach
+    // after a reconnect, a long-absence delta) is a new window with a new budget.
+    LaunchedEffect(repo.convoId.value, repo.historyWindowGen.value) {
+        // the budget for pages fetched because the list cannot scroll — per window on screen
+        val shortWindow = ShortWindowPaging()
         snapshotFlow {
-            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 &&
-                (!pinned || !listState.canScrollForward)
-        }.collect { atTop ->
-            if (atTop && landed && repo.historyHasMore.value) repo.loadOlderHistory()
+            val atTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+            if (atTop && !pinned) {
+                // The READER scrolled up here. Exactly the old rule, and deliberately nothing more in the value:
+                // rows streaming in or a page landing must not look like a new arrival at the top — the reader
+                // asks again by scrolling, as before.
+                HistoryPageAsk(wanted = landed && repo.historyHasMore.value, byReader = true, rows = 0, pageGen = 0)
+            } else {
+                val rows = toolProcess.presentation.rows.size
+                val more = repo.historyHasMore.value
+                HistoryPageAsk(
+                    wanted = wantsOlderHistory(
+                        parkedAtTop = atTop && pinned && !listState.canScrollForward, landed, more,
+                        // the loader row is an item too while there is more above: not counting it would let the
+                        // previous layout's item count pass for "the new rows are measured"
+                        laidOutItems = listState.layoutInfo.totalItemsCount - (if (more) 1 else 0), rows = rows,
+                    ),
+                    byReader = false, rows = rows,
+                    pageGen = repo.historyPrependGen.value, // a landed page is a new question even when the answer is unchanged
+                )
+            }
+        }.collectLatest { ask ->
+            if (!ask.wanted) return@collectLatest
+            // a reader at the top gets their page; a list too short to scroll pages within its budget (tool
+            // rows fold, so "until the screen is full" alone could walk the whole session in)
+            val autoPages = if (repo.daemonLeanHistory.value) SHORT_WINDOW_AUTO_PAGES else SHORT_WINDOW_AUTO_PAGES_LEGACY
+            if (!ask.byReader && !shortWindow.mayAsk(ask.pageGen, ask.rows, autoPages)) return@collectLatest
+            // Asked again only for THIS page, while it has not landed and the list is still parked here:
+            // collectLatest cancels the wait when anything above changes, and once a page lands the next one is
+            // a new decision (a new value for a short window; a new scroll for a reader), never this loop's.
+            val landedPages = repo.historyPrependGen.value
+            while (repo.historyPrependGen.value == landedPages) {
+                repo.loadOlderHistory()
+                delay(HISTORY_PAGE_RETRY_MS)
+            }
         }
     }
     // persist the composer draft per project (debounced) so leaving mid-message doesn't lose it
@@ -3539,7 +3587,24 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 }
             }
         }
-        viewer?.let { (imgs, idx) -> ImageViewer(imgs, idx) { viewer = null } }
+        viewer?.let { (set, idx) ->
+            // lean history: a row's pictures may be previews. Each page shows the full version once the
+            // repository holds it, and the page in view asks for it — reading the two state maps here is what
+            // swaps the picture in place when the reply lands.
+            ImageViewer(
+                images = set.images.mapIndexed { i, preview -> set.refAt(i)?.let { repo.fullImages[it] } ?: preview },
+                startIndex = idx,
+                pictureAt = { i ->
+                    val ref = set.refAt(i)
+                    when {
+                        ref == null || ref in repo.fullImages -> ViewerPicture.FULL
+                        repo.fullImageUnavailable[ref] == true -> ViewerPicture.UNAVAILABLE
+                        else -> ViewerPicture.LOADING
+                    }
+                },
+                onPageShown = { i -> set.refAt(i)?.let { repo.requestFullImage(it, set.seq, i) } },
+            ) { viewer = null }
+        }
         videoViewer?.let { VideoPlayerOverlay(it) { videoViewer = null } } // issue #98
         if (repo.micPermissionSheet.value) {
             MicPermissionSheet(
@@ -3807,7 +3872,7 @@ private fun MessageItem(
     // band's own tool chip already names its call and repeating the label between bands only cost air
     toolSourceLabeled: Boolean = true,
     onOpenWorkflow: (String) -> Unit = {},
-    onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
+    onOpenImages: (ChatImages, Int) -> Unit = { _, _ -> },
     onOpenVideo: (dev.ccpocket.app.data.SentFile) -> Unit = {},
     onTightenAutoRun: (ChatItem.AutoRun) -> Unit = {},
     // long-press on a USER turn opens the rewind/fork menu (issue #282). Null = no entry at all: the
@@ -3868,7 +3933,7 @@ private fun MessageItem(
                     // the replay carries them now); imagesTruncated still renders with no tiles at all,
                     // because an image-ONLY prompt the budget shed would otherwise read as an empty turn
                     if (m.images.isNotEmpty() || m.imagesTruncated) {
-                        SentImages(m.images, m.imagesTruncated) { i -> onOpenImages(m.images, i) }
+                        SentImages(m.images, m.imagesTruncated) { i -> onOpenImages(ChatImages(m.images, m.imageRefs, m.seq), i) }
                     }
                     // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
                     // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
@@ -3954,7 +4019,7 @@ private fun MessageItem(
                     footerSlot = if (m.images.isEmpty() && !m.imagesTruncated) {
                         null
                     } else {
-                        ({ ToolResultImages(m.images, m.imagesTruncated) { i -> onOpenImages(m.images, i) } })
+                        ({ ToolResultImages(m.images, m.imagesTruncated) { i -> onOpenImages(ChatImages(m.images, m.imageRefs, m.seq), i) } })
                     },
                 )
             }

@@ -209,6 +209,7 @@ class ChatTranscript {
                         // absent images never ERASE what the card already had: a sub-agent's RESULT and
                         // an image-bearing RESULT are different frames, and only one of them speaks here
                         images = f.images.takeIf { it.isNotEmpty() }?.let(::decodeImages) ?: card.images,
+                        imageRefs = if (f.images.isNotEmpty()) decodeImageRefs(f.images) else card.imageRefs,
                     )
                 }
             }
@@ -359,6 +360,17 @@ class ChatTranscript {
 internal fun decodeImages(images: List<dev.ccpocket.protocol.ImageData>): List<ByteArray> =
     images.mapNotNull { runCatching { Base64.Default.decode(it.base64) }.getOrNull() }
 
+/**
+ * The preview refs that go with [decodeImages]' result, index for index (lean history): an image that failed
+ * to decode is dropped from both, so the two lists stay aligned. Empty when no image is a preview — the shape
+ * every row had before previews existed, so such rows compare equal to what they always were.
+ */
+@OptIn(ExperimentalEncodingApi::class)
+internal fun decodeImageRefs(images: List<dev.ccpocket.protocol.ImageData>): List<String?> {
+    if (images.none { it.ref != null }) return emptyList()
+    return images.mapNotNull { image -> runCatching { Base64.Default.decode(image.base64) }.getOrNull()?.let { image } }.map { it.ref }
+}
+
 /** One replayed history row as the stream item it should render as. Moved here with [ChatTranscript] so a
  *  split pane replays its backlog exactly the way the focused conversation does. */
 @OptIn(ExperimentalEncodingApi::class)
@@ -370,6 +382,7 @@ internal fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
     ChatRole.USER -> ChatItem.User(
         h.text,
         images = h.images.mapNotNull { runCatching { Base64.Default.decode(it.base64) }.getOrNull() },
+        imageRefs = decodeImageRefs(h.images),
         imagesTruncated = h.imagesTruncated,
         // rewind/fork anchor coordinates (issue #282) — carried verbatim, including their absence
         seq = if (h.compactSummary) null else h.seq,
@@ -403,5 +416,6 @@ internal fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
         ?: ChatItem.Tool(
             h.tool ?: "tool", h.text, ok = h.ok, output = h.output, workflowRunId = h.workflowRunId,
             images = decodeImages(h.images), imagesTruncated = h.imagesTruncated,
+            imageRefs = decodeImageRefs(h.images), seq = h.seq,
         )
 }
