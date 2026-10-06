@@ -119,6 +119,74 @@ class HistoryPagingTest {
         }
     }
 
+    private fun rows(from: Int, to: Int) = (from..to).map { HistoryMessage(ChatRole.USER, "row $it", seq = it.toLong()) }
+
+    @Test
+    fun aReducedFullWindowReconcilesTheOlderPageWithoutDuplicatingRetainedOrLiveRows() {
+        val r = repo()
+        r.receiveForTest(ConvoHistory("c1", rows(1, 10), firstSeq = 1, lastSeq = 10))
+        // Live rows have no on-disk coordinates yet. A large reattach delta is reduced to a full tail.
+        r.transcript.messages.addAll((11..20).map { ChatItem.User("row $it", promptId = "p$it", delivered = true) })
+        r.receiveForTest(ConvoHistory("c1", rows(15, 30), firstSeq = 15, lastSeq = 30, hasMore = true))
+        val pending = ChatItem.User("next prompt", pending = true, promptId = "pending")
+        val live = ChatItem.Assistant("still streaming after the window")
+        r.transcript.messages.addAll(listOf(live, pending))
+
+        r.loadOlderHistory()
+        r.receiveForTest(ConvoHistoryPage("c1", rows(1, 14), firstSeq = 1, hasMore = false))
+
+        assertEquals((1..30).map { "row $it" } + listOf(live.text, pending.text), texts(r))
+        val delivered = r.messages.filterIsInstance<ChatItem.User>().single { it.text == "row 12" }
+        assertEquals(12L, delivered.seq, "the page enriches the live row with its real coordinates")
+        assertEquals("p12", delivered.promptId, "delivery identity survives reconciliation")
+        assertTrue(r.messages[r.messages.lastIndex] === pending)
+        assertTrue(r.messages[r.messages.lastIndex - 1] === live)
+        assertEquals(0, r.lastHistoryPrependCount, "an overlapping page must not jump the viewport")
+        assertFalse(r.historyHasMore.value)
+    }
+
+    @Test
+    fun severalOlderPagesOnlyInsertRowsBeforeTheRetainedPrefix() {
+        val r = repo()
+        r.receiveForTest(ConvoHistory("c1", rows(10, 20), firstSeq = 10, lastSeq = 20, hasMore = true))
+        r.transcript.messages.addAll((21..30).map { ChatItem.User("row $it") })
+        r.receiveForTest(ConvoHistory("c1", rows(25, 40), firstSeq = 25, lastSeq = 40, hasMore = true))
+
+        r.loadOlderHistory()
+        r.receiveForTest(ConvoHistoryPage("c1", rows(18, 24), firstSeq = 18, hasMore = true))
+        assertEquals((10..40).map { "row $it" }, texts(r))
+        assertEquals(0, r.lastHistoryPrependCount)
+
+        r.loadOlderHistory()
+        r.receiveForTest(ConvoHistoryPage("c1", rows(1, 17), firstSeq = 1, hasMore = false))
+        assertEquals((1..40).map { "row $it" }, texts(r))
+        assertEquals(9, r.lastHistoryPrependCount, "only rows 1..9 were newly inserted")
+    }
+
+    @Test
+    fun olderPageNeverMatchesAnIdenticalPromptInsideTheCurrentWindow() {
+        val r = repo()
+        r.receiveForTest(ConvoHistory("c1", listOf(u("continue"), u("boundary")), firstSeq = 10, lastSeq = 20))
+        r.receiveForTest(ConvoHistory("c1", listOf(u("boundary"), u("continue")), firstSeq = 20, lastSeq = 30, hasMore = true))
+        r.loadOlderHistory()
+        r.receiveForTest(ConvoHistoryPage("c1", listOf(u("continue")), firstSeq = 10, hasMore = false))
+        assertEquals(listOf("continue", "boundary", "continue"), texts(r))
+        assertEquals(0, r.lastHistoryPrependCount)
+    }
+
+    @Test
+    fun clearDropsTheRetainedPrefixBeforeAnotherWindowPages() {
+        val r = repo()
+        r.receiveForTest(ConvoHistory("c1", rows(1, 20), firstSeq = 1, lastSeq = 20))
+        r.receiveForTest(ConvoHistory("c1", rows(15, 30), firstSeq = 15, lastSeq = 30, hasMore = true))
+        r.receiveForTest(ConvoHistory("c1", emptyList()))
+        r.receiveForTest(ConvoHistory("c1", rows(20, 25), firstSeq = 20, lastSeq = 25, hasMore = true))
+        r.loadOlderHistory()
+        r.receiveForTest(ConvoHistoryPage("c1", rows(10, 19), firstSeq = 10, hasMore = false))
+        assertEquals((10..25).map { "row $it" }, texts(r))
+        assertEquals(10, r.lastHistoryPrependCount)
+    }
+
     @Test
     fun aSlowPageLandingAfterTheDeadlineIsStillAcceptedAndPagingSurvives() {
         // the CONFIRMED bug (#147): on a slow cross-border link the page reply can take >10s; the reply
