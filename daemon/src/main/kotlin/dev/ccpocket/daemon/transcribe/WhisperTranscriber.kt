@@ -83,18 +83,8 @@ object WhisperTranscriber {
      */
     fun buildPrompt(workdir: Path?): String {
         if (workdir == null) return ""
-        val terms = LinkedHashSet<String>()
-        runCatching {
-            val head = workdir.resolve(".git/HEAD").readText().trim()
-            head.substringAfter("ref: refs/heads/", "").takeIf { it.isNotBlank() }?.let { terms.add(it) }
-        }
-        runCatching {
-            workdir.listDirectoryEntries()
-                .map { it.name }
-                .filterNot { it.startsWith(".") }
-                .sorted()
-                .forEach { terms.add(it) }
-        }
+        // branch + top-level names, shared with the transcript refiner's glossary
+        val terms = LinkedHashSet(ProjectTerms.of(workdir))
         SEED_TERMS.forEach { terms.add(it) }
         // the "一律…不音译" instruction plus a spoken-style exemplar is load-bearing: without it whisper
         // writes embedded English as Chinese loanwords (spoken "hello hello" → 「哈喽哈喽」, verified)

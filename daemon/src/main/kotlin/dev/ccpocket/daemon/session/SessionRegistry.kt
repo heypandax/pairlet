@@ -1349,6 +1349,9 @@ class SessionRegistry(
     /** Workdir of a live conversation — used by voice transcription for term injection. */
     suspend fun workdirOf(convoId: String): Path? = get(convoId)?.workdir
 
+    /** The agent backend driving a live conversation — dictation's refiner follows it (voice input v2). */
+    suspend fun agentOf(convoId: String): AgentKind? = get(convoId)?.kind
+
     /** The conversation's current permission mode — the authoritative input to the shell approval gate (issue #3). */
     suspend fun modeOf(convoId: String): PermissionMode? = get(convoId)?.currentMode()
 

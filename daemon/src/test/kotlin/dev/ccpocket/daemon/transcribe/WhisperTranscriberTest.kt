@@ -77,6 +77,27 @@ class WhisperTranscriberTest {
         ) // project terms collapse to just the seeds; no crash, no hash leaked
     }
 
+    // ── project terms (shared with the refiner's glossary) ─────────
+
+    @Test
+    fun projectTerms_are_branch_then_sorted_visible_toplevel_names() {
+        val wd = tmp().resolve("cc-pocket").createDirectories()
+        wd.resolve(".git").createDirectories()
+        wd.resolve(".git/HEAD").writeText("ref: refs/heads/feat-voice\n")
+        wd.resolve("daemon").createDirectories()
+        wd.resolve("README.md").writeText("x")
+        wd.resolve(".env").writeText("x")
+        assertEquals(listOf("feat-voice", "README.md", "daemon"), ProjectTerms.of(wd))
+    }
+
+    @Test
+    fun projectTerms_never_throw_on_a_missing_or_repo_less_dir() {
+        assertEquals(emptyList(), ProjectTerms.of(tmp().resolve("absent")))
+        val wd = tmp().resolve("plain").createDirectories()
+        wd.resolve("src").createDirectories()
+        assertEquals(listOf("src"), ProjectTerms.of(wd))
+    }
+
     // ── transcript cleanup ──────────────────────────────────────
 
     @Test

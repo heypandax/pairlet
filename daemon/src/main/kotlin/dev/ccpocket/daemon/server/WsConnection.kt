@@ -215,6 +215,9 @@ class WsConnection(
                                 // router owns the answer because it owns the readers; absent (an older
                                 // daemon) decodes to empty = "Claude only, legacy behaviour".
                                 quotaAgents = router.quotaAgentWires(),
+                                // voice input v2: the agents whose transcript refiner can launch here — same source
+                                // as the relay copy (DeviceSessions)
+                                transcriptRefineAgents = router.transcriptRefineAgentWires(),
                             ).withVoiceMemo(router.voiceMemoCapability()),
                         ),
                     )
@@ -353,8 +356,14 @@ class WsConnection(
                     // voice memo → tasks: in receive order as well, like the relay's inline route — a start must be
                     // registered before its first chunk, or that chunk is answered "unknown job", dropped, and the
                     // upload then waits out its idle timeout holding the device's only slot.
+                    // voice input v2: a transcript refine likewise — it only registers the run (the model runs on the
+                    // service's scope), so once this returns, the AudioCancel that withdraws it (read later, dispatched
+                    // below) cannot overtake it and leave a model running for nobody. AudioCancel itself deliberately
+                    // stays on the concurrent path: inline, it could overtake its capture's own last AudioChunk (still
+                    // concurrent), miss the buffer and let a cancelled dictation be transcribed and answered.
                     if (env.body is dev.ccpocket.protocol.VoiceMemoStart || env.body is dev.ccpocket.protocol.VoiceMemoAudio ||
-                        env.body is dev.ccpocket.protocol.VoiceMemoGet || env.body is dev.ccpocket.protocol.VoiceMemoCancel
+                        env.body is dev.ccpocket.protocol.VoiceMemoGet || env.body is dev.ccpocket.protocol.VoiceMemoCancel ||
+                        env.body is dev.ccpocket.protocol.TranscriptRefine
                     ) {
                         try {
                             router.handle(env.body, sink, caps = caps, deviceId = gatedDeviceId)
@@ -391,7 +400,7 @@ class WsConnection(
             managed?.detach(sink)           // #360: …and for managed session list pushes
             caps.pinRetired = true          // …and a closed connection can never hold a pin subscription again
             caps.pinSubscriptionId = null
-            outbox.close()
+            retireOutbox(outbox)            // not bare close(): see retireOutbox (TRANSPORT-AUTO-REPATH-V1 4.6)
             writer.cancel()
             revokeWatch?.cancel()
             withContext(NonCancellable) {
@@ -407,4 +416,18 @@ class WsConnection(
         const val WRITE_TIMEOUT_MS = 10_000L // a healthy loopback/LAN write is instant; stalled this long = zombie
         const val HANDSHAKE_TIMEOUT_MS = 10_000L // hello + Noise on loopback/LAN is instant; a silent socket is a probe
     }
+}
+
+/**
+ * Ends a connection's outbox so NO fan-out sender can stay parked on it (#404, TRANSPORT-AUTO-REPATH-V1 4.6).
+ * close() alone fails only FUTURE sends: a sender already suspended on a full buffer keeps waiting for a receiver,
+ * and the writer that would have received is being cancelled — so the conversation emit that called it, and the
+ * turn behind it, would never finish. More LAN reconnects (idle re-path) make that window more frequent.
+ * Close first (later sends throw ClosedSendChannelException exactly as before and the fan-out's runCatching
+ * ignores them), then drain: each tryReceive pulls a parked sender's frame in and resumes that sender normally.
+ * Draining rather than cancel() keeps CancellationException out of emitters running in other scopes.
+ */
+internal fun retireOutbox(outbox: kotlinx.coroutines.channels.Channel<*>) {
+    outbox.close()
+    while (outbox.tryReceive().isSuccess) Unit
 }

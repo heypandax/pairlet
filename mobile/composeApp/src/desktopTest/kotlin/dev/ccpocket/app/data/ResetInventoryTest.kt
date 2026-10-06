@@ -332,7 +332,8 @@ class ResetInventoryTest {
             listOf("scope", "pinnedTo", "projectPinRegistry", "relay", "directE2E")
                 .forEach { put(it, "constructor dependency / transport instance") }
             listOf("directLinkUp", "pushDial", "registrarOverride", "linkHealthOverride", "downlinkFramesOverride", "onSendForTest",
-                "pinWriterForTest", "memoWriterForTest", "memoStoreForTest", "redeemForTest", "dialForTest", "voiceUploadForTest")
+                "pinWriterForTest", "memoWriterForTest", "memoStoreForTest", "redeemForTest", "dialForTest", "voiceUploadForTest",
+                "directConnectForTest", "networkSnapshotProvider", "sameMachineClient", "tcpProbeForTest", "repathEnabledOverride")
                 .forEach { put(it, "test seam / injected function") }
             listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply")
                 .forEach { put(it, "shell callback wiring, not state") }
@@ -343,6 +344,8 @@ class ResetInventoryTest {
             listOf("appLock\$delegate", "recorder\$delegate", "memo\$delegate").forEach { put(it, "lazy platform service") }
             listOf("pinLink", "memoHost", "approvalOutcomes", "promptOutcomes", "backgroundOutcomes", "fileChunks")
                 .forEach { put(it, "owned helper; its internal state is outside S0 (modules join the inventory from S1)") }
+            listOf("repath")
+                .forEach { put(it, "owned helper (#404); disconnect() calls its reset(), which voids every timer and pending evaluation") }
             listOf("claudeQuota")
                 .forEach { put(it, "derived view over the CLAUDE slot of quotaByAgent") }
             EXPANDED.keys.forEach { put(it, "expanded: its fields are tabled under the '${EXPANDED.getValue(it)}.' prefix") }

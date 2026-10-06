@@ -12,6 +12,8 @@ enum class TelEvent(val id: String) {
     PromptResponseRecovered("prompt_response_recovered"),
     TurnResult("turn_result"),
     ConnectionRecoveryResult("connection_recovery_result"),
+    // #404 idle relay→direct re-path: Source = trigger, Result = outcome; both fixed enums, never an address
+    TransportRepath("transport_repath"),
     ApprovalApplyResult("approval_apply_result"),
     FileViewResult("file_view_result"),
     BackgroundTaskResult("background_task_result"),
