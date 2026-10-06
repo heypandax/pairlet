@@ -39,9 +39,10 @@ class TranscriptRefineServiceTest {
 
     private val claude = FakeTranscriptRefiner()
     @Volatile private var sessionAgent: AgentKind? = AgentKind.CLAUDE
+    @Volatile private var glossary: List<String> = GLOSSARY
 
     private fun TestScope.service(refiners: TranscriptRefiners = TranscriptRefiners(listOf(claude))) =
-        TranscriptRefineService(backgroundScope, refiners, agentOf = { sessionAgent }, glossaryOf = { GLOSSARY })
+        TranscriptRefineService(backgroundScope, refiners, agentOf = { sessionAgent }, glossaryOf = { glossary })
 
     private fun req(text: String = TEXT, capture: String = "cap-1", hint: String? = null, convo: String = "c-1") =
         TranscriptRefine(convo, capture, text, locale = "zh-Hans", agentHint = hint)
@@ -65,6 +66,34 @@ class TranscriptRefineServiceTest {
         assertEquals(GLOSSARY, claude.lastGlossary)
         assertEquals(TranscriptRefineService.HARD_TIMEOUT_MS, claude.lastTimeoutMs)
         assertFalse(s.isRefining())
+        // "Claude Code" and "effort" are not in this conversation's glossary: applied, but for the composer
+        assertFalse(r.autoSend)
+    }
+
+    @Test
+    fun the_validator_checks_against_the_glossary_the_refiner_was_handed() = runTest {
+        glossary = GLOSSARY + listOf("Claude Code", "effort")
+        val s = service(); val inbox = Inbox()
+        s.onRefine(req(), inbox)
+        runCurrent()
+        val r = inbox.only()
+        assertEquals(glossary, claude.lastGlossary)
+        assertEquals(CORRECTED, r.text)
+        assertTrue(r.autoSend)
+    }
+
+    @Test
+    fun a_hard_blocked_edit_is_dropped_and_the_rest_applied_without_auto_send() = runTest {
+        glossary = GLOSSARY + listOf("Claude Code", "effort")
+        claude.behavior = { RefineOutcome.Edits(EDITS + TextEdit("有没有", "有")) } // removes a negation
+        val s = service(); val inbox = Inbox()
+        s.onRefine(req(), inbox)
+        runCurrent()
+        val r = inbox.only()
+        assertTrue(r.ok)
+        assertEquals(CORRECTED, r.text)
+        assertEquals(EDITS, r.edits)
+        assertFalse(r.autoSend)
     }
 
     @Test
@@ -77,6 +106,7 @@ class TranscriptRefineServiceTest {
         assertTrue(r.ok)
         assertEquals(TEXT, r.text)
         assertTrue(r.edits.isEmpty())
+        assertTrue(r.autoSend)
     }
 
     @Test
@@ -287,6 +317,7 @@ class TranscriptRefineServiceTest {
         assertTrue(r.ok)
         assertEquals("  ", r.text)
         assertTrue(r.edits.isEmpty())
+        assertTrue(r.autoSend)
         assertEquals(0, claude.calls.get())
     }
 
@@ -325,6 +356,7 @@ class TranscriptRefineServiceTest {
             assertTrue(log.contains(code), "missing '$code' in:\n$log")
         }
         assertTrue(log.contains("agent=claude") && log.contains("edits=2"))
+        assertTrue(log.contains("applied=2 dropped=0 autoSend=false"), "missing the refine counts in:\n$log")
         for (secret in listOf("cloud code", "Claude Code", "守护进程", "用功", "effort", "不存在的片段", "替换")) {
             assertFalse(log.contains(secret), "the log leaked '$secret'")
         }

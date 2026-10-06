@@ -145,11 +145,13 @@ class TranscriptRefineService(
             ?: return failure(f, TranscriptRefineError.UNAVAILABLE, null)
         run.agent = refiner.agent
         // nothing to correct, and nothing for a model to answer
-        if (f.text.isBlank()) return TranscriptRefined(f.convoId, f.captureId, ok = true, text = f.text, agent = refiner.agent.wireName())
+        if (f.text.isBlank()) return TranscriptRefined(f.convoId, f.captureId, ok = true, text = f.text, agent = refiner.agent.wireName(), autoSend = true)
         // the hard limit covers the glossary read too: it walks the project on disk, and a slow disk must not stretch
         // the phone's wait past the 12 s either
+        // the validator's glossary rule checks against the same list the refiner was handed
+        var glossary = emptyList<String>()
         val outcome = withTimeoutOrNull(hardTimeoutMs) {
-            val glossary = try {
+            glossary = try {
                 glossaryOf(f.convoId)
             } catch (e: CancellationException) {
                 throw e
@@ -159,10 +161,17 @@ class TranscriptRefineService(
             refiner.refine(f.text, f.locale, glossary, hardTimeoutMs)
         } ?: RefineOutcome.TimedOut
         return when (outcome) {
-            is RefineOutcome.Edits -> when (val checked = TranscriptEditValidator.check(f.text, outcome.edits)) {
-                is TranscriptEditValidator.Result.Accepted -> TranscriptRefined(
-                    f.convoId, f.captureId, ok = true, text = checked.text, edits = checked.edits, agent = refiner.agent.wireName(),
-                )
+            is RefineOutcome.Edits -> when (val checked = TranscriptEditValidator.check(f.text, outcome.edits, glossary)) {
+                is TranscriptEditValidator.Result.Accepted -> {
+                    log.info(
+                        "${f.convoId} refine edits applied=${checked.edits.size} " +
+                            "dropped=${outcome.edits.size - checked.edits.size} autoSend=${checked.autoSend}",
+                    )
+                    TranscriptRefined(
+                        f.convoId, f.captureId, ok = true, text = checked.text, edits = checked.edits,
+                        agent = refiner.agent.wireName(), autoSend = checked.autoSend,
+                    )
+                }
                 is TranscriptEditValidator.Result.Rejected -> {
                     log.info("${f.convoId} refine edits rejected rule=${checked.rule} proposed=${outcome.edits.size}")
                     failure(f, TranscriptRefineError.INVALID, refiner.agent)
