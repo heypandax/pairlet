@@ -79,6 +79,19 @@ class RelayE2EConnection {
     val deaf = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private var nextId = 0L
 
+    // #298 silence watchdog. Lives on the connection object, not in connect(): its strikes and the time of the
+    // last trip must survive the very reconnects it causes (SLOW-LINK-RESILIENCE 3.1); each handshaken link
+    // keeps its own age, silence clock and send count
+    private val silenceWatch = SilenceWatchdog()
+
+    /** Transport frames decrypted on this object's connections, ever: only grows, never reset by a reconnect.
+     *  Two readings bracket a wait — unchanged means NOTHING came down the link in between, which the repo's
+     *  open deadline tells apart from "the daemon answered other requests, just not this one"
+     *  (SLOW-LINK-RESILIENCE 3.2). Written by the reader; two overlapping readers (#142) can lose an
+     *  increment, never leave the value unchanged across a decrypt. */
+    @Volatile var inboundFrames: Long = 0L
+        private set
+
     /** Stable identity for control frames retained across reconnects. */
     private data class ControlTarget(val relay: String, val accountId: String, val deviceId: String) {
         constructor(paired: PairedDaemon) : this(paired.relay, paired.accountId, paired.deviceId)
@@ -180,10 +193,21 @@ class RelayE2EConnection {
                 // pre-handshake on its side and NOTHING comes back — zero inbound means the decrypt-failure
                 // counter below never moves, and the link zombies until the process dies (observed: 28 min on
                 // desktop, would be a full outage on a relay-only phone). Sends with no inbound for too long
-                // trip the SAME [deaf] recovery. Benignly racy across the writer/reader coroutines: an off-by-
-                // one send count or a late reset costs at most one extra (cheap, invisible) re-handshake.
-                var sentSinceInbound = 0
-                var lastInboundAt = epochMillis() // the completed handshake IS inbound proof
+                // trip the SAME [deaf] recovery.
+                //
+                // "Too long" is judged on evidence (SLOW-LINK-RESILIENCE 3.1), because on a lossy link silence
+                // is also what a big frame in flight looks like: frames arrive in order, everything behind it
+                // waits, and a rebuild throws its reply away only to ask for it again. Two clocks widen the
+                // 20s base window, which a link long past its handshake keeps — that quiet is the zombie shape.
+                // A YOUNG link (its silence began under a minute after the handshake) gets twice the window: the
+                // completed handshake itself proves the daemon holds our session, and a zombie needs the daemon
+                // to lose it AGAIN after that — rare — while a big first reply stuck on a lossy link is routine.
+                // ("Has this link decrypted anything yet" cannot tell the two apart: the daemon seals a
+                // DaemonInfo right after every handshake, so every link hears back within a round trip.) And
+                // every silence rebuild doubles the next window, up to a ceiling, until five minutes pass
+                // without one: strikes outlive reconnects and are NOT forgiven by a decrypt, for the same
+                // DaemonInfo reason. Benignly racy across the writer/reader coroutines (see SilenceWatchdog).
+                val silence = silenceWatch.linkUp(epochMillis(), to = paired.accountId) { gen == connSeq } // the completed handshake IS inbound proof
                 liveGen = gen
                 val writer = launch {
                     // superseded mid-drain: an ordinary frame goes back to the live connection instead of down this
@@ -191,12 +215,9 @@ class RelayE2EConnection {
                     outbox.runWriter(gen, isCurrent = { gen == connSeq }) { f ->
                         val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
                         sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
-                        if (silenceDeafTripped(++sentSinceInbound, epochMillis() - lastInboundAt)) {
-                            sentSinceInbound = 0 // signal once, then let the forced re-handshake take over
-                            // gen recheck (review, Low): sendOrDie can stall ~10s, long enough for a #142
-                            // supersede — a dying writer must not tear down its healthy successor
-                            if (gen == connSeq) deaf.emit(Unit)
-                        }
+                        // signals once per trip; the link's own gen recheck (review, Low) keeps a dying writer from
+                        // tearing down — or charging a strike to — its healthy successor
+                        if (silence.onSent(epochMillis())) deaf.emit(Unit)
                     }
                 }
                 // Heartbeat (see LinkHealth.launchHeartbeat): an idle-link WS ping under sendOrDie, so a wedged socket
@@ -218,9 +239,10 @@ class RelayE2EConnection {
                                     continue
                                 }
                                 deafRun = 0 // a good decrypt proves the link is not deaf
-                                // …and disarms the silence watchdog: the daemon demonstrably holds our session
-                                sentSinceInbound = 0
-                                lastInboundAt = epochMillis()
+                                // …and restarts the silence watchdog's clock: the daemon demonstrably holds our
+                                // session. Strikes stay — they only age out (SLOW-LINK-RESILIENCE 3.1)
+                                silence.onInbound(epochMillis())
+                                inboundFrames++ // downlink evidence, counted before decode: an undecodable frame still arrived
                                 runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }
                                     .onFailure { Diagnostics.protocolDecodeFailed(it, pt.size.toLong()) }.getOrNull()?.let { inbound.emit(it.body) }
                             }
@@ -372,15 +394,37 @@ class RelayE2EConnection {
         // while the daemon is legitimately quiet, a clock alone would trip on an idle background link that
         // sent nothing at all. Wide enough that a slow turn with no pushes never trips (the daemon acks
         // prompts and streams work product well inside 20s); narrow enough that a zombied link heals in
-        // roughly half a minute instead of "until the user kills the app".
+        // roughly half a minute instead of "until the user kills the app". 20s is the BASE window — the one a
+        // link long past its handshake gets; [silenceWindowMs] widens it on evidence, up to the ceiling.
         const val SILENCE_DEAF_MIN_SENDS = 3
         const val SILENCE_DEAF_WINDOW_MS = 20_000L
+        const val SILENCE_DEAF_MAX_WINDOW_MS = 160_000L
+
+        /** A link whose silence began less than this after its handshake is YOUNG and gets twice the window. */
+        const val SILENCE_YOUNG_LINK_MS = 60_000L
+
+        /** How long a silence trip is remembered: strikes clear only this long after the LAST trip — never on
+         *  downlink, which the daemon's post-handshake DaemonInfo guarantees on every rebuilt link. */
+        const val SILENCE_STRIKE_MEMORY_MS = 300_000L
+
+        // past this many doublings every window is the ceiling anyway; capping the exponent BEFORE shifting
+        // keeps a runaway strike count from wrapping (Long shl 64 is the value itself, shl 63 goes negative)
+        private const val SILENCE_MAX_DOUBLINGS = 16
 
         /** Pure (for tests): sealed sends with ZERO inbound transport decrypts for too long = the daemon
          *  no longer holds our session (it drops our frames pre-handshake and has nothing to say back).
-         *  The decrypt-failure counter can't see this — silence produces no failures (#298). */
-        fun silenceDeafTripped(sendsSinceInbound: Int, silenceMs: Long): Boolean =
-            sendsSinceInbound >= SILENCE_DEAF_MIN_SENDS && silenceMs >= SILENCE_DEAF_WINDOW_MS
+         *  The decrypt-failure counter can't see this — silence produces no failures (#298). [windowMs] is
+         *  how long "too long" is for this link right now ([silenceWindowMs]). */
+        fun silenceDeafTripped(sendsSinceInbound: Int, silenceMs: Long, windowMs: Long = SILENCE_DEAF_WINDOW_MS): Boolean =
+            sendsSinceInbound >= SILENCE_DEAF_MIN_SENDS && silenceMs >= windowMs
+
+        /** Pure (for tests): the silence window, `min(20s × 2^strikes × (linkAge < 60s ? 2 : 1), 160s)`
+         *  (SLOW-LINK-RESILIENCE 3.1). [strikes] = silence trips still remembered ([SILENCE_STRIKE_MEMORY_MS]),
+         *  across reconnects; [linkAgeMs] = how long after its handshake the link's current silence began. */
+        fun silenceWindowMs(strikes: Int, linkAgeMs: Long): Long {
+            val doublings = strikes.coerceIn(0, SILENCE_MAX_DOUBLINGS) + if (linkAgeMs < SILENCE_YOUNG_LINK_MS) 1 else 0
+            return minOf(SILENCE_DEAF_WINDOW_MS shl doublings, SILENCE_DEAF_MAX_WINDOW_MS)
+        }
     }
 }
 

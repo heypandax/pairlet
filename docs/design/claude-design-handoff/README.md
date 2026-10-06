@@ -22,7 +22,7 @@
 - [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md)：聊天快捷操作。
 - [Settings + Bridges UI 2.1](settings-bridges-ui-2.1/README.md)：设置与桥接修订。
 - [Defaults + Voice + Results UI 2.1](defaults-voice-results-ui-2.1/README.md)：默认值、语音与结果展示。
-- [Voice Refine Send v1](voice-refine-send-v1/README.md)：语音说完后的结束态——✓ 经校对后直接发送、前导控件转为文字放入输入框、等待与回退（2026-10-05 投递，待评审）。
+- [Voice Refine Send v1](voice-refine-send-v1/README.md)：语音说完后的结束态——✓ 经校对后直接发送、前导控件转为文字放入输入框、等待与回退（2026-10-05 投递，10-06 原型交付并评审；用前导控件区分「会发送」与「不会发送」两种录音条，实施中）。
 
 ## 按主题查询
 
@@ -47,7 +47,7 @@
 | `new-session-from-chat-v1` | [New Session From Chat v1 — 会话界面里的新建会话入口](new-session-from-chat-v1/README.md)（已实现，待合入） |
 | `chat-quick-actions-ui-2.0` | [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md) |
 | `context-statusline` | [上下文占用指示器入驻 composer 设计交付](context-statusline/README.md) |
-| `voice-refine-send-v1` | [Voice Refine Send v1 — 语音说完即发与发送前校对](voice-refine-send-v1/README.md)（待评审） |
+| `voice-refine-send-v1` | [Voice Refine Send v1 — 语音说完即发与发送前校对](voice-refine-send-v1/README.md)（已评审，实施中） |
 | `defaults-voice-results-ui-2.1` | [Defaults + Voice + Results UI 2.1 — Claude Design handoff](defaults-voice-results-ui-2.1/README.md) |
 | `desktop-chrome-redesign` | [Desktop Chrome Redesign——顶栏拆除＋侧栏直通窗顶（2026-09-02）](desktop-chrome-redesign/README.md) |
 | `embedded-terminal` | [内嵌终端（issue #153）设计交付](embedded-terminal/README.md) |

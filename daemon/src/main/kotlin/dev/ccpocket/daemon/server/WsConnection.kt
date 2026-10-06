@@ -285,8 +285,11 @@ class WsConnection(
                 }
                 // KTOR-6963: a shipped iOS build drops the whole link on any message over 1 MiB, whatever the
                 // relay allows. Shrink what can be shrunk (history windows, tool images, file bodies) to THIS
-                // connection's declared cap right before sealing — the writer is where the size is final.
-                val bytes = FrameFitter.encodeWithin(env, caps.maxFrameBytes) { log.warn("frame cap: $it") }
+                // connection's declared cap right before sealing — the writer is where the size is final. A heavy
+                // history window first ships its newest rows only (SLOW-LINK-RESILIENCE 3.3): routine, so info.
+                val bytes = FrameFitter.encodeWithin(env, caps.maxFrameBytes, onSoftTrim = { log.info("history soft cap: $it") }) {
+                    log.warn("frame cap: $it")
+                }
                 // the writer is the ONLY sealer — the GCM send counter advances strictly in order
                 val ws: WsFrame = WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, crypto.seal(bytes)))
                 // bounded write: on a zombie phone socket a send stalls forever (TCP buffer fills, no error),
@@ -396,7 +399,7 @@ class WsConnection(
             managed?.detach(sink)           // #360: …and for managed session list pushes
             caps.pinRetired = true          // …and a closed connection can never hold a pin subscription again
             caps.pinSubscriptionId = null
-            outbox.close()
+            retireOutbox(outbox)            // not bare close(): see retireOutbox (TRANSPORT-AUTO-REPATH-V1 4.6)
             writer.cancel()
             revokeWatch?.cancel()
             withContext(NonCancellable) {
@@ -412,4 +415,18 @@ class WsConnection(
         const val WRITE_TIMEOUT_MS = 10_000L // a healthy loopback/LAN write is instant; stalled this long = zombie
         const val HANDSHAKE_TIMEOUT_MS = 10_000L // hello + Noise on loopback/LAN is instant; a silent socket is a probe
     }
+}
+
+/**
+ * Ends a connection's outbox so NO fan-out sender can stay parked on it (#404, TRANSPORT-AUTO-REPATH-V1 4.6).
+ * close() alone fails only FUTURE sends: a sender already suspended on a full buffer keeps waiting for a receiver,
+ * and the writer that would have received is being cancelled — so the conversation emit that called it, and the
+ * turn behind it, would never finish. More LAN reconnects (idle re-path) make that window more frequent.
+ * Close first (later sends throw ClosedSendChannelException exactly as before and the fan-out's runCatching
+ * ignores them), then drain: each tryReceive pulls a parked sender's frame in and resumes that sender normally.
+ * Draining rather than cancel() keeps CancellationException out of emitters running in other scopes.
+ */
+internal fun retireOutbox(outbox: kotlinx.coroutines.channels.Channel<*>) {
+    outbox.close()
+    while (outbox.tryReceive().isSuccess) Unit
 }

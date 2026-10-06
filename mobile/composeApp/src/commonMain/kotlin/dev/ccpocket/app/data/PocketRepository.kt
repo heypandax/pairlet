@@ -24,9 +24,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.AppUpdateRoute
+import dev.ccpocket.app.appUpdateRoute
 import dev.ccpocket.app.update.VersionStatus
 import dev.ccpocket.app.net.DirectE2EConnection
 import dev.ccpocket.app.net.DirectUnreachableException
+import dev.ccpocket.app.net.DirectEligibility
+import dev.ccpocket.app.net.NetworkSnapshot
+import dev.ccpocket.app.net.directEligibility
+import dev.ccpocket.app.net.RepathController
+import dev.ccpocket.app.net.RepathTrigger
+import dev.ccpocket.app.net.tcpReachable
+import dev.ccpocket.app.net.localNetworkSnapshot
 import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.DeadLinkException
 import dev.ccpocket.app.net.DepositOutcome
@@ -329,6 +338,13 @@ internal const val SESSION_OPEN_TIMEOUT_MS = 8_000L
  *  admits it. */
 internal const val SESSION_OPEN_RETRY_TIMEOUT_MS = 4_000L
 
+/** What an open gets after its first deadline when the link claimed Ready but NOTHING has come down it since the
+ *  request went out (docs/design/SLOW-LINK-RESILIENCE.md 3.2): 8s + 12s = 20s in all, and no replay. On a link
+ *  that delivers in order the answer is then either still in flight behind a big frame — a replay would only
+ *  queue behind the same frame and make the daemon read and send the same window again — or it was swallowed by
+ *  a zombie link, which swallows a replay just the same and which the silence watchdog rebuilds on its own. */
+internal const val SESSION_OPEN_SILENT_LINK_TIMEOUT_MS = 12_000L
+
 /** How long the composer's notice explains a greyed-out "+" in the chat header ([PocketRepository.noteNewSessionUnavailable]). */
 internal const val NEW_SESSION_NOTICE_MS = 4_000L
 
@@ -339,9 +355,12 @@ internal const val NEW_SESSION_FROM_HEADER = "header"
  * Why an open gave up (issue #340) — the two worlds one blind 8s deadline could not tell apart.
  *
  * [LINK]: the connection was not [ConnPhase.Ready], so nothing we sent could have arrived and nothing we
- * resend would either. The computer is very probably fine; the honest thing to name is the link.
- * [COMPUTER]: the link claimed Ready and the request still went unanswered — for a resume, even after
- * being replayed once. This is the only case that has ever deserved "the computer didn't respond".
+ * resend would either — or it claimed Ready, but nothing at all came down it after the request was sent
+ * (SLOW-LINK-RESILIENCE 3.2): the answer is stuck in the link or was lost by it. Either way the computer is
+ * very probably fine; the honest thing to name is the link.
+ * [COMPUTER]: the link claimed Ready, kept carrying the daemon's other answers, and the request still went
+ * unanswered — for a resume, even after being replayed once. This is the only case that has ever deserved
+ * "the computer didn't respond".
  */
 enum class OpenFailure { LINK, COMPUTER }
 
@@ -591,6 +610,7 @@ class PocketRepository(
     private var presenceProbeJob: Job? = null // #145: healthy-link re-sync probe armed by a daemon-comeback presence edge
     internal var presenceProbeMs = LIST_WAIT_MS           // test seam
     internal var linkHealthOverride: (() -> Boolean)? = null // test seam for transportHealthy()
+    internal var downlinkFramesOverride: (() -> Long)? = null // test seam for downlinkFrames()
     private var directoriesRev = 0          // bumped on every Directories reply — the #145 probe's "did the computer answer" check
     // per-session connection bookkeeping (plain vars; [phase]/[directoriesLoaded] hold the observable truth)
     private var attachedThisSession = false // relay Attached seen (or, direct mode, socket + first Directories)
@@ -2135,11 +2155,15 @@ class PocketRepository(
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
     private fun handleControl(f: Frame) {
         when (f) {
-            is Attached -> { diagnosticConnectionId = f.connectionId?.validated(); Diagnostics.connection(diagnosticConnectionId, f.peerConnectionId?.validated()); attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; armLinkStableReset(); ensurePushLink(); startListWait(); recomputePhase() }
+            is Attached -> { diagnosticConnectionId = f.connectionId?.validated(); Diagnostics.connection(diagnosticConnectionId, f.peerConnectionId?.validated()); attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; armLinkStableReset(); ensurePushLink(); startListWait(); recomputePhase()
+                // #404: settles a planned switch's outcome; on relay arms the backoff timer, on direct stops it
+                repath.onAttached(direct = transportName() != "relay") }
             // Only re-handshake on a genuine offline->online transition. The relay re-broadcasts
             // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
-            is PeerPresence -> { Diagnostics.connection(diagnosticConnectionId, f.connectionId?.validated()); val wasOffline = daemonOffline; daemonOffline = !f.online; if (f.online && wasOffline) onComputerBackOnline(); recomputePhase() }
+            is PeerPresence -> { Diagnostics.connection(diagnosticConnectionId, f.connectionId?.validated()); val wasOffline = daemonOffline; daemonOffline = !f.online; if (f.online && wasOffline) onComputerBackOnline(); recomputePhase()
+                // #404: the edge only REQUESTS an evaluation (5 s, after the #145 probe window) — never a teardown here
+                if (f.online && wasOffline) repath.request(RepathTrigger.PeerOnline) }
             // a refused credential (revoked / expired pairing) ends this binding's right to its transcripts too
             is AuthError -> { pairingInvalid = true; sessionCache.clear(); forgetPersistedCatalog(paired.value); retryJob?.cancel(); recomputePhase() }
             else -> {}
@@ -2182,6 +2206,10 @@ class PocketRepository(
     /** Is the CURRENT transport demonstrably up? (attached, no observed failure, socket loop still alive) */
     private fun transportHealthy(): Boolean =
         linkHealthOverride?.invoke() ?: (connected.value && attachedThisSession && connectJob?.isActive == true)
+
+    /** Transport frames decrypted on either leg since this repository was built — only ever grows, whichever leg
+     *  carried them. Compared across a wait, it says whether ANYTHING came down the link meanwhile (3.2). */
+    private fun downlinkFrames(): Long = downlinkFramesOverride?.invoke() ?: (relay.inboundFrames + directE2E.inboundFrames)
 
     // ── push registration ───────────────────────────────────────────────────────────────────────────
 
@@ -2514,6 +2542,77 @@ class PocketRepository(
     /** Test seam: replaces the relay/direct dial of one transport launch — gets the binding it would dial and the
      *  first-pair ticket it would present, and holds the "socket" for as long as it suspends. */
     internal var dialForTest: (suspend (PairedDaemon, String?) -> Unit)? = null
+    /** Stands in for [DirectE2EConnection.connect] only (the relay leg still runs) — #403 cooldown tests. */
+    internal var directConnectForTest: (suspend (String, PairedDaemon) -> Unit)? = null
+    /** #403 pre-dial eligibility inputs: the interface list, and whether this client shares the daemon's machine
+     *  (only the desktop build does — loopback addresses are dialable there and nowhere else). */
+    internal var networkSnapshotProvider: () -> NetworkSnapshot? = ::localNetworkSnapshot
+    internal var sameMachineClient: Boolean = appUpdateRoute() == AppUpdateRoute.DESKTOP_IN_APP
+
+    /** #404 test seams: the bounded TCP probe, and a forced on/off in place of the platform default. */
+    internal var tcpProbeForTest: (suspend (String, Int) -> Boolean)? = null
+    internal var repathEnabledOverride: Boolean? = null
+
+    /**
+     * #404 idle relay→direct re-path (TRANSPORT-AUTO-REPATH-V1 4.5). Desktop defaults on (loopback is always
+     * dialable, no network-ownership question); phones default off until verified on a device across Wi‑Fi and
+     * cellular (4.7) — SecureStore [K_REPATH_AUTO] "on"/"off" overrides either default. Reset on disconnect.
+     */
+    private val repath = RepathController(
+        scope = scope,
+        now = { epochMillis() },
+        enabled = {
+            repathEnabledOverride ?: when (SecureStore.getString(K_REPATH_AUTO)) {
+                "on" -> true
+                "off" -> false
+                else -> sameMachineClient
+            }
+        },
+        isOnRelay = {
+            transportName() == "relay" && sessionActive.value && connected.value && attachedThisSession &&
+                !demoMode.value && !pairingInvalid && paired.value != null
+        },
+        directUrl = { paired.value?.let { p -> p.directUrl?.takeIf { it != badDirectUrl[p.accountId] } } },
+        coolingDown = { paired.value?.let { epochMillis() < (directCooldownUntil[it.accountId] ?: 0L) } == true },
+        eligible = { directEligibility(it, networkSnapshotProvider(), sameMachineClient) == DirectEligibility.Dial },
+        probe = { h, p -> tcpProbeForTest?.invoke(h, p) ?: tcpReachable(h, p, RepathController.PROBE_TIMEOUT_MS) },
+        isIdle = { repathIdle() },
+        // the planned switch is an ordinary reconnect (retire-before-dial #142, direct-first with the #403 budget,
+        // same-attempt relay fallback + cooldown, #147 reattach) under a fresh Ready-hold so success shows no banner
+        switchNow = { startReconnectGrace(restart = true); launchTransport(reconnect = true, force = true) },
+        report = { t, r -> Telemetry.track(TelEvent.TransportRepath, mapOf(TelKey.Source to t.wire, TelKey.Result to r.wire)) },
+    )
+
+    /**
+     * #404 / TRANSPORT-AUTO-REPATH-V1 4.3: a planned relay→direct switch only happens when nothing could be lost
+     * or visibly interrupted by the reconnect. Reads existing state only; every clause is one line of the spec's
+     * list, and the desktop side panes count exactly like the main chat.
+     */
+    internal fun repathIdle(): Boolean {
+        val panes = sidePanes.panes
+        // streaming output, main chat and every pane. (`thinking` is NOT consulted: it is the session's
+        // extended-thinking SETTING (#345), not activity — a turn that is thinking is already `streaming`.)
+        if (streaming.value || panes.any { it.streaming.value }) return false
+        // prompts not yet on the wire / stalled, and queued turns
+        if (turnQueued.value || sendStalled.value) return false
+        if (messages.any { it is ChatItem.User && it.pending } ||
+            panes.any { p -> p.messages.any { it is ChatItem.User && it.pending } }) return false
+        // approvals and questions waiting on the user
+        if (pendingAsk.value != null || pendingApprovals.isNotEmpty() || panes.any { it.pendingAsk.value != null }) return false
+        // opening / switching a session, starting a new task
+        if (opening.value || switching.value || switchingSession.value || sessionsOpening.value != null ||
+            newTaskStarting.value || panes.any { it.opening.value }) return false
+        // uploads, image compression, file transfers into the workspace inbox
+        if (pendingImages.any { it.state == ImgState.Compressing } ||
+            pendingFiles.any { it.state == FileUpState.Queued || it.state == FileUpState.Uploading }) return false
+        // voice: recording, transcribing, or its upload
+        if (voice.value !is VoiceState.Idle && voice.value !is VoiceState.Failed || voiceUploading.value) return false
+        // history paging, file view / export
+        if (historyLoadingOlder.value || outstanding(NonSessionRequest.FILE) > 0) return false
+        // project pin sync
+        if (pinLink.syncInFlight) return false
+        return true
+    }
 
     private fun launchTransport(reconnect: Boolean, force: Boolean = false) {
         if (demoMode.value) return // demo mode never touches the network
@@ -2578,10 +2677,14 @@ class PocketRepository(
                     // proxy leg entirely. Unreachable/refused/bad handshake → silent same-attempt relay
                     // fallback + cooldown. A drop AFTER it was live exits normally into the reconnect path.
                     val du = p.directUrl?.takeIf { it != badDirectUrl[p.accountId] }
-                    if (du != null && epochMillis() >= (directCooldownUntil[p.accountId] ?: 0L)) {
+                    // #403 pre-dial eligibility: a stored private/loopback address that can't be this computer on
+                    // the current network (cellular, another subnet, a phone dialing 127.0.0.1) is skipped — no
+                    // cooldown, no bad-URL mark; the next attempt re-checks on whatever network we're on by then
+                    if (du != null && epochMillis() >= (directCooldownUntil[p.accountId] ?: 0L) &&
+                        directEligibility(du, networkSnapshotProvider(), sameMachineClient) == DirectEligibility.Dial) {
                         directAttemptInFlight = true
                         try {
-                            directE2E.connect(du, p, Pairing.deviceKeys())
+                            directConnectForTest?.invoke(du, p) ?: directE2E.connect(du, p, Pairing.deviceKeys())
                             return@runCatching
                         } catch (e: DirectUnreachableException) {
                             directCooldownUntil[p.accountId] = epochMillis() + DIRECT_RETRY_COOLDOWN_MS
@@ -2645,6 +2748,12 @@ class PocketRepository(
         connectWatchdog = scope.launch {
             delay(CONNECT_TIMEOUT_MS)
             if (sessionActive.value && connected.value && !attachedThisSession && !pairingInvalid) {
+                // #403 defense: the direct budget should end an attempt long before this fires, but if the direct
+                // dial is still what's hanging, cancel alone would leave no cooldown and the retry would dial the
+                // same address first again — the "never connects" loop. Mark it before cancelling.
+                if (directAttemptInFlight) paired.value?.accountId?.let {
+                    directCooldownUntil[it] = epochMillis() + DIRECT_RETRY_COOLDOWN_MS
+                }
                 connectJob?.cancel()
                 onTransportDown(ConnectWedgedException())
             }
@@ -2747,6 +2856,7 @@ class PocketRepository(
             // list; wedged link → the bounded send trips DeadLink in ≤10s instead of ~25s of fake Ready.
             refreshDirectoriesSilently()
             pinLink.onForeground() // #362: re-fetch heals a missed pin push; a blocked outbox may try again
+            if (transportName() == "relay") repath.request(RepathTrigger.Foreground) // #404
         }
     }
 
@@ -2818,6 +2928,7 @@ class PocketRepository(
         openJob?.cancel(); openJob = null
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); deafJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel(); linkStableJob?.cancel(); presenceProbeJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; deafJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null; linkStableJob = null; presenceProbeJob = null
+        repath.reset() // #404: every way off a computer (exit, unpair, switch) voids pending evaluations and the timer
         clearPromptLifecycleState() // pending bubbles and every related deadline leave with messages below
         // frames queued for the binding we're leaving must not leak into the next link (both transports
         // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
@@ -3884,6 +3995,7 @@ class PocketRepository(
                 paired.value?.let { p ->
                     if (p.directUrl != f.lanUrl && (f.lanUrl == null || f.lanUrl != badDirectUrl[p.accountId])) {
                         rememberDirectUrl(p.accountId, f.lanUrl)
+                        if (f.lanUrl != null) repath.request(RepathTrigger.DirectUrlChanged) // #404
                     }
                     // adopt the daemon's real computer name as this binding's default display name (issue #62);
                     // a user-set nickname still wins in displayName(). Independent of the directUrl guard above.
@@ -6332,6 +6444,9 @@ class PocketRepository(
                 ?.also { it.requested = true }?.context,
         )
         openDiagnostic?.stage(DiagnosticStage.QUEUE)
+        // what had come down the link before this request went out: the deadline below compares against it
+        // (SLOW-LINK-RESILIENCE 3.2). A local — it belongs to this open and dies with it.
+        val downlinkAtSend = downlinkFrames()
         send(request)
         openObservation?.takeIf { it.requested }?.let { observation ->
             historyDiagnosticDeadline = scope.launch {
@@ -6351,10 +6466,22 @@ class PocketRepository(
         // (1) The link is not Ready: nothing we sent could have arrived, and nothing we resend will
         //     either. Fail now and name the LINK — the phase machinery already owns retry/backoff.
         if (phase.value != ConnPhase.Ready) return failOpen(OpenFailure.LINK, retried = false)
-        // (2) The link claims Ready, so the open may merely have been slow — a big transcript on the far
-        //     side, a loaded daemon, a relay hiccup that ate one frame. Replay the SAME request once,
-        //     SILENTLY: `opening` stays raised and nothing on screen moves, so the user never learns a
-        //     retry happened unless it too fails.
+        // (2) The link claims Ready, yet NOTHING has come down it since the request went out — not this
+        //     open's answer, not the answer to any poll sent meanwhile. Frames arrive in order, so either a
+        //     big frame is still crossing a lossy link with everything else queued behind it, or the link is
+        //     a zombie that swallows whatever we send. A replay helps in neither world: it queues behind the
+        //     same frame (and has the daemon read and send the same window again), or it is swallowed too,
+        //     while the silence watchdog rebuilds a zombie on its own. So no replay: give the answer in
+        //     flight the rest of a 20s budget, then name the LINK (SLOW-LINK-RESILIENCE 3.2).
+        if (downlinkFrames() == downlinkAtSend) {
+            delay(SESSION_OPEN_SILENT_LINK_TIMEOUT_MS)
+            if (gen != openGen || !opening.value) return
+            return failOpen(OpenFailure.LINK, retried = false)
+        }
+        // (3) The link claims Ready and HAS been carrying the daemon's answers, just not this one — so the
+        //     open may merely have been slow: a big transcript on the far side, a loaded daemon, a relay
+        //     hiccup that ate one frame. Replay the SAME request once, SILENTLY: `opening` stays raised and
+        //     nothing on screen moves, so the user never learns a retry happened unless it too fails.
         //
         //     RESUMES ONLY. A brand-new open is NOT idempotent on the daemon: SessionRegistry live-matches
         //     an incoming open on its resumeId, so a second `resumeId == null` request skips that block
@@ -8405,6 +8532,7 @@ class PocketRepository(
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
         const val K_ACCENT_THEME = "appearance_accent_theme"  // SecureStore: AccentTheme name (POCKET/CODEX; issue #204)
+        const val K_REPATH_AUTO = "repath_auto" // SecureStore: "on" / "off" overrides the #404 idle re-path default (desktop on, phone off)
         const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
         const val K_FILES_HIDDEN_PREFIX = "files_show_hidden:" // SecureStore: "files_show_hidden:<workdir>" → "1" = 文件浏览显示 . 开头的隐藏项
         const val FILE_TREE_LIMIT = 2_000                      // 文件浏览每层的条目上限（= daemon listPathEntries 的硬上限）
