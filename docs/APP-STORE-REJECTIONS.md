@@ -46,7 +46,7 @@
 **防复发**：
 
 - 首次启动、隐私同意页、配对页改版后，从未配对状态实际走到 Demo，检查项目列表、会话、工具展示及退出路径。
-- 在 [审核备注](../fastlane/metadata/review_information/notes.txt)保留准确的入口说明；当前说明为配对页的 `Try Demo - no computer needed`，下一版必须与真实文案和导航一致。
+- 在 [审核备注](../fastlane/metadata/review_information/notes.txt)保留准确的入口说明；2.5.0 模拟器实测路径为首次披露页 `Agree and continue` → `Connect your computer` 页的 `Explore the demo instead`（标注 `No computer needed`），配对页也有 `Explore the demo instead`。下一版必须与真实文案和导航一致。
 - 对需要真实硬件或联网才能审核的功能另给可操作说明，不用 Demo 样例冒充真实网络能力验证。
 
 ### R3：中国大陆商店中的 OpenAI / ChatGPT 关联表述
