@@ -24,9 +24,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.AppUpdateRoute
+import dev.ccpocket.app.appUpdateRoute
 import dev.ccpocket.app.update.VersionStatus
 import dev.ccpocket.app.net.DirectE2EConnection
 import dev.ccpocket.app.net.DirectUnreachableException
+import dev.ccpocket.app.net.DirectEligibility
+import dev.ccpocket.app.net.NetworkSnapshot
+import dev.ccpocket.app.net.directEligibility
+import dev.ccpocket.app.net.localNetworkSnapshot
 import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.DeadLinkException
 import dev.ccpocket.app.net.DepositOutcome
@@ -2529,6 +2535,12 @@ class PocketRepository(
     /** Test seam: replaces the relay/direct dial of one transport launch — gets the binding it would dial and the
      *  first-pair ticket it would present, and holds the "socket" for as long as it suspends. */
     internal var dialForTest: (suspend (PairedDaemon, String?) -> Unit)? = null
+    /** Stands in for [DirectE2EConnection.connect] only (the relay leg still runs) — #403 cooldown tests. */
+    internal var directConnectForTest: (suspend (String, PairedDaemon) -> Unit)? = null
+    /** #403 pre-dial eligibility inputs: the interface list, and whether this client shares the daemon's machine
+     *  (only the desktop build does — loopback addresses are dialable there and nowhere else). */
+    internal var networkSnapshotProvider: () -> NetworkSnapshot? = ::localNetworkSnapshot
+    internal var sameMachineClient: Boolean = appUpdateRoute() == AppUpdateRoute.DESKTOP_IN_APP
 
     private fun launchTransport(reconnect: Boolean, force: Boolean = false) {
         if (demoMode.value) return // demo mode never touches the network
@@ -2593,10 +2605,14 @@ class PocketRepository(
                     // proxy leg entirely. Unreachable/refused/bad handshake → silent same-attempt relay
                     // fallback + cooldown. A drop AFTER it was live exits normally into the reconnect path.
                     val du = p.directUrl?.takeIf { it != badDirectUrl[p.accountId] }
-                    if (du != null && epochMillis() >= (directCooldownUntil[p.accountId] ?: 0L)) {
+                    // #403 pre-dial eligibility: a stored private/loopback address that can't be this computer on
+                    // the current network (cellular, another subnet, a phone dialing 127.0.0.1) is skipped — no
+                    // cooldown, no bad-URL mark; the next attempt re-checks on whatever network we're on by then
+                    if (du != null && epochMillis() >= (directCooldownUntil[p.accountId] ?: 0L) &&
+                        directEligibility(du, networkSnapshotProvider(), sameMachineClient) == DirectEligibility.Dial) {
                         directAttemptInFlight = true
                         try {
-                            directE2E.connect(du, p, Pairing.deviceKeys())
+                            directConnectForTest?.invoke(du, p) ?: directE2E.connect(du, p, Pairing.deviceKeys())
                             return@runCatching
                         } catch (e: DirectUnreachableException) {
                             directCooldownUntil[p.accountId] = epochMillis() + DIRECT_RETRY_COOLDOWN_MS
@@ -2660,6 +2676,12 @@ class PocketRepository(
         connectWatchdog = scope.launch {
             delay(CONNECT_TIMEOUT_MS)
             if (sessionActive.value && connected.value && !attachedThisSession && !pairingInvalid) {
+                // #403 defense: the direct budget should end an attempt long before this fires, but if the direct
+                // dial is still what's hanging, cancel alone would leave no cooldown and the retry would dial the
+                // same address first again — the "never connects" loop. Mark it before cancelling.
+                if (directAttemptInFlight) paired.value?.accountId?.let {
+                    directCooldownUntil[it] = epochMillis() + DIRECT_RETRY_COOLDOWN_MS
+                }
                 connectJob?.cancel()
                 onTransportDown(ConnectWedgedException())
             }
