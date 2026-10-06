@@ -228,6 +228,24 @@ class DaemonCore(
         ),
     )
 
+    /**
+     * Voice input v2: a dictated transcript is proofread by a one-shot, tool-less claude that shares the main backend's
+     * [claudeRuntime], following the conversation's own agent (design docs/design/VOICE-INPUT-REFINE-SEND.md §4). Only
+     * a Claude refiner exists so far; another agent's adapter is one more entry in the list. The per-call empty working
+     * directories live in the memo scratch directory, so a killed daemon's leftovers are swept at the next start.
+     */
+    val transcriptRefine = dev.ccpocket.daemon.transcribe.TranscriptRefineService(
+        scope,
+        dev.ccpocket.daemon.transcribe.TranscriptRefiners(
+            listOf(dev.ccpocket.daemon.transcribe.ClaudeTranscriptRefiner(claudeRuntime, tempRoot = voiceMemoScratch)),
+        ),
+        agentOf = registry::agentOf,
+        glossaryOf = { convoId ->
+            val workdir = registry.workdirOf(convoId)
+            kotlinx.coroutines.withContext(Dispatchers.IO) { dev.ccpocket.daemon.transcribe.RefineGlossary.terms(workdir) }
+        },
+    )
+
     val router = RequestRouter(
         registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
         // presetEnv shares PresetStore with the DaemonInfo gateway pill (Main.kt): the host we ask for a
@@ -245,6 +263,7 @@ class DaemonCore(
         voiceMemo = voiceMemo,
         git = git,
         codexQuota = dev.ccpocket.daemon.codex.CodexQuotaService(codexBin),
+        transcriptRefine = transcriptRefine,
     )
 
     /**
@@ -408,10 +427,11 @@ class DaemonCore(
     val executionRefusals = dev.ccpocket.daemon.execution.ExecutionRefusals()
 
     /** The auto-update idle gate (see [DaemonActivity]). Reads [executionPlane] as-is: never loads the planes. */
-    suspend fun hasActiveWork(): Boolean = DaemonActivity.busy(registry, executionPlane, scheduler, transcribe, voiceMemo)
+    suspend fun hasActiveWork(): Boolean = DaemonActivity.busy(registry, executionPlane, scheduler, transcribe, voiceMemo, transcriptRefine)
 
     suspend fun shutdown() {
         runCatching { voiceMemo.close() }
+        runCatching { transcriptRefine.close() }
         registry.closeAll()
     }
 

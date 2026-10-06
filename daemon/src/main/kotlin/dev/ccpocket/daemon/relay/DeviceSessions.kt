@@ -577,6 +577,8 @@ class DeviceSessions(
                 // #348: the backends whose subscription allowance this daemon can read. Same source as the
                 // LAN transport's copy (WsConnection) — the router owns the readers, so it owns the answer.
                 quotaAgents = core.router.quotaAgentWires(),
+                // voice input v2: the agents whose transcript refiner can launch here — same source as the LAN copy
+                transcriptRefineAgents = core.router.transcriptRefineAgentWires(),
             ).withVoiceMemo(core.router.voiceMemoCapability()),
         )
 

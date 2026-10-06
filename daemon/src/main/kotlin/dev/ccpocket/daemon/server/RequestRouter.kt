@@ -182,6 +182,8 @@ class RequestRouter(
     private val managedSessions: dev.ccpocket.daemon.session.ManagedSessionService? = null,
     /** Voice memo → tasks. Null = not wired: nothing is advertised and every memo frame is dropped. */
     private val voiceMemo: dev.ccpocket.daemon.memo.VoiceMemoService? = null,
+    /** Voice input v2's transcript refine. Null = not wired: no agent is advertised and every refine is dropped. */
+    private val transcriptRefine: dev.ccpocket.daemon.transcribe.TranscriptRefineService? = null,
 ) {
     /** Both transports attach their owner push targets through the router they already hold (issue #360). */
     internal val managedSessionService: dev.ccpocket.daemon.session.ManagedSessionService? get() = managedSessions
@@ -220,6 +222,12 @@ class RequestRouter(
 
     /** A pairing was revoked: its memo jobs stop and its cached transcripts go. */
     suspend fun revokeVoiceMemoDevice(deviceId: String) { voiceMemo?.revokeDevice(deviceId) }
+
+    /** [dev.ccpocket.protocol.DaemonInfo.transcriptRefineAgents]: the agents whose refiner can launch right now — a
+     *  LOCAL check, the same one voice memos advertise their organisers by. Not wired, or the check itself failing,
+     *  advertises nothing: the phone then keeps putting dictation in the composer. */
+    fun transcriptRefineAgentWires(): List<String> =
+        runCatching { transcriptRefine?.advertisedAgents() }.getOrNull().orEmpty()
 
     /** The LAN transport attaches its per-socket pin subscriber through the router it already holds, so the pin
      *  plane reaches both transports without another server-construction seam. */
@@ -292,6 +300,10 @@ class RequestRouter(
 
         /** voice memo → tasks: this connection decodes pocket/memo.state. Replies and pushes are both gated on it. */
         @Volatile var supportsVoiceMemo: Boolean = false
+
+        /** voice input v2: this connection decodes pocket/transcript.refined. A refine is neither run for nor answered
+         *  to a connection without it. */
+        @Volatile var supportsTranscriptRefine: Boolean = false
 
         /** Largest sealed WebSocket message this connection can receive: the client's declared
          *  [ClientCaps.maxFrameBytes] (clamped by [frameCap]), else the legacy 1 MiB that shipped iOS builds are
@@ -408,6 +420,9 @@ class RequestRouter(
             // voice memo → tasks: a memo snapshot carries a transcript — it only reaches a connection that declared
             // it can read one; a null / not-yet-declared holder fails closed
             frame is dev.ccpocket.protocol.VoiceMemoState -> caps?.supportsVoiceMemo == true
+            // voice input v2: a refine result carries dictated text — only to a connection that declared it reads one;
+            // a null / not-yet-declared holder fails closed
+            frame is dev.ccpocket.protocol.TranscriptRefined -> caps?.supportsTranscriptRefine == true
             else -> true
         }
 
@@ -523,6 +538,7 @@ class RequestRouter(
                 caps?.supportsManagedSessions = frame.supportsManagedSessions // #360: gates pocket/managed.state + .discovered
                 caps?.supportsToolOutcomes = frame.supportsToolOutcomes // #380: gates outcome-only tool RESULTs
                 caps?.supportsVoiceMemo = frame.supportsVoiceMemo // gates pocket/memo.state
+                caps?.supportsTranscriptRefine = frame.supportsTranscriptRefine // gates refines + pocket/transcript.refined
                 caps?.supportsSessionObservation = frame.supportsSessionObservationV1 // gates the observation snapshot
                 caps?.maxFrameBytes = ClientCapsHolder.frameCap(frame.maxFrameBytes) // KTOR-6963: sizes every frame sealed to this connection
             }
@@ -958,7 +974,13 @@ class RequestRouter(
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)
-            is AudioCancel -> transcribe.onCancel(frame)
+            // a cancelled capture stops its transcription AND its refine; neither answers
+            is AudioCancel -> {
+                transcribe.onCancel(frame)
+                transcriptRefine?.onCancel(frame)
+            }
+            // voice input v2: proofread a dictated transcript; the model runs on the service's own scope
+            is dev.ccpocket.protocol.TranscriptRefine -> transcriptRefineRequest(frame, sink, origin, caps)
 
             // file upload (issue #90): stream each chunk into the live session's workspace inbox;
             // the FileUploaded receipt rides the same sink the chunks arrived on
@@ -1134,6 +1156,25 @@ class RequestRouter(
             caps.supportsVoiceMemo && runCatching { sink.emit(state) }.isSuccess
         }
         service.handle(dev.ccpocket.daemon.memo.MemoOwner(device), frame, reply)
+    }
+
+    /**
+     * Transcript refine admission. A refine runs a model on the OWNER's account, so it is served only when the owner
+     * test holds ([isOwner]: restricted credentials never get here anyway — BridgeCaps / ExecutionCaps default-deny the
+     * type — this is the second door), the connection declared [ClientCapsHolder.supportsTranscriptRefine] (its reply
+     * could not reach it otherwise, and the sink's own [allowedForCaps] gate re-checks), and the service is wired.
+     * Anything else is dropped in silence; the phone's own deadline then lands the text in the composer.
+     */
+    private suspend fun transcriptRefineRequest(
+        frame: dev.ccpocket.protocol.TranscriptRefine,
+        sink: OutboundSink,
+        origin: String?,
+        caps: ClientCapsHolder?,
+    ) {
+        if (!isOwner(origin)) return
+        if (caps == null || !caps.supportsTranscriptRefine) return
+        val service = transcriptRefine ?: return
+        service.onRefine(frame, sink)
     }
 
     /**

@@ -20,12 +20,18 @@ import dev.ccpocket.daemon.schedule.ScheduleExecutor
 import dev.ccpocket.daemon.schedule.ScheduleStore
 import dev.ccpocket.daemon.schedule.SchedulerService
 import dev.ccpocket.daemon.session.SessionRegistry
+import dev.ccpocket.daemon.transcribe.FakeTranscriptRefiner
+import dev.ccpocket.daemon.transcribe.RefineOutcome
 import dev.ccpocket.daemon.transcribe.TranscribeService
+import dev.ccpocket.daemon.transcribe.TranscriptRefineService
+import dev.ccpocket.daemon.transcribe.TranscriptRefiners
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.ScheduleCreate
 import dev.ccpocket.protocol.Transcript
+import dev.ccpocket.protocol.TranscriptRefine
+import dev.ccpocket.protocol.TranscriptRefined
 import dev.ccpocket.protocol.VoiceMemoStage
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -65,6 +71,8 @@ class DaemonActivityTest {
     private val transcribe = TranscribeService(scope, { convoId, c, _ -> dictation(convoId, c.captureId) }) { dir.toPath() }
     private val summarizer = FakeSummarizer()
     private val voiceMemo = VoiceMemoService(scope, FakeTranscriber(), summarizer, FakeMemoClock(), MemoServiceLimits(sweepIntervalMs = 0))
+    private val refiner = FakeTranscriptRefiner()
+    private val refine = TranscriptRefineService(scope, TranscriptRefiners(listOf(refiner)), agentOf = { AgentKind.CLAUDE }, glossaryOf = { emptyList() })
 
     private val identity = Identity.loadOrCreate(File(dir, "identity.json"))
     private val journal = RunJournal(File(dir, "execution-runs")) { clock }
@@ -74,13 +82,13 @@ class DaemonActivityTest {
 
     @AfterTest
     fun cleanup() {
-        runBlocking { runCatching { voiceMemo.close() }; runCatching { registry.closeAll() } }
+        runBlocking { runCatching { voiceMemo.close() }; runCatching { refine.close() }; runCatching { registry.closeAll() } }
         scope.cancel()
         dir.deleteRecursively()
     }
 
     private suspend fun busy(withPlane: Boolean = true) =
-        DaemonActivity.busy(registry, if (withPlane) runPlane else null, scheduler, transcribe, voiceMemo)
+        DaemonActivity.busy(registry, if (withPlane) runPlane else null, scheduler, transcribe, voiceMemo, refine)
 
     @Test
     fun an_idle_daemon_is_not_busy() = runBlocking {
@@ -180,6 +188,20 @@ class DaemonActivityTest {
 
         release.complete(Unit)
         inbox.awaitStage(VoiceMemoStage.READY)
+        withTimeout(5_000) { while (busy()) delay(10) }
+        assertFalse(busy())
+    }
+
+    @Test
+    fun a_dictation_being_proofread_holds_the_update_until_it_is_answered() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val answered = CompletableDeferred<TranscriptRefined>()
+        refiner.behavior = { release.await(); RefineOutcome.Edits(emptyList()) }
+        refine.onRefine(TranscriptRefine("c-1", "cap-1", "hello world", locale = "en")) { answered.complete(it as TranscriptRefined) }
+        assertTrue(busy(), "a refine the phone is waiting on must hold the update")
+
+        release.complete(Unit)
+        assertTrue(withTimeout(5_000) { answered.await() }.ok)
         withTimeout(5_000) { while (busy()) delay(10) }
         assertFalse(busy())
     }
