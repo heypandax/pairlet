@@ -50,6 +50,7 @@ dependencies {
     runtimeOnly(libs.slf4j.simple)
     implementation(libs.sqlite.jdbc)             // OpenCodeTranscriptScanner/Replay read opencode.db
     implementation(libs.zstd.jni)                // DshTranscript decodes ~/.dsh multi-frame session.jsonl.zstd
+    implementation(libs.pinyin4j)                // TranscriptEditValidator's homophone rule (Pinyin readings)
 
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter)
