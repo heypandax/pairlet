@@ -1,6 +1,6 @@
 # New Session From Chat v1 — 会话界面里的新建会话入口
 
-状态：原型已由 Claude Design 交付，并经其自检修复两处原型缺陷；**已评审（2026-10-05，用户委托 Fable 代为决定，见下）**，正在独立 worktree 里实现，尚未合回主分支。
+状态：**已实现，分支待合入主分支**（2026-10-06，与设计稿的差异见文末「实现记录」）。原型由 Claude Design 交付，并经其自检修复两处原型缺陷；已评审（2026-10-05，用户委托 Fable 代为决定，见下）。
 
 - 日期：2026-10-05（本机时区）。来源：维护者提出「在会话界面中增加新开会话的便捷方式」，强调会话界面是关键界面，要求先出设计。
 - 设计项目：cc-pocket Design System 2.0。[在线设计板：New Session From Chat v1](https://claude.ai/design/p/eb401868-d618-47f7-b8d4-4641117d566d?file=New+Session+From+Chat+v1.dc.html)。
@@ -54,3 +54,26 @@
 - 发送：`repo.startTaskWithPrompt(wd, text, agent)` 已有——开新会话、发首条、三种失败回弹；离开前 `saveDraft`（同切换器）；落地后让返回栈指向新项目的会话列表（`sessionsDir`，参照 `switchToSession`）。
 - 埋点：沿用 `TelEvent.FeatureUsed` 与 `TelKey.Target` 词表，加 `new_session_entry`（source=header）与 `new_session_result`。
 - 测试：`desktopTest` 渲染 `ChatScreen` 断言「+」存在 / 禁用 / 观察模式仍在；`SessionWorkingSetTest` 不变。
+
+## 实现记录（与设计稿的差异）
+
+实现于 2026-10-06：顶栏按钮 `NewSessionHeaderButton`（`ui/chat/ChatChrome.kt`），接线在 `ChatScreen`（`ui/App.kt`），发送后的跟进在 `PocketRepository.followNewTaskFromChat`，测试 `desktopTest` 的 `NewSessionEntryTest`。以下逐条记录与设计稿或原实现说明不同、或设计稿没写到的处理。
+
+- **可达性信号**：会话列表的「＋ New session」停靠按钮本身不接收可达性信号（调用方只传 `repo.opening`）。「+」改读同一页面连接徽标的来源 `repo.phase`，`ConnPhase.Ready` 时可用；打开会话路径判断「链路不通」（#340 的 LINK）用的也是它。因此重连中（Connecting / Reconnecting，宽限期过后）「+」同样变灰，点按的提示文案仍是「电脑离线」那句。
+- **提示槽**：离线提示复用输入区上方的临时提示槽（`showNotice` → `voiceNotice`，原先只给语音提示用、固定 2.5 秒），加了时长参数，「+」的提示停 4 秒。这个槽只在普通输入区里显示：观察终端会话（含 Dot 只读观察条）或提问卡占用输入时，点灰色「+」看不到这行字，按钮的灰色和无障碍名照常。
+- **暂存附件时不打开弹层**（设计稿未涉及）：输入区有暂存的图片或文件（`pendingImages` / `pendingFiles` 非空，含正在压缩、上传的）时，点「+」不打开弹层，在同一提示槽显示「Send or remove the attachments first / 请先发送或移除已添加的附件」4 秒。原因是新会话的首条经 `startTaskWithPrompt` 走同一份输入区状态发出，会把这些附件一起带进新会话；发送逻辑本身没改。按钮外观和无障碍名保持可用态，避免顶栏随附件闪动；这种点按不计 `new_session_entry`。
+- **「会继续运行」只在属实时显示**：有待回答的提问 → 提问那句；有待批准 → 批准那句；正在流式输出 → 「This chat keeps running. / 这个对话会继续运行。」；会话空闲（没有在跑、也没有待处理）时不显示任何一行。离开的空闲会话按既有规则（与返回键、切换器相同）回收进程，之后可以再打开。
+- **存稿写法**：离开前按切换器的写法 `saveDraft(draftKey, input)` 存（会话自己的键），时机是弹层发送被接受的那一刻（`NewTaskSheet` 新增的可选参数 `onStarted`）。返回键的写法是按项目目录存（`saveDraft(workdir, …)`），实测会让旧聊天没发出的文字出现在新会话的输入框里，所以不用。
+- **打开期间保持聊天页**（设计稿未提）：借用切换器（#165）的 `switchingSession`，新会话打开期间聊天页留在屏幕上，不先闪到列表。打开成功、失败、返回或断开时都会释放。
+- **返回栈**：新会话落地后（首条送达，或已打开但首条被拒）才让返回键指向新项目的会话列表，与 `switchToSession` 共用 `pointBackAtSessions`；打开失败时返回栈保持原样，不落到用户没去过的列表。
+- **失败回弹**：首条被拒时会话已打开、聊天页还在，弹层就在聊天页重开，带着草稿和发送时的项目、智能体。打开失败（`OPEN_REFUSED` / `TIMEOUT`）时聊天页随之离开；草稿和这组选择留在仓库里，项目页（若在屏上）用它自己的弹层回弹。这条路径上项目页原来的粘性选择不再还原，选择跟着失败的草稿走。
+- **「浏览其他文件夹…」**：项目页的文件夹浏览（`DirectoryPickerSheet` 及它转交的两个弹层）只在项目页内部接线，聊天页拿不到，这一行在聊天页只关闭弹层。
+- **演示模式**：`startTaskWithPrompt` 在演示里可用。演示应答原先给每个新建会话同一个 convoId（`demo-convo-new`），在演示里「新会话中再点 +」会等满 30 秒超时、首条不发；已改为逐次编号（`demo-convo-new-N`）。
+- **尺寸**：固定 48dp 点击区、16dp 字形（`Icons.Rounded.Add`），与「⋯」现状一致；没有实现设计稿 200% 字号时 58pt / 19pt 的放大。
+- **埋点**：`feature_used` 增加 `new_session_entry`、`new_session_result`，参数 key 用 `TelKey.Target`（`target=header`；设计稿写的是 source），结果 `result=delivered / open_refused / timeout / send_refused`；登记在 `docs/observability/EVENT-CATALOG.md` 第 8 节。
+- **文案**：新增字符串为 `new_session_unavailable`（「New session, unavailable / 新会话，不可用」）、三句状态行与 `new_session_attachments_staged`。现有启用态中文是「新建会话」，禁用态按评审写「新会话，不可用」，两者用词略有出入。
+
+## 已知限制
+
+- **平板双栏的双弹层**：左栏是项目页（没经会话列表直接进的聊天）时如果首条被拒，聊天页和项目页会各自重开一个弹层，每栏一个。本轮不修。
+- **未验证**：没有做真机（iOS / Android）、读屏（VoiceOver / TalkBack，包括 TalkBack 双击禁用态按钮是否还会出提示）和 200% 字号的验证。已做的是 desktop JVM 测试与 iOS 模拟器目标编译。

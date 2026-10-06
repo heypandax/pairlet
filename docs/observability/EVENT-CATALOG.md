@@ -142,7 +142,7 @@ value_reached 目前由会话内容布局、提示输出实际可见、文件可
 
 | feature | 触发点 | 额外参数 | 平台 |
 |---|---|---|---|
-| new_session_entry | 可用状态下点「+」、Fast Start 弹层打开（`noteNewSessionEntry`）。离线时点灰色「+」只显示原因、不计；失败回弹自动重开不计 | `target=header` | 手机 |
+| new_session_entry | 可用状态下点「+」、Fast Start 弹层打开（`noteNewSessionEntry`）。离线时点灰色「+」只显示原因、不计；暂存附件时点按不计入（弹层不打开，只提示先处理附件）；失败回弹自动重开不计 | `target=header` | 手机 |
 | new_session_result | 从该弹层发出的任务结束时一条（`followNewTaskFromChat`）：首条提示送达，或打开 / 发送失败 | `target=header`，`result=delivered / open_refused / timeout / send_refused` | 手机 |
 
 取值都是固定枚举（`result` 的失败值即 `NewTaskError` 的小写名），不带项目路径、会话 ID 或提示内容。项目页悬浮按钮的 Fast Start 不上报这两条。

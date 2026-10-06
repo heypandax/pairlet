@@ -2938,7 +2938,16 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 val newSessionAvailable = repo.phase.value == ConnPhase.Ready
                 NewSessionHeaderButton(
                     available = newSessionAvailable,
-                    onClick = { if (newSessionAvailable) openNewTask() else repo.noteNewSessionUnavailable() },
+                    onClick = {
+                        when {
+                            !newSessionAvailable -> repo.noteNewSessionUnavailable()
+                            // photos/files staged in this composer would ride the new session's first prompt (it is sent
+                            // through the same composer state), so the sheet doesn't open over them. The button keeps its
+                            // look: greying it as attachments come and go would make the header flicker.
+                            repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() -> repo.noteNewSessionAttachmentsStaged()
+                            else -> openNewTask()
+                        }
+                    },
                 )
                 if (!repo.observing.value) {
                     Spacer(Modifier.width(6.dp))
@@ -3629,6 +3638,14 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             val agentFilter = repo.agentFilter.value
             val dirs = remember(dirsSnapshot, agentFilter) { filterDirectoriesByAgent(dirsSnapshot, agentFilter) }
             val ask = repo.pendingAsk.value
+            // only what is TRUE of the chat being left: a pending question or approval keeps waiting, a running turn
+            // keeps running — and an idle chat gets no line at all, since nothing of it would "keep running"
+            val leaving = when {
+                ask != null && ask.isQuestion -> Res.string.new_task_keeps_running_question
+                ask != null -> Res.string.new_task_keeps_running_approval
+                repo.streaming.value -> Res.string.new_task_keeps_running
+                else -> null
+            }
             NewTaskSheet(
                 repo = repo,
                 dirs = dirs, // the Projects list's own source and filter
@@ -3636,13 +3653,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 // Projects screen only; the chat has no route to it, so here the row just closes the sheet
                 onBrowseOther = closeNewTask,
                 onDismiss = closeNewTask,
-                quietStatus = stringResource(
-                    when {
-                        ask == null -> Res.string.new_task_keeps_running
-                        ask.isQuestion -> Res.string.new_task_keeps_running_question
-                        else -> Res.string.new_task_keeps_running_approval
-                    },
-                ),
+                quietStatus = leaving?.let { stringResource(it) },
                 onStarted = {
                     // leaving this chat starts here: its draft is saved first — the switcher's contract above
                     repo.saveDraft(draftKey, input)

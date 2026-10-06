@@ -251,6 +251,7 @@ import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.app.isPreviewMode
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.memo_new_session_offline
+import dev.ccpocket.app.resources.new_session_attachments_staged
 import dev.ccpocket.app.resources.preview_cmd_title
 import dev.ccpocket.app.resources.preview_cmd_note
 import dev.ccpocket.app.resources.status_conn_lost
@@ -7639,6 +7640,12 @@ class PocketRepository(
      * user just found greyed out, and has to outlast the glance from the header down to the composer.
      */
     fun noteNewSessionUnavailable() = showNotice(Res.string.memo_new_session_offline, holdMs = NEW_SESSION_NOTICE_MS)
+
+    /** The chat header's "+" was tapped with photos or files staged in this chat's composer. The new session's first
+     *  prompt is sent through the same composer state, so they would ride into it: the sheet does not open, and this
+     *  line — same slot, same hold — says what to do first. The send path itself is unchanged. */
+    fun noteNewSessionAttachmentsStaged() =
+        showNotice(Res.string.new_session_attachments_staged, holdMs = NEW_SESSION_NOTICE_MS)
 
     /** Reset all composer voice state (keeps [preferRemote] — it describes the device, not the session). */
     private fun clearVoice() {

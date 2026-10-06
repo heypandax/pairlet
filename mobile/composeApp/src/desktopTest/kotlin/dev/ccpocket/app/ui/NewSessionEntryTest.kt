@@ -20,6 +20,7 @@ import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -31,12 +32,15 @@ import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.FileUpState
+import dev.ccpocket.app.data.ImgState
 import dev.ccpocket.app.data.PendingFile
+import dev.ccpocket.app.data.PendingImage
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.memo_new_session_offline
+import dev.ccpocket.app.resources.new_session_attachments_staged
 import dev.ccpocket.app.resources.new_session_title
 import dev.ccpocket.app.resources.new_session_unavailable
 import dev.ccpocket.app.resources.new_task_agent
@@ -137,8 +141,8 @@ class NewSessionEntryTest {
     private fun ComposeUiTest.plus(): SemanticsNodeInteraction = onNodeWithContentDescription(str(Res.string.new_session_title))
     private fun ComposeUiTest.greyedPlus(): SemanticsNodeInteraction = onNodeWithContentDescription(str(Res.string.new_session_unavailable))
     private fun ComposeUiTest.ellipsis(): SemanticsNodeInteraction = onNodeWithText("⋯")
-    private fun ComposeUiTest.sheetOpen() =
-        present(str(Res.string.new_task_keeps_running)) || present(str(Res.string.new_task_send_failed))
+    /** The sheet's own prompt field — the one part of it that is always there, whatever its status line says. */
+    private fun ComposeUiTest.sheetOpen() = onAllNodesWithTag("new-task-prompt").fetchSemanticsNodes().isNotEmpty()
 
     /** A tap on the sheet's scrim, which covers the header: the dismissal a user makes by tapping above the sheet. */
     private fun ComposeUiTest.tapAboveTheSheet() { ellipsis().performClick(); waitForIdle() }
@@ -218,6 +222,7 @@ class NewSessionEntryTest {
             // the Projects FAB's sticky picks, left by an earlier Fast Start
             repo.newTaskDir.value = FAB_DIR
             repo.newTaskAgent.value = AgentKind.CLAUDE
+            repo.streaming.value = true // a turn is running here, so "keeps running" is true of this chat
         }
 
         plus().performClick()
@@ -240,15 +245,34 @@ class NewSessionEntryTest {
         }
     }
 
+    /** The line only ever says what is true of the chat being left: nothing while it is idle, "keeps running" while a
+     *  turn streams, and the approval / question it still holds once one is pending. */
     @Test
-    fun theQuietLineSaysWhatTheChatLeftBehindStillWaitsOn() = runComposeUiTest {
+    fun theQuietLineSaysOnlyWhatIsTrueOfTheChatLeftBehind() = runComposeUiTest {
         val repo = mountChat("acct-nse-quiet")
+        val lines = listOf(
+            Res.string.new_task_keeps_running, Res.string.new_task_keeps_running_approval, Res.string.new_task_keeps_running_question,
+        ).map { str(it) }
+
+        // idle: nothing runs and nothing waits, so the sheet says nothing about this chat
+        plus().performClick()
+        waitForIdle()
+        assertTrue(sheetOpen(), "sanity: the sheet is up")
+        assertTrue(lines.none { present(it) }, "an idle chat gets no line")
+        tapAboveTheSheet()
+
+        // a turn streams: it keeps running
+        runOnIdle { repo.streaming.value = true }
+        plus().performClick()
+        waitForIdle()
+        assertPresent(str(Res.string.new_task_keeps_running))
+
+        // a pending approval outranks the bare "keeps running": exactly one of the three lines
         runOnIdle {
             repo.pendingAsk.value = PermissionAsk(
                 convoId = "c-acct-nse-quiet", askId = "ap-1", tool = "Bash", inputPreview = "rm -rf build", title = "Run command",
             )
         }
-        plus().performClick()
         waitForIdle()
         assertPresent(str(Res.string.new_task_keeps_running_approval))
         assertFalse(present(str(Res.string.new_task_keeps_running)), "exactly one of the three lines")
@@ -262,6 +286,42 @@ class NewSessionEntryTest {
         waitForIdle()
         assertPresent(str(Res.string.new_task_keeps_running_question))
         assertFalse(present(str(Res.string.new_task_keeps_running_approval)))
+    }
+
+    /** Photos or files staged in this chat's composer would ride the new session's first prompt (it is sent through
+     *  the same composer state). So "+" does not open the sheet over them — it says what to do first — and it keeps
+     *  its look and name meanwhile: greying it as attachments come and go would make the header flicker. */
+    @Test
+    fun stagedAttachmentsKeepTheSheetClosedUntilTheyAreGone() = runComposeUiTest {
+        val events = mutableListOf<Pair<TelEvent, Map<TelKey, Any>>>()
+        telemetryTap = { e, p -> synchronized(events) { events += e to p } }
+        try {
+            mainClock.autoAdvance = false
+            val repo = mountChat("acct-nse-staged")
+            fun entries() = synchronized(events) {
+                events.count { it.first == TelEvent.FeatureUsed && it.second[TelKey.Feature] == "new_session_entry" }
+            }
+            runOnIdle { repo.pendingImages.add(PendingImage(7, byteArrayOf(1, 2, 3), ImgState.Compressing)) }
+            mainClock.advanceTimeBy(100)
+            waitForIdle()
+
+            plus().assertIsEnabled().assert(isButton) // unchanged look and name with attachments staged
+            plus().performClick()
+            mainClock.advanceTimeBy(100)
+            waitForIdle()
+            assertFalse(sheetOpen(), "the sheet does not open over staged attachments")
+            assertPresent(str(Res.string.new_session_attachments_staged))
+            assertEquals(0, entries(), "a refused tap is not a new_session_entry")
+
+            runOnIdle { repo.pendingImages.clear() }
+            plus().performClick()
+            mainClock.advanceTimeBy(100)
+            waitForIdle()
+            assertTrue(sheetOpen(), "with the composer clear, + opens the sheet as usual")
+            assertEquals(1, entries())
+        } finally {
+            telemetryTap = null
+        }
     }
 
     // ── the send path (demo loopback) ────────────────────────────────────────────────────────────────
@@ -340,9 +400,10 @@ class NewSessionEntryTest {
         }
     }
 
-    /** The open lands but the prompt is refused (here: an upload still running from the chat that was left). The
-     *  chat is still on screen — the hold kept it — so the sheet comes back HERE with the draft and the picks as sent,
-     *  and only an ordinary dismissal afterwards gives the FAB's picks back. */
+    /** The open lands but the prompt is refused — any of sendPrompt's gates; here an upload, slipped in once the sheet
+     *  is already up (with one staged beforehand "+" would not have opened it at all). The chat is still on screen — the
+     *  hold kept it — so the sheet comes back HERE with the draft and the picks as sent, and only an ordinary
+     *  dismissal afterwards gives the FAB's picks back. */
     @Test
     fun aRefusedFirstPromptReopensTheSheetInTheChatWithThePicksAsSent() = runComposeUiTest {
         val events = mutableListOf<Pair<TelEvent, Map<TelKey, Any>>>()
@@ -350,14 +411,14 @@ class NewSessionEntryTest {
         try {
             val sent = mutableListOf<Frame>()
             val repo = mountDemoChat("acct-nse-refused", sent)
+
+            plus().performClick()
+            waitForIdle()
             runOnIdle {
                 repo.pendingFiles.add(
                     PendingFile(1L, "build.log", 10L, ByteArray(10), "text/plain", FileUpState.Uploading),
                 )
             }
-
-            plus().performClick()
-            waitForIdle()
             onNodeWithTag("new-task-prompt").performTextInput("audit the release script")
             runOnIdle { repo.newTaskDir.value = TARGET }
             onNodeWithTag("new-task-send").performClick()

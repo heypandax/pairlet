@@ -1542,6 +1542,7 @@
     <string name="new_task_failed">Couldn\'t start the task. Your prompt is still here.</string>
     <!-- new session from a chat (new-session-from-chat-v1): the chat header's "+" opens this same sheet -->
     <string name="new_session_unavailable">New session, unavailable</string>
+    <string name="new_session_attachments_staged">Send or remove the attachments first</string>
     <string name="new_task_keeps_running">This chat keeps running.</string>
     <string name="new_task_keeps_running_approval">This chat keeps running; its approval is still waiting.</string>
     <string name="new_task_keeps_running_question">This chat keeps running; its question is still waiting.</string>
