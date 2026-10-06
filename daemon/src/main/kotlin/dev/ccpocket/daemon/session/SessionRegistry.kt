@@ -468,7 +468,7 @@ class SessionRegistry(
             // EXCEPT for a conversation this very daemon is driving right now: it cannot be bound (binding is
             // refused while live), and demoting its reconnect to a tail would orphan a running turn and its asks.
             val policyUnreadable = lookup is dev.ccpocket.daemon.disk.ObservationLookup.Unavailable && !isLiveSession(resume)
-            if (policyUnreadable) log.info("open ${resume.take(8)}… → observation policy unreadable (${(lookup as dev.ccpocket.daemon.disk.ObservationLookup.Unavailable).reason}): read-only")
+            if (policyUnreadable) log.warn("open ${resume.take(8)}… → observation policy unreadable (${(lookup as dev.ccpocket.daemon.disk.ObservationLookup.Unavailable).reason}): read-only until the store file is repaired or removed")
             val binding = (lookup as? dev.ccpocket.daemon.disk.ObservationLookup.Bound)?.binding
             val readOnly = open.observeOnly || binding?.readOnly == true || policyUnreadable
             if (readOnly) {

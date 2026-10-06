@@ -258,8 +258,9 @@ class ManagedSessionStore internal constructor(
         return when (val r = readCanonical(canonical)) {
             is ManagedProjectRead.Loaded -> r.state.member(agent, sessionId)?.observation?.let { ObservationLookup.Bound(it) } ?: ObservationLookup.Unbound
             is ManagedProjectRead.Missing, ManagedProjectRead.InvalidWorkdir -> ObservationLookup.Unbound
-            is ManagedProjectRead.Corrupt -> ObservationLookup.Unavailable(r.reason)
-            is ManagedProjectRead.Unreadable -> ObservationLookup.Unavailable(r.reason)
+            // the reason names the file: there is no automatic repair, so the owner has to fix or remove it by hand
+            is ManagedProjectRead.Corrupt -> ObservationLookup.Unavailable("${r.reason}; file ${fileFor(canonical).path}")
+            is ManagedProjectRead.Unreadable -> ObservationLookup.Unavailable("${r.reason}; file ${fileFor(canonical).path}")
         }
     }
 

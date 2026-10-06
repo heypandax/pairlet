@@ -124,7 +124,9 @@ class ManagedSessionStoreObservationTest {
         file.writeText(file.readText().replace("\"schemaVersion\":2", "\"schemaVersion\":1"))
         val fresh = store()
         assertIs<ManagedProjectRead.Corrupt>(fresh.read(workdir))
-        assertIs<ObservationLookup.Unavailable>(fresh.observationOf(workdir, AgentKind.CODEX, "a"))
+        val unavailable = assertIs<ObservationLookup.Unavailable>(fresh.observationOf(workdir, AgentKind.CODEX, "a"))
+        // no automatic repair exists, so the reason must name the file the owner has to fix or remove
+        assertTrue(unavailable.reason.contains(".json"), "reason names the store file: ${unavailable.reason}")
         assertIs<ObservationLookup.Unavailable>(fresh.observationOf(workdir, AgentKind.CODEX, "never-a-member"))
         assertEquals(ManagedSessionErrors.STORE_CORRUPT, assertIs<ManagedMutation.Refused>(fresh.setObservation(workdir, AgentKind.CODEX, "a", null)).error)
         // undecodable bytes: same answer
