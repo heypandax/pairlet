@@ -390,7 +390,7 @@ class WsConnection(
             managed?.detach(sink)           // #360: …and for managed session list pushes
             caps.pinRetired = true          // …and a closed connection can never hold a pin subscription again
             caps.pinSubscriptionId = null
-            outbox.close()
+            retireOutbox(outbox)            // not bare close(): see retireOutbox (TRANSPORT-AUTO-REPATH-V1 4.6)
             writer.cancel()
             revokeWatch?.cancel()
             withContext(NonCancellable) {
@@ -406,4 +406,18 @@ class WsConnection(
         const val WRITE_TIMEOUT_MS = 10_000L // a healthy loopback/LAN write is instant; stalled this long = zombie
         const val HANDSHAKE_TIMEOUT_MS = 10_000L // hello + Noise on loopback/LAN is instant; a silent socket is a probe
     }
+}
+
+/**
+ * Ends a connection's outbox so NO fan-out sender can stay parked on it (#404, TRANSPORT-AUTO-REPATH-V1 4.6).
+ * close() alone fails only FUTURE sends: a sender already suspended on a full buffer keeps waiting for a receiver,
+ * and the writer that would have received is being cancelled — so the conversation emit that called it, and the
+ * turn behind it, would never finish. More LAN reconnects (idle re-path) make that window more frequent.
+ * Close first (later sends throw ClosedSendChannelException exactly as before and the fan-out's runCatching
+ * ignores them), then drain: each tryReceive pulls a parked sender's frame in and resumes that sender normally.
+ * Draining rather than cancel() keeps CancellationException out of emitters running in other scopes.
+ */
+internal fun retireOutbox(outbox: kotlinx.coroutines.channels.Channel<*>) {
+    outbox.close()
+    while (outbox.tryReceive().isSuccess) Unit
 }
