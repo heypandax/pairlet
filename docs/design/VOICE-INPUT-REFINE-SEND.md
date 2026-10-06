@@ -162,7 +162,7 @@ daemon 侧 Sentry 只记阶段与耗时分类，沿用 [ERROR-PATHS](../observab
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | M0 探针 | Codex app-server：禁工具的 `-c` 覆盖、输出 schema 的接受方式；Claude 预设/网关下 `--model` 行为；写进 `scripts/probe-codex-wire.py` / `probe-claude-wire.py` | 探针脚本通过；Codex 替换列表 3 次实测 < 6 s 才启用 Codex 校对器（§4.3 门槛） |
-| M1 daemon | 协议帧 + `TranscriptRefineService` + Claude 适配器（Codex 适配器与 `CodexUtilityServer` 本轮不做，见 §4.3）+ 校验器单测（唯一匹配、比例上限、注入样例） | TestClient 走通 refine → refined；日志无文本。**2026-10-06 已实现（分支 `worktree-agent-a0a1dfc337fdc1759`）**，自动化验证（假进程，未发真实推理）：`:protocol:jvmTest` 40 类 434 例 0 失败；daemon 定向（transcribe / memo / server / DaemonActivityTest / BridgeCapsTest / ExecutionCapsTest）44 类 352 例 0 失败；`compileKotlinDesktop` 通过，App 帧守卫测试通过。合入 main 后重跑结果见提交说明。真实 CLI 调用与 relay 设备路径端到端尚无自动化覆盖，待一次手工验证。 |
+| M1 daemon | 协议帧 + `TranscriptRefineService` + Claude 适配器（Codex 适配器与 `CodexUtilityServer` 本轮不做，见 §4.3）+ 校验器单测（唯一匹配、比例上限、注入样例） | TestClient 走通 refine → refined；日志无文本。**2026-10-06 已实现（分支 `worktree-agent-a0a1dfc337fdc1759`）**，自动化验证（假进程，未发真实推理）：`:protocol:jvmTest` 40 类 434 例 0 失败；daemon 定向（transcribe / memo / server / DaemonActivityTest / BridgeCapsTest / ExecutionCapsTest）44 类 352 例 0 失败；`compileKotlinDesktop` 通过，App 帧守卫测试通过。合入 main（290a1ac9）后 `--rerun` 重跑：`:protocol:jvmTest` 40 类 434 例 0 失败；daemon 同一范围 45 类 364 例 0 失败（多出的一类是 main 带来的 `OutboxRetireTest`）；`compileKotlinDesktop` 通过；`AgentFrameGuardTest` + `ResetInventoryTest` 2 类 15 例 0 失败。真实 CLI 调用与 relay 设备路径端到端尚无自动化覆盖，待一次手工验证。 |
 | M2 手机 | `Refining` 状态、设置项、按设计稿落录音条与结束序列、回退与迟到规则、desktopTest | 真机：Claude 会话 ✓ 后 ≤ 6 s 消息出现在会话中；断连/超时/无校对器三条回退可复现 |
 | M3 打磨 | 双语文案、无障碍朗读、遥测、隐私文案 | 设计稿验收清单逐项过 |
 
