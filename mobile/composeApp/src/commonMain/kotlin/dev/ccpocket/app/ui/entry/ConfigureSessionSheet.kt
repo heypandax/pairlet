@@ -99,6 +99,9 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
 import dev.ccpocket.app.theme.tightCenter
 import dev.ccpocket.app.ui.CodexCatalogNoteLine
+import dev.ccpocket.app.ui.CodexCatalogRefreshButton
+import dev.ccpocket.app.ui.CodexCatalogStatus
+import dev.ccpocket.app.ui.codexCatalogStatusText
 import dev.ccpocket.app.ui.CtxPill
 import dev.ccpocket.app.ui.ModelChoice
 import dev.ccpocket.app.ui.PocketSheet
@@ -156,6 +159,11 @@ fun ConfigureSessionSheet(
      *  [dev.ccpocket.app.ui.codexCatalogNote]); null = nothing to explain. A lambda like [modelsFor]: the agent
      *  chips switch backends in place. */
     modelsNoteFor: (AgentKind) -> String? = { null },
+    /** Codex catalog cache: the localized STATE of [modelsFor]'s rows per agent (updating / restored preview /
+     *  CLI built-ins / failed refresh); null = a confirmed catalog with nothing to say. */
+    modelsStatusFor: (AgentKind) -> CodexCatalogStatus? = { null },
+    /** Codex catalog cache: the user's manual refresh of an agent's catalog; null = no refresh control. */
+    onRefreshModels: ((AgentKind) -> Unit)? = null,
     modePresetsFor: (AgentKind) -> List<AgentModePreset> = { emptyList() },
     /**
      * The connected daemon's advertised AGENT presets, per agent (issue #333; dsh only today). A lambda for
@@ -255,13 +263,27 @@ fun ConfigureSessionSheet(
                 }
 
                 val models = modelsFor(chosenAgent)
-                EntryLabel(
-                    stringResource(if (models.isEmpty()) Res.string.label_model else Res.string.cfg_model_reported),
-                    Modifier.padding(top = 22.dp, bottom = Metric.gapS),
-                )
+                val modelStatus = modelsStatusFor(chosenAgent)
+                Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = Metric.gapS), verticalAlignment = Alignment.CenterVertically) {
+                    EntryLabel(
+                        stringResource(if (models.isEmpty()) Res.string.label_model else Res.string.cfg_model_reported),
+                        Modifier.weight(1f),
+                    )
+                    // Codex catalog cache: a light manual refresh beside the label; the rows below stay tappable
+                    if (chosenAgent == AgentKind.CODEX && onRefreshModels != null) {
+                        CodexCatalogRefreshButton(refreshing = modelStatus == CodexCatalogStatus.REFRESHING) { onRefreshModels(chosenAgent) }
+                    }
+                }
                 ModelSection(models, chosenModel, defaultModelFor(chosenAgent)) { chosenModel = it }
-                // a fallback list reads exactly like a real catalog — say so before the user picks from it
-                modelsNoteFor(chosenAgent)?.let { CodexCatalogNoteLine(it, Modifier.padding(top = Metric.gap)) }
+                // a fallback list reads exactly like a real catalog — say so before the user picks from it: the
+                // state line (cached / previewed / CLI built-ins / failed), then the daemon's own sentence when the
+                // state is a failure worth a reason. A stale sentence is withheld while a check runs or a preview shows.
+                modelStatus?.let {
+                    Text(codexCatalogStatusText(it), color = Tok.muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = Metric.gap))
+                }
+                if (modelStatus != CodexCatalogStatus.REFRESHING && modelStatus != CodexCatalogStatus.PREVIEW) {
+                    modelsNoteFor(chosenAgent)?.let { CodexCatalogNoteLine(it, Modifier.padding(top = if (modelStatus != null) 4.dp else Metric.gap)) }
+                }
 
                 when (modeChoiceSet(chosenAgent)) {
                     ModeChoiceSet.OPENCODE_AUTOMATIC -> {

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -95,11 +96,15 @@ import dev.ccpocket.app.resources.value_on
 import dev.ccpocket.app.resources.value_default
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentGlyph
+import kotlinx.coroutines.delay
 import dev.ccpocket.app.ui.AutoSizeSingleLineText
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
+import dev.ccpocket.app.ui.CodexCatalogRefreshButton
+import dev.ccpocket.app.ui.CodexCatalogStatus
+import dev.ccpocket.app.ui.codexCatalogStatusText
 import dev.ccpocket.app.ui.GatewayModelPreset
 import dev.ccpocket.app.ui.GatewayVendorMonogram
 import dev.ccpocket.app.ui.gatewayRowsFrom
@@ -196,6 +201,9 @@ internal fun desktopDefaultModeIndex(
  * [onStart] for this creation only — no per-project memory, no new default. [modelsFor] is a lambda because
  * the list follows the agent picked INSIDE the popover; [onAgentPicked] lets the host refresh it.
  */
+/** Codex catalog cache: how long a typed new-session path must stay unchanged before the catalog is asked for it. */
+internal const val CATALOG_PATH_DEBOUNCE_MS = 700L
+
 @Composable
 fun NewSessionPopover(
     initialPath: String,
@@ -210,10 +218,18 @@ fun NewSessionPopover(
     defaultModelFor: (AgentKind) -> String? = { null },
     /** Why [modelsFor]'s rows are only a built-in fallback (Codex today); null = nothing to explain. */
     modelsNoteFor: (AgentKind) -> String? = { null },
+    /** Codex catalog cache: the state of [modelsFor]'s rows (updating / preview / …) and the manual refresh, which
+     *  names the directory typed INSIDE the popover — the catalog is that project's, not the open chat's. */
+    modelsStatusFor: (AgentKind) -> CodexCatalogStatus? = { null },
+    onRefreshModels: ((AgentKind, String) -> Unit)? = null,
     /** issue #333 — the daemon's advertised agent presets for the agent picked INSIDE the popover.
      *  Empty = no preset row: a daemon that never advertised them never reads the choice back either. */
     agentPresetsFor: (AgentKind) -> List<AgentPresetInfo> = { emptyList() },
     onAgentPicked: (AgentKind) -> Unit = {},
+    /** Codex catalog cache: the (agent, directory) the catalog should describe — fired when the agent is picked and,
+     *  debounced by [CATALOG_PATH_DEBOUNCE_MS], when the typed path settles on a plausible directory, so typing does
+     *  not start a CLI per keystroke. */
+    onCatalogContext: (AgentKind, String) -> Unit = { _, _ -> },
     onStart: (String, AgentKind, PermissionMode, String?, String?, String?) -> Unit,
 ) {
     val selectableAgents = availableAgents.ifEmpty { listOf(AgentKind.CLAUDE) }
@@ -245,6 +261,12 @@ fun NewSessionPopover(
     val trimmed = path.text.trim()
     // light client check; the daemon is the authority (rejects a non-readable dir with a clear error)
     val looksAbsolute = trimmed.startsWith("/") || trimmed.startsWith("~") || Regex("^[A-Za-z]:[\\\\/].*").matches(trimmed)
+    // the catalog target follows the typed directory: immediately on open / agent pick, debounced while typing
+    LaunchedEffect(agent, trimmed) {
+        if (!looksAbsolute) return@LaunchedEffect
+        if (trimmed != initialPath.trim()) delay(CATALOG_PATH_DEBOUNCE_MS)
+        onCatalogContext(agent, trimmed)
+    }
     val pathFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { pathFocus.requestFocus() }
     Column(
@@ -308,7 +330,11 @@ fun NewSessionPopover(
                 }
             }
             // mobile parity: a fallback list reads exactly like a real catalog, so the row says which one this is
-            NewSessionModelRow(modelsFor(agent), chosenModel, defaultModelFor(agent), note = modelsNoteFor(agent)) { chosenModel = it }
+            NewSessionModelRow(
+                modelsFor(agent), chosenModel, defaultModelFor(agent), note = modelsNoteFor(agent),
+                status = modelsStatusFor(agent),
+                onRefresh = onRefreshModels?.takeIf { agent == AgentKind.CODEX }?.let { refresh -> { refresh(agent, trimmed) } },
+            ) { chosenModel = it }
             PopoverLabel(stringResource(Res.string.label_mode))
             if (agent == AgentKind.OPENCODE) {
                 // no selectable ladder: opencode has no approval protocol (daemon runs it --auto),
@@ -387,7 +413,12 @@ fun NewSessionPopover(
  * sits inside the row's own section gap, so it reads as part of the model row, not of what follows.
  */
 @Composable
-private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fallback: String?, note: String? = null, onChoose: (String?) -> Unit) {
+private fun NewSessionModelRow(
+    choices: List<ModelChoice>, chosen: String?, fallback: String?, note: String? = null,
+    /** Codex catalog cache: the state line under the row and the refresh control beside its label. */
+    status: CodexCatalogStatus? = null, onRefresh: (() -> Unit)? = null,
+    onChoose: (String?) -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     val defaultLabel = stringResource(Res.string.value_model_default)
     val summary = when {
@@ -395,9 +426,15 @@ private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fall
         !fallback.isNullOrBlank() -> modelChipLabel(fallback)
         else -> defaultLabel
     }
-    PopoverLabel(stringResource(Res.string.label_model))
+    if (onRefresh != null) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { PopoverLabel(stringResource(Res.string.label_model)) }
+            CodexCatalogRefreshButton(refreshing = status == CodexCatalogStatus.REFRESHING, onRefresh = onRefresh)
+        }
+    } else PopoverLabel(stringResource(Res.string.label_model))
+    val hasNotes = status != null || (note != null && status != CodexCatalogStatus.REFRESHING && status != CodexCatalogStatus.PREVIEW)
     Row(
-        Modifier.fillMaxWidth().padding(bottom = if (open || note != null) 6.dp else 14.dp).clip(RoundedCornerShape(8.dp))
+        Modifier.fillMaxWidth().padding(bottom = if (open || hasNotes) 6.dp else 14.dp).clip(RoundedCornerShape(8.dp))
             .border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
             .clickable { open = !open }.padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -414,11 +451,23 @@ private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fall
             }
         }
     }
-    note?.let {
-        Text(
-            it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp,
-            modifier = Modifier.padding(bottom = 14.dp),
-        )
+    if (hasNotes) DesktopCodexCatalogNotes(status, note, Modifier.padding(bottom = 14.dp))
+}
+
+/**
+ * The desktop's Codex catalog footer — the twin of the phone's `CodexCatalogNotes`: the localized state line,
+ * then the daemon's own sentence when the state is a failure worth a reason. A stale sentence is withheld while
+ * a check runs or a preview shows (it describes a previous check, not the rows on screen).
+ */
+@Composable
+internal fun DesktopCodexCatalogNotes(status: CodexCatalogStatus?, note: String?, modifier: Modifier = Modifier) {
+    val detail = if (status == CodexCatalogStatus.REFRESHING || status == CodexCatalogStatus.PREVIEW) null else note
+    if (status == null && detail == null) return
+    Column(modifier) {
+        status?.let { Text(codexCatalogStatusText(it), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp) }
+        detail?.let {
+            Text(it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp, modifier = if (status != null) Modifier.padding(top = 3.dp) else Modifier)
+        }
     }
 }
 
@@ -595,10 +644,20 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onDismiss(); true } else false
             },
     ) {
-        PopoverLabel(stringResource(Res.string.label_model))
+        val codexStatus = model.modelsStatusForAgent(AgentKind.CODEX)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { PopoverLabel(stringResource(Res.string.label_model)) }
+            // Codex catalog cache: the same light refresh the phone picker has; rows below stay clickable
+            if (model.chatAgent == AgentKind.CODEX) {
+                CodexCatalogRefreshButton(refreshing = codexStatus == CodexCatalogStatus.REFRESHING) { model.refreshModels(AgentKind.CODEX) }
+            }
+        }
         LaunchedEffect(model.chatAgent) { model.fetchModels(model.chatAgent) }
         val options = when (model.chatAgent) {
-            AgentKind.CODEX -> model.modelsForAgent(AgentKind.CODEX).ifEmpty { CODEX_MODEL_OPTIONS }.map { it to it }
+            // no answer yet → the static trio; an ANSWERED empty catalog stays empty (the status line says so).
+            // Rows show the upstream display name; the value sent on click is the execution id, unchanged.
+            AgentKind.CODEX -> (if (model.modelsKnownFor(AgentKind.CODEX)) model.modelsForAgent(AgentKind.CODEX) else CODEX_MODEL_OPTIONS)
+                .map { model.modelDisplayName(AgentKind.CODEX, it) to it }
             // daemon truth or nothing — no static catalog (see SessionSheets' OPTIONS note); the
             // empty state renders below and the custom field still takes a provider/model id
             AgentKind.OPENCODE -> model.modelsForAgent(AgentKind.OPENCODE).map { it to it }
@@ -649,13 +708,9 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
         options.forEach { (label, pick) ->
             QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
         }
-        // a built-in fallback reads exactly like a real catalog — say which one these rows are
-        model.modelsNoteForAgent(model.chatAgent)?.let {
-            Text(
-                it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp,
-                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-            )
-        }
+        // a built-in fallback reads exactly like a real catalog — say which one these rows are: the state line
+        // (cached / previewed / CLI built-ins / failed), then the daemon's own sentence when there is a failure
+        DesktopCodexCatalogNotes(model.modelsStatusForAgent(model.chatAgent), model.modelsNoteForAgent(model.chatAgent), Modifier.padding(top = 4.dp, bottom = 8.dp))
         if (gatewayUrl != null) {
             PopoverLabel(stringResource(Res.string.model_gateway_section))
             gatewayRows()

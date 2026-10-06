@@ -176,7 +176,7 @@ class SidePaneModelDelegationGuardTest {
         // user's dsh INSTALL, identical for every column, and it is only ever read by the new-session
         // popover, which is window-level. modelsNoteForAgent likewise: the machine's Codex cache, read
         // by that same popover.
-        "permissionModeAvailable", "modelsForAgent", "modelsNoteForAgent", "agentPresetsForAgent", "fetchModels", "pathSep",
+        "permissionModeAvailable", "modelsForAgent", "modelsNoteForAgent", "modelsStatusForAgent", "refreshModels", "modelDisplayName", "modelsKnownFor", "agentPresetsForAgent", "fetchModels", "pathSep",
         "gatewayBaseUrl", "gatewayModels", "availableAgents",
         // Changes browser / Git panel / worktrees: overlays, raised from the focused header only
         "changedFilesLoading", "changedFilesStale", "fetchChangedFiles", "selectedChangedPath",

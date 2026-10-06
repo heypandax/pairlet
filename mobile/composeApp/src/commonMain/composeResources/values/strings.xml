@@ -518,6 +518,12 @@
     <string name="opencode_models_loading">Loading models from opencode…</string>
     <string name="model_models_loading">Loading models from %1$s…</string>
     <string name="model_models_empty">%1$s reported no models.</string>
+    <string name="model_catalog_refreshing">Updating model list…</string>
+    <string name="model_catalog_preview">Showing this computer\'s last list; not yet checked on this connection.</string>
+    <string name="model_catalog_cli_builtin">Codex is not signed in on this computer — showing the CLI\'s built-in list.</string>
+    <string name="model_catalog_last_good">Update failed — showing the last list.</string>
+    <string name="model_catalog_builtin">Using the built-in list.</string>
+    <string name="model_catalog_refresh">Refresh model list</string>
     <string name="af_hint">Pick any combination — only the checked agents show their projects and sessions, and “All” means no filter. Each agent stays tagged in its own color.</string>
     <string name="settings_usage">Token usage</string>
     <string name="usage_title">Usage</string>

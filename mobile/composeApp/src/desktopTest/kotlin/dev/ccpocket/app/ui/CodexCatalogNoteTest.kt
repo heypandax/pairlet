@@ -23,6 +23,7 @@ import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CODEX_MODEL_IDS
+import dev.ccpocket.protocol.FetchModels
 import dev.ccpocket.protocol.ModelsList
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SessionLive
@@ -82,6 +83,9 @@ class CodexCatalogNoteTest {
                     val scope = rememberCoroutineScope()
                     val repo = remember {
                         PocketRepository(scope, account()).apply {
+                            onSendForTest = { frame ->
+                                if (frame is FetchModels && frame.agent == AgentKind.CODEX) receiveForTest(list)
+                            }
                             receiveForTest(
                                 SessionLive(
                                     convoId = "c-codex", workdir = "/Users/alex/code/cc-pocket", sessionId = "s1",
@@ -125,7 +129,7 @@ class CodexCatalogNoteTest {
                             workdir = "~/code/cc-pocket", agent = AgentKind.CODEX, computer = "alex-macbook",
                             availableAgents = listOf(AgentKind.CLAUDE, AgentKind.CODEX),
                             modelsFor = { a -> repo.newSessionModelChoices(a) },
-                            modelsNoteFor = { a -> codexCatalogNote(a, repo.agentModels[a]) },
+                            modelsNoteFor = { a -> codexCatalogNote(a, repo.modelListFor(a)) },
                             onPick = { _, _, _, _, _ -> }, onDismiss = {},
                         )
                     }
@@ -155,6 +159,9 @@ class CodexCatalogNoteTest {
     private fun settingsDefaults(list: ModelsList, assertions: SkikoComposeUiTest.() -> Unit) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         val repo = PocketRepository(scope, account()).apply {
+            onSendForTest = { frame ->
+                if (frame is FetchModels && frame.agent == AgentKind.CODEX) receiveForTest(list)
+            }
             setDefaultAgent(AgentKind.CODEX)
             receiveForTest(list)
         }

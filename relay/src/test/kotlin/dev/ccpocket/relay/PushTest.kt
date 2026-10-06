@@ -182,6 +182,69 @@ class PushTest {
         assertEquals(2, warns.count { it.contains("consecutive=1") })
     }
 
+    @Test fun retriesOnceAfterThrownIoAndLogsTheAcceptedSendContentFree() = runBlocking {
+        val store = InMemoryRelayStore()
+        store.insertAccount("acct", ByteArray(32), 1)
+        store.insertDevice(device("a", "acct")); store.setPushToken("a", "apns", "tokA-123456789", 2)
+        val logs = mutableListOf<String>()
+        var calls = 0
+        val sender = FnSender { if (++calls == 1) throw RuntimeException("Connection reset") else SendResult.ACCEPTED }
+        val route = NotifyRoute("/Users/x/proj", "sess-1234567890", kind = "approval")
+
+        StorePushService(store, mapOf("apns" to sender), retryDelayMs = 0) { logs += it }
+            .notify("acct", "Approval needed — proj", "Run command is waiting for your decision", route)
+
+        assertEquals(2, calls) // the reset cost one retry, not the alert
+        assertTrue(logs.any { it.contains("retry attempt=2") })
+        assertFalse(logs.any { it.contains("WARN") }) // rescued → not a full failure, streak untouched
+        assertEquals(1, store.pushTargets("acct").size)
+        val sent = logs.single { it.startsWith("[push] sent") }
+        assertTrue(sent.contains("platform=apns") && sent.contains("kind=approval") && sent.contains("sid=sess-123") && sent.contains("token=tokA-1"), sent)
+        // content-free: never the alert text, never the whole token or session id
+        assertFalse(sent.contains("Approval needed") || sent.contains("waiting") || sent.contains("tokA-123456789") || sent.contains("sess-1234567890"), sent)
+    }
+
+    @Test fun retriesOnceAfterFailedAnswerThenGivesUp() = runBlocking {
+        val store = InMemoryRelayStore()
+        store.insertAccount("acct", ByteArray(32), 1)
+        store.insertDevice(device("a", "acct")); store.setPushToken("a", "apns", "tokA", 2)
+        val logs = mutableListOf<String>()
+        var calls = 0
+        val sender = FnSender { calls++; SendResult.FAILED }
+
+        StorePushService(store, mapOf("apns" to sender), retryDelayMs = 0) { logs += it }.notify("acct", "t", "b")
+
+        assertEquals(2, calls) // exactly one retry — bounded, never a loop
+        assertTrue(logs.any { it.contains("WARN") && it.contains("consecutive=1") })
+        assertFalse(logs.any { it.startsWith("[push] sent") })
+        assertEquals(1, store.pushTargets("acct").size) // still transient — the token stays
+    }
+
+    @Test fun neverRetriesAnInvalidToken() = runBlocking {
+        val store = InMemoryRelayStore()
+        store.insertAccount("acct", ByteArray(32), 1)
+        store.insertDevice(device("a", "acct")); store.setPushToken("a", "apns", "tokA", 2)
+        var calls = 0
+        val sender = FnSender { calls++; SendResult.INVALID_TOKEN }
+
+        StorePushService(store, mapOf("apns" to sender), now = { 9 }, retryDelayMs = 0) {}.notify("acct", "t", "b")
+
+        assertEquals(1, calls) // 410 is final — a retry would only hammer a dead token
+        assertTrue(store.pushTargets("acct").isEmpty())
+    }
+
+    @Test fun acceptedSendWithoutRouteLogsPlaceholders() = runBlocking {
+        val store = InMemoryRelayStore()
+        store.insertAccount("acct", ByteArray(32), 1)
+        store.insertDevice(device("a", "acct")); store.setPushToken("a", "fcm", "tokB", 2)
+        val logs = mutableListOf<String>()
+
+        StorePushService(store, mapOf("fcm" to RecordingSender()), retryDelayMs = 0) { logs += it }.notify("acct", "t", "b")
+
+        val sent = logs.single { it.startsWith("[push] sent") }
+        assertTrue(sent.contains("platform=fcm") && sent.contains("kind=-") && sent.contains("sid=-"), sent)
+    }
+
     @Test fun configFallsBackToLoggingWithoutCredentials() {
         assertIs<LoggingPushService>(PushConfig.load(InMemoryRelayStore()) { null })
     }

@@ -101,15 +101,17 @@ import org.jetbrains.compose.resources.stringResource
 internal fun settingsDefaultModelOptions(
     agent: AgentKind,
     selected: String?,
-    discovered: List<String>,
+    /** The daemon-reported ids; null = no answer (and no preview) yet. Codex falls back to the static trio ONLY
+     *  then — an answered empty catalog stays empty (Codex catalog cache). */
+    discovered: List<String>?,
 ): List<String?> {
     val available = when (agent) {
         AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { it.second }
-        AgentKind.CODEX -> discovered.ifEmpty { CODEX_MODEL_OPTIONS }
+        AgentKind.CODEX -> discovered ?: CODEX_MODEL_OPTIONS
         // DSH (issue #255) rides the daemon-reported list like the rest. v1 fetches no catalog for it —
         // model switching is out of scope and FetchModels answers an explicit empty list — so this
         // resolves to just the current selection, which is the honest "nothing to pick from" state.
-        AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH -> discovered
+        AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE, AgentKind.DSH -> discovered.orEmpty()
     }
     return (listOf<String?>(null) + listOfNotNull(selected) + available.filter { it.isNotBlank() }).distinct()
 }
@@ -413,7 +415,7 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
     val modelOptions = settingsDefaultModelOptions(
         defaultAgent,
         defaultModel,
-        repo.agentModels[defaultAgent]?.models.orEmpty(),
+        repo.modelListFor(defaultAgent)?.models,
     )
     SettingsChoiceRows(
         modelOptions,
@@ -429,9 +431,17 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
         },
         monospace = { it != null },
     ) { repo.setDefaultModelFor(defaultAgent, it) }
-    // a fallback list reads exactly like a real catalog — say so before a default is picked from it
-    codexCatalogNote(defaultAgent, repo.agentModels[defaultAgent])?.let {
-        CodexCatalogNoteLine(it, Modifier.padding(top = 10.dp, start = 2.dp))
+    // a fallback list reads exactly like a real catalog — say so before a default is picked from it (state line +
+    // the daemon's sentence), with the same light refresh the pickers offer (Codex catalog cache)
+    if (defaultAgent == AgentKind.CODEX) {
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            CodexCatalogNotes(
+                defaultAgent, repo.modelListFor(defaultAgent),
+                refreshing = repo.agentModelsRefreshing[defaultAgent] == true, preview = repo.isModelListPreview(defaultAgent),
+                modifier = Modifier.weight(1f).padding(top = 4.dp, start = 2.dp),
+            )
+            CodexCatalogRefreshButton(refreshing = repo.agentModelsRefreshing[defaultAgent] == true) { repo.refreshModels(defaultAgent) }
+        }
     }
     Text(
         stringResource(Res.string.settings_default_model_sub, agentName(defaultAgent)),

@@ -325,7 +325,7 @@ class ResetInventoryTest {
         }
 
         /** Owned helper objects whose fields are inventoried individually, under this key prefix. */
-        val EXPANDED = mapOf("transcript" to "transcript", "sidePanes" to "sidePanes", "sessionCache" to "sessionCache")
+        val EXPANDED = mapOf("transcript" to "transcript", "sidePanes" to "sidePanes", "sessionCache" to "sessionCache", "modelCatalogPolicy" to "modelCatalogPolicy")
 
         /** Fields outside the inventory, each with the reason. Not state, or state owned by a helper. */
         val IGNORED: Map<String, String> = buildMap {
@@ -349,6 +349,8 @@ class ResetInventoryTest {
                 "receiptExpired", "responseExpired", "receiptTimeoutMs", "turnTimeoutMs")
                 .forEach { put("sidePanes.$it", "SidePanes wiring / timeout configuration") }
             listOf("maxEntries", "maxBytes").forEach { put("sessionCache.$it", "SessionHistoryCache bounds (constructor configuration)") }
+            put("modelCatalogPolicy.now", "ModelCatalogRefreshPolicy clock (constructor configuration)")
+            put("modelCatalogStore", "stateless adapter over SecureStore (three function fields, no state of its own)")
         }
 
         /** Tabled fields the dirtying deliberately leaves at their initial value. */
@@ -701,6 +703,14 @@ class ResetInventoryTest {
             newTaskStarting              K K K K K K K K
             versionStatus                R R K K K K K K
             agentModels                  R R K K K K K K
+            agentModelPreview            R R K K K K K K  # Codex catalog cache: the restored rows belong to the computer we left
+            agentModelsRefreshing        R R K K K K K K  # … and the cue
+            codexCatalogRequest          R R K C K K K K  # the outstanding correlated request leaves with the link; OPN re-targets it at the opened session's directory (new token)
+            codexCatalogTimeout          R R K K K K K K  # its timer, likewise
+            codexCatalogTarget           R R K C K K K K  # the directory the catalog is asked for; OPN re-targets it at the opened session's
+            codexCatalogContext          R R K K K K K K  # which context the authoritative Codex list was confirmed for
+            codexCatalogScope            R R K K K K K K  # …and the daemon's scope marker on it
+            modelCatalogPolicy.lastReply R R K K K K K K  # per-computer answer ages
             usage                        R R K K K K K K
             usageLoading                 R R K K K K K K
             usageAgent                   R R K K K K K K

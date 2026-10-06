@@ -10,7 +10,8 @@ import kotlin.test.assertTrue
 /**
  * Issue #382: with turn pushes no longer suppressed by presence, a phone that is in the foreground AND
  * showing the very session the push is about must not also pop a banner — the chat already shows it.
- * Approvals and everything about other sessions still present.
+ * Since #382 was applied to asks (2026-10) that covers approvals too: the ask card is on screen. Everything
+ * about other sessions, and anything without session routing, still presents.
  */
 class ForegroundSessionTest {
 
@@ -20,8 +21,15 @@ class ForegroundSessionTest {
         assertFalse(shouldPresentForegroundPush(viewingSessionId = "s1", pushSessionId = "s1", pushKind = null))
     }
 
-    @Test fun approval_for_the_viewed_session_still_presents() {
-        assertTrue(shouldPresentForegroundPush("s1", "s1", "approval"))
+    @Test fun approval_for_the_viewed_session_is_hidden_too() {
+        // the daemon now pushes owner asks regardless of presence; the viewed chat already shows the ask card
+        assertFalse(shouldPresentForegroundPush("s1", "s1", "approval"))
+    }
+
+    @Test fun approval_for_another_session_or_without_routing_presents() {
+        assertTrue(shouldPresentForegroundPush("s1", "s2", "approval"))
+        assertTrue(shouldPresentForegroundPush(null, "s1", "approval"))
+        assertTrue(shouldPresentForegroundPush("s1", null, "approval"))
     }
 
     @Test fun other_session_or_no_open_chat_presents() {
@@ -48,8 +56,10 @@ class ForegroundSessionTest {
     @Test fun holder_tracks_the_open_session() {
         ForegroundSession.update("s1")
         assertFalse(ForegroundSession.shouldPresent("s1", null))
-        assertTrue(ForegroundSession.shouldPresent("s1", "approval"))
+        assertFalse(ForegroundSession.shouldPresent("s1", "approval"))
+        assertTrue(ForegroundSession.shouldPresent("s2", "approval"))
         ForegroundSession.update(null)
         assertTrue(ForegroundSession.shouldPresent("s1", null))
+        assertTrue(ForegroundSession.shouldPresent("s1", "approval"))
     }
 }

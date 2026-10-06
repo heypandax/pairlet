@@ -112,56 +112,47 @@ object PushPolicy {
         if (!pushEnabled) null else turnPush(workdir, sessionId, finalText, error).copy(urgent = true)
 
     /**
-     * The push for a pending permission ask, or null = don't push (a live client already has the card).
+     * The push for a pending permission ask — copy only; [askPushFor] applies the gate. Two flavors:
      *
-     *  - [origin] non-null (bridge, issue #91): ALWAYS pushed, urgent — the bridge can neither see nor
-     *    answer the ask, and the owner's phone being online elsewhere doesn't put the ask on its screen.
-     *  - owner session, [watched] false (issue #138): nobody is attached to the conversation, so the ask
-     *    frame reached NO client — urgent, because the relay's "interactive socket live" suppression
-     *    would wrongly swallow it when the phone is online in a DIFFERENT session.
-     *  - owner session, watched but the phone is gone everywhere ([peerOnline]/[lanConnected] both
-     *    false — locked phone with a stale sink): pushed non-urgent, so the relay's own interactive-
-     *    socket check stays as the second gate (our presence flags can lag a reconnect).
-     *  - otherwise: an attached, present client received the ask on the data plane — no push.
+     *  - [origin] non-null (bridge, issue #91): the bridge can neither see nor answer the ask, so the title
+     *    names the bridge and the body names the project.
+     *  - owner session ([origin] null, issue #138): the title names the project.
+     *
+     * Both ride `urgent = true` and `kind = "approval"`. Urgent means only "skip the relay's interactive-device
+     * check" (relay `NotifyGate.shouldSend`): the owner's desktop App is an interactive device attached around
+     * the clock, so that check would otherwise mute every owner ask. Presence is no longer an input (2026-10,
+     * issue #382 applied to asks): a client attached to the conversation, a relay peer online, a LAN client
+     * connected — none of it says the user is LOOKING, and on a machine with the desktop App open the old
+     * presence gate never let a single owner ask through. A phone showing this very session in the foreground
+     * hides the banner itself (app-side `shouldPresentForegroundPush`); everyone else gets the alert.
      */
-    fun askPush(
-        workdir: Path,
-        sessionId: String?,
-        origin: String?,
-        tool: String,
-        watched: Boolean,
-        peerOnline: Boolean,
-        lanConnected: Boolean,
-    ): NotifyPush? {
+    fun askPush(workdir: Path, sessionId: String?, origin: String?, tool: String): NotifyPush {
         val project = workdir.fileName?.toString() ?: "session"
-        return when {
-            origin != null -> NotifyPush(
-                title = "Approval needed — $origin",
-                body = "$project: $tool is waiting for your decision",
-                workdir = workdir.toString(),
-                sessionId = sessionId,
-                urgent = true, // deliver even if a phone is attached elsewhere — the ask isn't on its data plane
-                kind = "approval", // P2-4: dedicated notification category
-            )
-            !watched -> NotifyPush(
-                title = "Approval needed — $project",
-                body = "$tool is waiting for your decision",
-                workdir = workdir.toString(),
-                sessionId = sessionId,
-                urgent = true, // no client holds the card; an online-but-elsewhere phone must still hear it
-                kind = "approval",
-            )
-            !peerOnline && !lanConnected -> NotifyPush(
-                title = "Approval needed — $project",
-                body = "$tool is waiting for your decision",
-                workdir = workdir.toString(),
-                sessionId = sessionId,
-                urgent = false, // relay re-checks interactive sockets — belt and suspenders on stale presence
-                kind = "approval",
-            )
-            else -> null
-        }
+        return if (origin != null) NotifyPush(
+            title = "Approval needed — $origin",
+            body = "$project: $tool is waiting for your decision",
+            workdir = workdir.toString(),
+            sessionId = sessionId,
+            urgent = true,
+            kind = "approval", // P2-4: dedicated notification category
+        ) else NotifyPush(
+            title = "Approval needed — $project",
+            body = "$tool is waiting for your decision",
+            workdir = workdir.toString(),
+            sessionId = sessionId,
+            urgent = true,
+            kind = "approval",
+        )
     }
+
+    /**
+     * The ask push the relay client actually sends, or null when the desktop's "notify my phone" switch
+     * ([pushEnabled], daemon `prefs.pushEnabled`) is off — the ONLY gate, bridge and owner asks alike, exactly
+     * as [turnPushFor] gates turn ends. Bursts are bounded by the conversation's per-conversation coalesce
+     * window (`Conversation.askPushCoalesceMs`), with the relay's per-account ceiling as the backstop.
+     */
+    fun askPushFor(pushEnabled: Boolean, workdir: Path, sessionId: String?, origin: String?, tool: String): NotifyPush? =
+        if (!pushEnabled) null else askPush(workdir, sessionId, origin, tool)
 
     /**
      * May [frame] be WRITTEN to a relay socket whose announced capability is [relayProtoV]

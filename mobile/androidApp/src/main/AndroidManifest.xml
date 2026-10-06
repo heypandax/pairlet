@@ -20,11 +20,15 @@
         <!-- Size changes stay in this Activity (#378): a rotation, a split-screen resize or a fold
              hands Compose a new LocalConfiguration to re-measure against, where a recreated
              Activity would start a fresh root on the list and drop the open chat, its draft and
-             its scroll position. Size only: density, locale, font scale, dark mode and the rest
-             still recreate the Activity, and process death is not covered. -->
+             its scroll position. uiMode rides the same path: an OS light/dark flip (manual or
+             scheduled) lands in LocalConfiguration, isSystemInDarkTheme() recomposes and a
+             Settings ▸ Appearance ▸ System pick re-themes in place — instead of recreating the root
+             mid-chat (the app has no night-qualified resources, so nothing else needs the restart).
+             Density, locale, font scale and the rest still recreate the Activity, and process death
+             is not covered. -->
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|uiMode"
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">

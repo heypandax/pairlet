@@ -177,10 +177,11 @@ fun ThemeMode.resolvesToDark(systemDark: Boolean): Boolean = when (this) {
 @Composable
 fun PocketTheme(mode: ThemeMode, accent: AccentTheme = AccentTheme.POCKET, fontScale: Float = 1f, content: @Composable () -> Unit) {
     val dark = mode.resolvesToDark(systemDark = isSystemInDarkTheme())
-    // issue #117: align the OS status/navigation-bar FOREGROUND (icon/text) color with the resolved theme so
-    // the bars stay legible in light mode too — Android tints them, iOS/desktop no-op. On the mode overload
-    // only, so the real app roots drive it while the boolean overload used by tests/previews stays inert.
-    SystemBarAppearance(darkTheme = dark)
+    // issue #117: align the OS chrome with the resolved theme — Android tints the status/navigation-bar icons,
+    // iOS pins or releases the window interface style (SYSTEM must release it, or the OS flip never reaches
+    // isSystemInDarkTheme), desktop no-op. On the mode overload only, so the real app roots drive it while
+    // the boolean overload used by tests/previews stays inert.
+    SystemBarAppearance(mode = mode, darkTheme = dark)
     PocketTheme(dark = dark, accent = accent, fontScale = fontScale, content = content)
 }
 

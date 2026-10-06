@@ -232,10 +232,14 @@ internal class RunCmd(
         // API presets (issue #113): ONE store shared by the service (CRUD/activate over the wire) and
         // every claude backend (per-launch env injection) — two instances would let them diverge
         val presetStore = dev.ccpocket.daemon.presets.PresetStore.load()
+        // Codex model catalog: ONE instance for the router (FetchModels) and every Codex backend, so a session
+        // normalises its effort/tier against the catalog confirmed for its own workdir — a per-backend instance
+        // would never see a confirmed read and would either strip settings on stale data or know nothing.
+        val codexModels = dev.ccpocket.daemon.codex.CodexModelService(codexBin = codexBin)
         val core = DaemonCore(
             mapOf(
                 AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(claudeBin, claudeHome, presetStore::activeEnv) }, // resolves the binary lazily on first launch
-                AgentKind.CODEX to AgentBackendFactory { CodexBackend(codexBin) }, // resolves the binary lazily on first launch
+                AgentKind.CODEX to AgentBackendFactory { CodexBackend(codexBin, codexModels) }, // resolves the binary lazily on first launch
                 AgentKind.OPENCODE to AgentBackendFactory { dev.ccpocket.daemon.opencode.OpenCodeBackend(opencodeBin) }, // resolves the binary lazily on first launch
                 AgentKind.KIMI to AgentBackendFactory { dev.ccpocket.daemon.kimi.KimiBackend(kimiBin) }, // resolves the binary lazily on first launch
                 AgentKind.ZCODE to AgentBackendFactory { dev.ccpocket.daemon.zcode.ZCodeBackend(zcodeBin) },
@@ -245,6 +249,7 @@ internal class RunCmd(
             claudeConfigDir = claudeHome,
             claudeBin = claudeBin,
             codexBin = codexBin, // #348: the allowance reader must resolve the same codex the backend does
+            codexModels = codexModels,
             voiceMemoWorkRoot = dev.ccpocket.daemon.memo.MemoWorkDir.defaultRoot(),
             presetStore = presetStore,
             openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),

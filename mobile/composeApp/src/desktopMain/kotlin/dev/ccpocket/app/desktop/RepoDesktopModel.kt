@@ -1509,8 +1509,18 @@ class RepoDesktopModel(
     override fun serviceTierOptionsFor(agent: AgentKind, model: String?) = repo.serviceTierOptions(agent, model)
     override fun permissionModeAvailable(id: String, agent: AgentKind): Boolean = repo.supportsPermissionMode(id, agent)
     override fun compactConversation() { repo.sendPrompt("/compact") }
-    override fun modelsForAgent(agent: AgentKind): List<String> = repo.agentModels[agent]?.models ?: emptyList()
-    override fun modelsNoteForAgent(agent: AgentKind): String? = codexCatalogNote(agent, repo.agentModels[agent])
+    // Codex catalog cache: the daemon's answer, else the restored on-device preview — the same list the phone shows
+    override fun modelsForAgent(agent: AgentKind): List<String> = repo.modelListFor(agent)?.models ?: emptyList()
+    override fun modelsNoteForAgent(agent: AgentKind): String? = codexCatalogNote(agent, repo.modelListFor(agent))
+    override fun modelsStatusForAgent(agent: AgentKind): dev.ccpocket.app.ui.CodexCatalogStatus? =
+        dev.ccpocket.app.ui.codexCatalogStatus(agent, repo.modelListFor(agent), repo.agentModelsRefreshing[agent] == true, repo.isModelListPreview(agent))
+    override fun refreshModels(agent: AgentKind) = repo.refreshModels(agent)
+    override fun fetchModels(agent: AgentKind, workdir: String) = repo.fetchModels(agent, targetWorkdir = workdir)
+    override fun refreshModels(agent: AgentKind, workdir: String) = repo.refreshModels(agent, targetWorkdir = workdir)
+    override fun modelDisplayName(agent: AgentKind, id: String): String =
+        if (agent != AgentKind.CODEX) id
+        else repo.modelListFor(agent)?.modelCapabilities?.firstOrNull { it.model == id }?.displayName?.takeIf { it.isNotBlank() } ?: id
+    override fun modelsKnownFor(agent: AgentKind): Boolean = repo.modelListFor(agent) != null
 
     override fun agentPresetsForAgent(agent: AgentKind) = repo.agentPresetsFor(agent)
     override fun fetchModels(agent: AgentKind) = repo.fetchModels(agent)
