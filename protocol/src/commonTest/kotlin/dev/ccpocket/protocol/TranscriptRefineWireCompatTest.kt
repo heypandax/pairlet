@@ -28,6 +28,18 @@ private data class PreRefineDaemonInfo(
     val supportsSessionObservationV1: Boolean = false,
 )
 
+/** The `pocket/transcript.refined` reader an already-shipped App decodes with (before the auto-send gate). */
+@Serializable
+private data class PreAutoSendTranscriptRefined(
+    val convoId: String,
+    val captureId: String,
+    val ok: Boolean,
+    val text: String = "",
+    val edits: List<TextEdit> = emptyList(),
+    val agent: String? = null,
+    val error: String? = null,
+)
+
 /**
  * Wire compatibility of voice input v2's refine exchange (docs/design/VOICE-INPUT-REFINE-SEND.md §5): both frames
  * round-trip under their discriminators, both capability fields are trailing optionals that an older peer neither
@@ -89,6 +101,24 @@ class TranscriptRefineWireCompatTest {
         assertTrue(reply.edits.isEmpty())
         assertNull(reply.agent)
         assertNull(reply.error)
+        assertFalse(reply.autoSend)
+    }
+
+    @Test
+    fun auto_send_is_a_trailing_optional_an_old_daemon_never_sends_and_an_old_app_skips() {
+        // an older daemon's ok reply carries no autoSend: the phone must fall back to the composer
+        val fromOldDaemon = assertIs<TranscriptRefined>(
+            body("""{"t":"pocket/transcript.refined","convoId":"c","captureId":"k","ok":true,"text":"Hi","edits":[{"from":"hi","to":"Hi"}],"agent":"claude"}"""),
+        )
+        assertFalse(fromOldDaemon.autoSend)
+
+        val gated = TranscriptRefined("c", "k", ok = true, text = "Hi", edits = listOf(TextEdit("hi", "Hi")), agent = "claude", autoSend = true)
+        assertTrue((roundTrip(gated) as TranscriptRefined).autoSend)
+        val oldAppView = PocketJson.decodeFromString<PreAutoSendTranscriptRefined>(bodyJson(gated))
+        assertEquals(
+            PreAutoSendTranscriptRefined("c", "k", ok = true, text = "Hi", edits = listOf(TextEdit("hi", "Hi")), agent = "claude"),
+            oldAppView,
+        )
     }
 
     @Test

@@ -82,6 +82,9 @@ data class TranscriptRefine(
  * ok=false: [error] is a [TranscriptRefineError] code and [text] is empty — the phone falls back to the transcript
  * it already holds. [agent] names the [AgentKind] wire name whose refiner handled the request, also on most
  * failures; null when none was chosen.
+ *
+ * [autoSend]: the corrected text passed the daemon's auto-send gate; false (also from a daemon that predates the
+ * field) means the phone puts the text in the composer.
  */
 @Serializable
 @SerialName("pocket/transcript.refined")
@@ -93,6 +96,7 @@ data class TranscriptRefined(
     val edits: List<TextEdit> = emptyList(),
     val agent: String? = null,
     val error: String? = null,
+    val autoSend: Boolean = false,
 ) : ToPhone
 
 /** One replacement: the fragment [from] of the original text becomes [to]. */
