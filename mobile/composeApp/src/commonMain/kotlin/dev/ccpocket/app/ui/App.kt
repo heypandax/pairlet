@@ -187,6 +187,7 @@ import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.OpenFailure
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
+import dev.ccpocket.app.data.VoiceBarMode
 import dev.ccpocket.app.data.VoiceState
 import dev.ccpocket.app.data.agentFilterIsAll
 import dev.ccpocket.app.pairing.displayName
@@ -3380,7 +3381,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     LimitResetBanner(repo) // usage-limit hit → one-tap "auto-continue after reset" (issue #137)
                     AgentRepairBanner(repo) // dsh incomplete install → one-tap reinstall
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
-                    val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
+                    // voice input v2: the send bar's waiting states (correcting, the corrections on show) keep the bar up
+                    val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing ||
+                        voiceState is VoiceState.Refining || voiceState is VoiceState.Preview
                     LaunchedEffect(capturing) { if (capturing) attachSheet = false }
                     if (suggestions.isNotEmpty() && !capturing) {
                         SlashCommandMenu(suggestions) { cmd -> composer.setText(cmd.completion()) }
@@ -3409,8 +3412,19 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         Text(stringResource(n), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
                     }
                     if (capturing) {
-                        if (repo.liveDictation.value && voiceState is VoiceState.Recording) {
-                            LiveTranscriptField(repo.liveFinal.value, repo.livePartial.value)
+                        val barMode = repo.voiceBarMode.value
+                        when {
+                            // the send bar after ✓: the original while it is corrected, then the corrections on show
+                            voiceState is VoiceState.Refining -> VoiceTextPreview(AnnotatedString(voiceState.original))
+                            voiceState is VoiceState.Preview ->
+                                VoiceTextPreview(voicePreviewText(voiceState.text, voiceState.ranges, voiceCorrectionMark()))
+                            repo.liveDictation.value && voiceState is VoiceState.Recording ->
+                                LiveTranscriptField(repo.liveFinal.value, repo.livePartial.value)
+                            // a send bar keeps iOS's live words in place through transcription, read-only, so the field
+                            // does not flash out between ✓ and "correcting"; today's bar drops it there, as it always did
+                            barMode != VoiceBarMode.LEGACY && repo.liveDictation.value && voiceState is VoiceState.Transcribing &&
+                                (repo.liveFinal.value + repo.livePartial.value).isNotBlank() ->
+                                VoiceTextPreview(liveTranscriptText(repo.liveFinal.value, repo.livePartial.value))
                         }
                         RecordingBar(
                             elapsedMs = recElapsed,
@@ -3419,6 +3433,14 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             onCancel = repo::cancelVoice,
                             onDone = repo::stopVoice,
                             uploading = voiceState is VoiceState.Transcribing && repo.voiceUploading.value,
+                            mode = barMode,
+                            onFinishEdit = repo::finishAndEditVoice,
+                            onFinishSend = repo::finishAndSendVoice,
+                            wait = when (voiceState) {
+                                is VoiceState.Refining -> VoiceBarWait.Correcting(refinerDisplayName(voiceState.agent))
+                                is VoiceState.Preview -> VoiceBarWait.Sending
+                                else -> null
+                            },
                         )
                         // RecordingBar's ✕/✓ own the voice capture. If an agent turn is also running,
                         // keep its separate interrupt reachable instead of hiding it for the entire recording
