@@ -218,6 +218,22 @@ class VoiceSendFlowTest {
         assertEquals(emptyList(), f.on(RefineDeadline(id)))
     }
 
+    @Test fun deadlineDuringTheHoldStillWinsAndNeverSends() {
+        // The answer came in time but the hold outlived the budget: rule 3 reads literally — edit-only, original,
+        // no cancel (the refine already answered). The host may simply stop the deadline timer on Refined.
+        val f = holding()
+        assertEquals(listOf(composer(original, TIMEOUT), Finished(id)), f.on(RefineDeadline(id)))
+        assertEquals(emptyList(), f.on(HoldElapsed(id, eligibleNow = true)))
+    }
+
+    @Test fun secondTapWhileWaitingChangesNothing() {
+        val f = refining()
+        for (e in listOf(TapSend(true), TapDone, TranscriptFinal("别的文字"), TranscriptFailed, Partial("x"))) {
+            assertEquals(emptyList(), f.on(e), "$e")
+        }
+        assertEquals(VoiceSendFlow.Phase.REFINING, f.phase)
+    }
+
     @Test fun capReachedWhileRefiningIsAnEdit() {
         assertEquals(listOf(CancelRefine(id), composer(original), Finished(id)), refining().on(CapReached))
     }
