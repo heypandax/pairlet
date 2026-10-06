@@ -382,20 +382,35 @@ class TranscriptRefineServiceTest {
     }
 
     @Test
-    fun the_hint_is_used_when_the_conversations_agent_has_no_refiner() = runTest {
+    fun a_known_agent_without_a_refiner_is_unavailable_whatever_the_hint() = runTest {
         sessionAgent = AgentKind.CODEX // no Codex refiner on this daemon
+        val s = service(); val inbox = Inbox()
+        s.onRefine(req(hint = "claude"), inbox)
+        runCurrent()
+        val r = inbox.only()
+        assertFalse(r.ok)
+        assertEquals(TranscriptRefineError.UNAVAILABLE, r.error)
+        assertNull(r.agent)
+        assertEquals(0, claude.calls.get(), "the hint never overrides the conversation's own agent")
+    }
+
+    @Test
+    fun the_hint_picks_only_for_a_conversation_with_no_agent_here() = runTest {
+        sessionAgent = null // not started (or no longer live) on this daemon
         val s = service(); val inbox = Inbox()
         s.onRefine(req(hint = "claude"), inbox)
         runCurrent()
         val r = inbox.only()
         assertTrue(r.ok)
         assertEquals("claude", r.agent)
-        // and when the conversation is not live here at all
-        sessionAgent = null
-        val second = Inbox()
-        s.onRefine(req(capture = "cap-2", hint = "claude"), second)
+        assertEquals(1, claude.calls.get())
+        // and without a hint there is nothing to follow
+        val none = Inbox()
+        s.onRefine(req(capture = "cap-2", hint = null), none)
         runCurrent()
-        assertEquals("claude", second.only().agent)
+        assertEquals(TranscriptRefineError.UNAVAILABLE, none.only().error)
+        assertNull(none.only().agent)
+        assertEquals(1, claude.calls.get())
     }
 
     @Test

@@ -24,10 +24,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  * on the sink the request arrived on — like [TranscribeService]'s [dev.ccpocket.protocol.Transcript], the result only
  * reaches the device that dictated — unless the phone cancelled, in which case nothing is sent.
  *
- * - Which refiner: the conversation's own agent when it has one here, else the phone's default agent
- *   ([TranscriptRefine.agentHint]) when THAT has one, else none → [TranscriptRefineError.UNAVAILABLE]. Deliberately no
- *   further fallback: the owner's quota is spent only on the agent they are using (a Codex user's dictation must not
- *   quietly run on their Claude account).
+ * - Which refiner: when the daemon knows the conversation's agent (it is live here), that agent's refiner and no
+ *   other — none, or one whose CLI is missing, is [TranscriptRefineError.UNAVAILABLE]. Only for a conversation with no
+ *   agent here yet (not started, or no longer live) does the phone's default agent ([TranscriptRefine.agentHint])
+ *   pick, with the same rule. Deliberately no fallback between the two: the owner's quota is spent only on the agent
+ *   they are using (a Codex user's dictation must not quietly run on their Claude account).
  * - One refine per conversation. A different request replaces the running one, whose requester is answered
  *   [TranscriptRefineError.SUPERSEDED]; the identical request re-sent (a reconnect) joins the running one instead.
  * - One model at a time across the whole daemon: a refine whose conversation differs from the running one waits for
@@ -44,7 +45,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class TranscriptRefineService(
     private val scope: CoroutineScope,
     private val refiners: TranscriptRefiners,
-    /** The agent driving a live conversation; null when it is not live here. */
+    /** The agent driving a live conversation; null when it is not live here (production: not started, or reaped). */
     private val agentOf: suspend (convoId: String) -> AgentKind?,
     /** The glossary for a conversation's refine ([RefineGlossary]); production reads the project off disk. */
     private val glossaryOf: suspend (convoId: String) -> List<String>,
@@ -148,9 +149,9 @@ class TranscriptRefineService(
     private suspend fun produce(run: Run): TranscriptRefined {
         val f = run.request
         if (f.text.length > TranscriptRefineLimits.MAX_TEXT_CHARS) return failure(f, TranscriptRefineError.UNAVAILABLE, null)
-        val refiner = refiners.usableFor(agentOf(f.convoId))
-            ?: refiners.usableFor(TranscriptRefiners.agentOf(f.agentHint))
-            ?: return failure(f, TranscriptRefineError.UNAVAILABLE, null)
+        // the conversation's known agent decides alone; the phone's hint only stands in when there is none
+        val agent = agentOf(f.convoId) ?: TranscriptRefiners.agentOf(f.agentHint)
+        val refiner = refiners.usableFor(agent) ?: return failure(f, TranscriptRefineError.UNAVAILABLE, null)
         run.agent = refiner.agent
         // nothing to correct, and nothing for a model to answer
         if (f.text.isBlank()) return TranscriptRefined(f.convoId, f.captureId, ok = true, text = f.text, agent = refiner.agent.wireName(), autoSend = true)
