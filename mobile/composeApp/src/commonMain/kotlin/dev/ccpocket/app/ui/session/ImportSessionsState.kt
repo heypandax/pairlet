@@ -51,6 +51,8 @@ enum class ManagedSessionsError {
     /** A change (enable / import / remove) got no answer in time: it may or may not have been applied. The list is being
      *  re-read to find out — never shown as a failure. */
     UNCONFIRMED,
+    /** A read-only binding was refused because this computer is driving the session right now. */
+    OBSERVATION_CONFLICT,
 }
 
 /** Whether a project's agents still need the one-time "keep my list, import later ones" switch. */
@@ -112,6 +114,11 @@ interface ManagedSessionsGateway {
     /** Re-read [scope]'s managed list and say whether ([agent], [nativeId]) is a member: true / false, null = could not
      *  read. Settles an import whose answer never came. Default: unknown. */
     suspend fun reconcile(scope: ManagedScope, agent: AgentKind, nativeId: String): Boolean? = null
+
+    /** Import AND bind read-only in one daemon write (docs/design/DOTS-SESSION-OBSERVABILITY.md). Default: a gateway
+     *  that cannot bind imports nothing and says so, rather than importing a controllable member by surprise. */
+    suspend fun importObserved(scope: ManagedScope, agent: AgentKind, nativeId: String, binding: dev.ccpocket.protocol.ObservationBinding): ImportResult =
+        ImportResult.Failure(ManagedSessionsError.UNSUPPORTED)
 }
 
 /** Stamp on every outgoing request; a result whose tag is stale is dropped. [generation] bumps on scope change / close. */
@@ -155,6 +162,10 @@ data class ImportSessionsState(
     val imports: Map<DiscoveredKey, ImportPhase> = emptyMap(),
     /** Imported in this screen (or learned from the host), on top of each row's [DiscoveredSession.alreadyManaged]. */
     val importedKeys: Set<DiscoveredKey> = emptySet(),
+    /** The daemon can bind read-only observation: the "link as a Dot sub-session" switch is offered. */
+    val observationOffered: Boolean = false,
+    /** The switch is on: every import from this screen is an import + read-only bind, in one daemon write. */
+    val observeAsDot: Boolean = false,
 ) {
     fun isImported(s: DiscoveredSession): Boolean = s.alreadyManaged || s.key in importedKeys
     val canLoadMore: Boolean get() = list == ListPhase.Loaded && nextCursor != null && !loadingMore
@@ -163,8 +174,10 @@ data class ImportSessionsState(
 
 sealed interface ImportSessionsEvent {
     /** Open the screen, or retarget it (other project / other computer). Always a new generation. */
-    data class Open(val scope: ManagedScope, val agents: List<AgentKind> = IMPORTABLE_AGENTS, val agent: AgentKind? = null) : ImportSessionsEvent
+    data class Open(val scope: ManagedScope, val agents: List<AgentKind> = IMPORTABLE_AGENTS, val agent: AgentKind? = null, val observationOffered: Boolean = false) : ImportSessionsEvent
     data object Close : ImportSessionsEvent
+    /** Flip the "link as a Dot sub-session (read-only)" switch; ignored when the daemon does not offer it. */
+    data class ToggleObserveAsDot(val on: Boolean) : ImportSessionsEvent
     data class QueryTyped(val text: String) : ImportSessionsEvent
     data class DebounceElapsed(val token: Long) : ImportSessionsEvent
     data class SelectAgent(val agent: AgentKind) : ImportSessionsEvent
@@ -184,7 +197,7 @@ sealed interface ImportSessionsEffect {
     /** An import got no answer: re-read the managed list to learn whether it landed. */
     data class Reconcile(val tag: RequestTag, val scope: ManagedScope, val key: DiscoveredKey) : ImportSessionsEffect
     data class Discover(val tag: RequestTag, val scope: ManagedScope, val agent: AgentKind, val query: String, val cursor: String?) : ImportSessionsEffect
-    data class Import(val tag: RequestTag, val scope: ManagedScope, val key: DiscoveredKey) : ImportSessionsEffect
+    data class Import(val tag: RequestTag, val scope: ManagedScope, val key: DiscoveredKey, val binding: dev.ccpocket.protocol.ObservationBinding? = null) : ImportSessionsEffect
     /** Tell the host to locate the session in the managed list. Never a prompt, never a takeover. */
     data class Imported(val scope: ManagedScope, val key: DiscoveredKey, val alreadyManaged: Boolean) : ImportSessionsEffect
 }
@@ -204,6 +217,9 @@ fun reduceImportSessions(state: ImportSessionsState, event: ImportSessionsEvent)
         val fresh = ImportSessionsState(
             scope = event.scope, generation = state.generation + 1, seq = state.seq,
             agents = agents, agent = agent, debounceToken = state.debounceToken + 1,
+            observationOffered = event.observationOffered,
+            // a re-open of the same scope keeps the user's switch; another project / computer starts off
+            observeAsDot = event.observationOffered && event.scope == state.scope && state.observeAsDot,
         )
         if (agents.isEmpty()) ImportSessionsStep(fresh.copy(list = ListPhase.Failed(ManagedSessionsError.UNSUPPORTED)))
         else firstPage(fresh)
@@ -211,6 +227,10 @@ fun reduceImportSessions(state: ImportSessionsState, event: ImportSessionsEvent)
 
     ImportSessionsEvent.Close -> ImportSessionsStep(
         ImportSessionsState(generation = state.generation + 1, seq = state.seq, debounceToken = state.debounceToken + 1),
+    )
+
+    is ImportSessionsEvent.ToggleObserveAsDot -> ImportSessionsStep(
+        if (state.observationOffered) state.copy(observeAsDot = event.on) else state,
     )
 
     is ImportSessionsEvent.QueryTyped -> {
@@ -257,9 +277,11 @@ fun reduceImportSessions(state: ImportSessionsState, event: ImportSessionsEvent)
         if (scope == null || row == null || state.isImported(row) || busy) ImportSessionsStep(state)
         else {
             val tag = RequestTag(state.generation, state.seq + 1)
+            // the binding a client can create is always user-assigned + read-only (the daemon refuses anything else)
+            val binding = if (state.observationOffered && state.observeAsDot) dev.ccpocket.protocol.ObservationBinding() else null
             ImportSessionsStep(
                 state.copy(seq = tag.seq, imports = state.imports + (event.key to ImportPhase.InFlight)),
-                listOf(ImportSessionsEffect.Import(tag, scope, event.key)),
+                listOf(ImportSessionsEffect.Import(tag, scope, event.key, binding)),
             )
         }
     }
@@ -391,7 +413,11 @@ class ImportSessionsController(
                 dispatch(ImportSessionsEvent.DiscoverReturned(effect.tag, r))
             }
             is ImportSessionsEffect.Import -> scope.launch {
-                val r = guard({ ImportResult.Failure(it) }) { gateway.import(effect.scope, effect.key.agent, effect.key.nativeId) }
+                val binding = effect.binding
+                val r = guard({ ImportResult.Failure(it) }) {
+                    if (binding != null) gateway.importObserved(effect.scope, effect.key.agent, effect.key.nativeId, binding)
+                    else gateway.import(effect.scope, effect.key.agent, effect.key.nativeId)
+                }
                 dispatch(ImportSessionsEvent.ImportReturned(effect.tag, effect.key, r))
             }
             is ImportSessionsEffect.Reconcile -> scope.launch {

@@ -573,6 +573,7 @@ class DeviceSessions(
                 // #360: managed session list — same source as the LAN transport's copy
                 supportsManagedSessions = core.router.managedSessionAgentWires().isNotEmpty(),
                 managedAgents = core.router.managedSessionAgentWires(),
+                supportsSessionObservationV1 = core.router.managedSessionAgentWires().isNotEmpty(),
                 // #348: the backends whose subscription allowance this daemon can read. Same source as the
                 // LAN transport's copy (WsConnection) — the router owns the readers, so it owns the answer.
                 quotaAgents = core.router.quotaAgentWires(),
@@ -858,7 +859,8 @@ class DeviceSessions(
                 ) { state ->
                     val now = capsNow()
                     if (now.supportsManagedSessions && !bridges.isBridgeCandidate(deviceId)) {
-                        sink.emit(dev.ccpocket.daemon.session.ManagedSessionService.filterAgents(state) { a -> RequestRouter.capsAllow(now, a) })
+                        val filtered = dev.ccpocket.daemon.session.ManagedSessionService.filterAgents(state) { a -> RequestRouter.capsAllow(now, a) }
+                        sink.emit(if (now.supportsSessionObservation) filtered else dev.ccpocket.daemon.session.ManagedSessionService.stripObservation(filtered))
                     }
                 }
                 if (env.body is dev.ccpocket.protocol.SyncProjectPins) {

@@ -205,6 +205,8 @@ class DaemonCore(
         managedSessionRoot, scope, registry, dirs, backends.keys,
     ).also { svc ->
         registry.managedSessions = svc
+        // read-only observation policy: the persisted binding is the registry's only control-policy input
+        registry.observationPolicy = { agent, workdir, sessionId -> svc.store.observationOf(workdir, agent, sessionId) }
         scope.launch(Dispatchers.IO) { runCatching { svc.recoverPending() } }
     }
 

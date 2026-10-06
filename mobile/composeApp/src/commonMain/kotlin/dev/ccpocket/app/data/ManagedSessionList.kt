@@ -133,6 +133,8 @@ fun mergeManagedSessions(
 /** Daemon refusal code → client error. Unknown codes are [ManagedSessionsError.INTERNAL]. */
 fun managedErrorOf(code: String?): ManagedSessionsError = when (code) {
     ManagedSessionErrors.FORBIDDEN -> ManagedSessionsError.DENIED
+    ManagedSessionErrors.OBSERVATION_CONFLICT -> ManagedSessionsError.OBSERVATION_CONFLICT
+    ManagedSessionErrors.OBSERVATION_INVALID -> ManagedSessionsError.INTERNAL
     ManagedSessionErrors.UNSUPPORTED -> ManagedSessionsError.UNSUPPORTED
     ManagedSessionErrors.INVALID_WORKDIR -> ManagedSessionsError.INVALID_WORKDIR
     ManagedSessionErrors.NOT_FOUND -> ManagedSessionsError.NOT_FOUND

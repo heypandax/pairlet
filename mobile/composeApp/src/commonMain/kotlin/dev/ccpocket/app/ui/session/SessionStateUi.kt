@@ -1,5 +1,7 @@
 package dev.ccpocket.app.ui.session
 
+import dev.ccpocket.protocol.ObservedProgress
+import dev.ccpocket.protocol.ObservedStates
 import dev.ccpocket.protocol.SessionSummary
 
 /**
@@ -21,7 +23,17 @@ import dev.ccpocket.protocol.SessionSummary
  * only when this client observed a known-running session become settled while the user was elsewhere. It
  * is never guessed from timestamps, prompt text, model or transcript content.
  */
-enum class SurfaceState { APPROVAL, ANSWER, FAILURE, RUNNING, NEW_RESULT, COMPLETE }
+enum class SurfaceState {
+    APPROVAL, ANSWER, FAILURE, RUNNING, NEW_RESULT, COMPLETE,
+
+    /** A read-only OBSERVED session whose native record says its turn waits for input — in the Dot app, never here:
+     *  attention-toned like [ANSWER] but with NO action (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.4). */
+    WAITING_EXTERNAL,
+
+    /** A read-only OBSERVED session with no proven turn state (activity only, or an unknown vocabulary value): shown
+     *  as unknown — never promoted to running by `live`, never settled to complete by silence. */
+    UNKNOWN,
+}
 
 /** The non-color half of a state (foundations · "Status marks"): the shape carries it in greyscale too.
  *  Fill IS the ladder among the round marks: filled [DOT] still running, [HALF_DOT] settled but unseen,
@@ -44,6 +56,8 @@ val SurfaceState.mark: StateMark
         // signalling the vocabulary forbids — the written label was carrying it unaided in greyscale.
         SurfaceState.NEW_RESULT -> StateMark.HALF_DOT
         SurfaceState.COMPLETE -> StateMark.RING
+        SurfaceState.WAITING_EXTERNAL -> StateMark.DIAMOND
+        SurfaceState.UNKNOWN -> StateMark.RING
     }
 
 val SurfaceState.tone: StateTone
@@ -52,6 +66,8 @@ val SurfaceState.tone: StateTone
         SurfaceState.FAILURE -> StateTone.DANGER
         SurfaceState.RUNNING -> StateTone.RUNNING
         SurfaceState.COMPLETE -> StateTone.NEUTRAL
+        SurfaceState.WAITING_EXTERNAL -> StateTone.ATTENTION
+        SurfaceState.UNKNOWN -> StateTone.NEUTRAL
     }
 
 /** Only a real pending intervention gets an action — the tap hands the decision to its own owner surface
@@ -65,7 +81,7 @@ val SurfaceState.action: StateAction?
 
 /** Which half of the list owns this state. Anything that still needs the user's attention stays in Active;
  *  that includes a newly completed result until the session is successfully opened. */
-val SurfaceState.pinsToActive: Boolean get() = this != SurfaceState.COMPLETE
+val SurfaceState.pinsToActive: Boolean get() = this != SurfaceState.COMPLETE && this != SurfaceState.UNKNOWN
 
 /**
  * One pending intervention, already resolved to real facts by the caller: a `fleetAttention()` row's real
@@ -122,11 +138,32 @@ fun sessionState(
     attention != null && !attention.isQuestion -> SurfaceState.APPROVAL
     attention != null -> SurfaceState.ANSWER
     failed == true -> SurfaceState.FAILURE
+    // a read-only OBSERVED member answers from its native record alone: the daemon's process truth and the
+    // `live || busy` compatibility flags describe writers, and this session's writer is not ours to judge
+    observedState(summary) != null -> observedState(summary)!!
     currentlyWorking == true -> SurfaceState.RUNNING
     newResult == true -> SurfaceState.NEW_RESULT
     currentlyWorking == false -> SurfaceState.COMPLETE
     summary.live || summary.busy -> SurfaceState.RUNNING
     else -> SurfaceState.COMPLETE
+}
+
+/**
+ * The one state a read-only observed member may claim from its [ObservedProgress], or null when the row is not an
+ * observed member (or carries no snapshot). An unknown vocabulary value reads as [SurfaceState.UNKNOWN]; a stale
+ * snapshot keeps its state (the meta line says "last recorded"); nothing here ever yields an actionable state.
+ */
+fun observedState(summary: SessionSummary): SurfaceState? {
+    val observation = summary.observation ?: return null
+    if (!observation.readOnly) return null
+    val progress = observation.progress ?: return SurfaceState.UNKNOWN
+    return when (ObservedStates.normalize(progress.state)) {
+        ObservedStates.RUNNING -> SurfaceState.RUNNING
+        ObservedStates.WAITING_INPUT -> SurfaceState.WAITING_EXTERNAL
+        ObservedStates.IDLE, ObservedStates.CANCELLED -> SurfaceState.COMPLETE
+        ObservedStates.FAILED -> SurfaceState.FAILURE
+        else -> SurfaceState.UNKNOWN
+    }
 }
 
 /** Classify a whole list, preserving the daemon's order. */

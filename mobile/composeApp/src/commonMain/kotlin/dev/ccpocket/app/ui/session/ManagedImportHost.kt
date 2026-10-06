@@ -35,6 +35,8 @@ fun ManagedImportHost(
     onLocate: (ImportSessionsEffect.Imported) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The daemon advertises read-only observation bindings: offer the "link as a Dot sub-session" switch. */
+    observationOffered: Boolean = false,
 ) {
     val coroutines = rememberCoroutineScope()
     val locate by rememberUpdatedState(onLocate)
@@ -54,8 +56,8 @@ fun ManagedImportHost(
         return s
     }
 
-    LaunchedEffect(scope, agents) {
-        controller.dispatch(ImportSessionsEvent.Open(scope, agents))
+    LaunchedEffect(scope, agents, observationOffered) {
+        controller.dispatch(ImportSessionsEvent.Open(scope, agents, observationOffered = observationOffered))
         loadStatus()
     }
     DisposableEffect(controller) { onDispose { controller.dispatch(ImportSessionsEvent.Close) } }
@@ -80,14 +82,14 @@ fun ManagedImportHost(
                         EnableResult.Enabled -> {
                             loadStatus()
                             // the discovery rows' "already imported" marks came from before the switch: page one again
-                            controller.dispatch(ImportSessionsEvent.Open(scope, agents, controller.state.value.agent))
+                            controller.dispatch(ImportSessionsEvent.Open(scope, agents, controller.state.value.agent, observationOffered))
                         }
                         is EnableResult.Failure -> {
                             if (r.error == ManagedSessionsError.UNCONFIRMED) {
                                 // no answer is not "no": the daemon may have committed READY — ask it before saying anything
                                 val s = loadStatus()
                                 if (s != null && agent !in s.uninitialized) {
-                                    controller.dispatch(ImportSessionsEvent.Open(scope, agents, controller.state.value.agent))
+                                    controller.dispatch(ImportSessionsEvent.Open(scope, agents, controller.state.value.agent, observationOffered))
                                     return@launch
                                 }
                             }
@@ -114,5 +116,5 @@ fun ManagedImportRoute(
     val scope = remember(computer, workdir) { ManagedScope(computer, workdir) }
     val managed = repo.daemonManagedAgents.value
     val agents = remember(managed) { IMPORTABLE_AGENTS.filter { it in managed } }
-    ManagedImportHost(gateway, scope, agents, onLocate, onClose, modifier)
+    ManagedImportHost(gateway, scope, agents, onLocate, onClose, modifier, observationOffered = repo.daemonSessionObservation.value)
 }

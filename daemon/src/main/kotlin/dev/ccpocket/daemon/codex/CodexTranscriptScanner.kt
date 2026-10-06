@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.codex
 
+import dev.ccpocket.daemon.conversation.TurnEvidence
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.SessionSummary
@@ -241,6 +242,73 @@ object CodexTranscriptScanner {
         return scanned(file, stamp, workdir = null, requireMeta = false)?.runtime ?: RuntimeState()
     }
 
+    /** The latest turn's lifecycle evidence (task_started / task_complete / turn_aborted, newest activity, the tool
+     *  call in flight) off the same single read that serves [summarize] and [runtimeState] — an observe tick that
+     *  already asked for the runtime state pays nothing extra. Null when the rollout holds no record at all. */
+    fun turnEvidence(file: Path): TurnEvidence? {
+        val stamp = stampOf(file)
+        return scanned(file, stamp, workdir = null, requireMeta = false)?.turns
+    }
+
+    private fun recordTime(obj: JsonObject): Long? =
+        obj.str("timestamp")?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
+
+    /** Fold one rollout line into [current]. Only `event_msg` lifecycle records move the turn; every business
+     *  record moves `lastActivityAt`; a tool call opens `lastAction`, its output / completion closes it. */
+    private fun mergeTurnEvidence(current: TurnEvidence?, obj: JsonObject): TurnEvidence? {
+        val payload = obj.obj("payload") ?: return current
+        val ts = recordTime(obj)
+        val base = current ?: TurnEvidence()
+        return when (obj.str("type")) {
+            "event_msg" -> when (payload.str("type")) {
+                "task_started" -> base.copy(
+                    turnId = payload.str("turn_id") ?: base.turnId,
+                    startedAt = ts ?: payload.long("started_at")?.let { it * 1000 },
+                    endedAt = null, endKind = null, endReason = null,
+                    lastEventAt = ts ?: base.lastEventAt, lastActivityAt = ts ?: base.lastActivityAt, lastAction = null,
+                )
+                "task_complete" -> base.copy(
+                    turnId = payload.str("turn_id") ?: base.turnId,
+                    endedAt = ts ?: payload.long("completed_at")?.let { it * 1000 } ?: base.lastActivityAt,
+                    endKind = TurnEvidence.END_COMPLETE, endReason = null,
+                    lastEventAt = ts ?: base.lastEventAt, lastActivityAt = ts ?: base.lastActivityAt, lastAction = null,
+                )
+                "turn_aborted" -> base.copy(
+                    turnId = payload.str("turn_id") ?: base.turnId,
+                    endedAt = ts ?: payload.long("completed_at")?.let { it * 1000 } ?: base.lastActivityAt,
+                    endKind = TurnEvidence.END_ABORTED, endReason = payload.str("reason"),
+                    lastEventAt = ts ?: base.lastEventAt, lastActivityAt = ts ?: base.lastActivityAt, lastAction = null,
+                )
+                // UNVERIFIED against a real failure record (none in the probed corpus): only a turn that started and
+                // has not ended since is marked failed by it, so a stray error line can never flip a finished turn.
+                "error" -> if (base.running) base.copy(
+                    endedAt = ts ?: base.lastActivityAt, endKind = TurnEvidence.END_ERROR,
+                    endReason = payload.str("message")?.take(120),
+                    lastEventAt = ts ?: base.lastEventAt, lastActivityAt = ts ?: base.lastActivityAt, lastAction = null,
+                ) else base
+                "item_completed" -> {
+                    val itemType = payload.obj("item")?.str("type")
+                    val finishesAction = itemType == "CommandExecution" || itemType == "FileChange" || itemType == "Extension" || itemType == "McpToolCall"
+                    base.copy(lastActivityAt = ts ?: base.lastActivityAt, lastAction = if (finishesAction) null else base.lastAction)
+                }
+                else -> base
+            }
+            "response_item" -> when (payload.str("type")) {
+                "function_call", "custom_tool_call" -> base.copy(
+                    lastActivityAt = ts ?: base.lastActivityAt,
+                    lastAction = TurnEvidence.actionPreview(
+                        payload.str("name"),
+                        if (payload.str("type") == "function_call") payload.str("arguments") else payload.str("input"),
+                    ),
+                )
+                "function_call_output", "custom_tool_call_output" -> base.copy(lastActivityAt = ts ?: base.lastActivityAt, lastAction = null)
+                "message", "reasoning", "web_search_call" -> base.copy(lastActivityAt = ts ?: base.lastActivityAt)
+                else -> base
+            }
+            else -> base
+        }
+    }
+
     private fun mergeRuntimeState(current: RuntimeState, obj: JsonObject): RuntimeState {
         val payload = obj.obj("payload") ?: return current
         val model = when (obj.str("type")) {
@@ -283,7 +351,7 @@ object CodexTranscriptScanner {
      *  `session_meta` header) and the runtime settings that were being merged line by line anyway. Keeping
      *  them together is the whole of issue #300: the summary path and the model/context path used to be two
      *  separate full parses of the same bytes, always requested within the same session open or tick. */
-    private data class Scanned(val parsed: Parsed?, val runtime: RuntimeState)
+    private data class Scanned(val parsed: Parsed?, val runtime: RuntimeState, val turns: TurnEvidence? = null)
 
     private val scanCache = MtimeMemo<Scanned>(MEMO_MAX)
 
@@ -308,6 +376,7 @@ object CodexTranscriptScanner {
         var userCount = 0
         var hasMeta = false
         var runtime = RuntimeState()
+        var turns: TurnEvidence? = null
         file.bufferedReader().use { r ->
             val first = r.readLine()
             val firstObj = first?.let { runCatching { json.parseToJsonElement(it.trim()) }.getOrNull() as? JsonObject }
@@ -333,6 +402,7 @@ object CodexTranscriptScanner {
             while (line != null) {
                 val obj = runCatching { json.parseToJsonElement(line.trim()) }.getOrNull() as? JsonObject
                 if (obj != null) runtime = mergeRuntimeState(runtime, obj)
+                if (obj != null) turns = mergeTurnEvidence(turns, obj)
                 val p = obj?.takeIf { it.str("type") == "response_item" }?.obj("payload")
                 if (p != null && p.str("type") == "message" && p.str("role") == "user") {
                     val t = codexMessageText(p)
@@ -349,6 +419,7 @@ object CodexTranscriptScanner {
         return Scanned(
             parsed = if (hasMeta) Parsed(id, cwd, version, firstPrompt, userCount) else null,
             runtime = runtime,
+            turns = turns,
         )
     }
 

@@ -492,6 +492,9 @@ class ResetInventoryTest {
             sessionsDir                  R R R K K K K R
             sessionGroups                R R K K K K K K
             daemonManagedSessions        R R K K K K K K
+            daemonSessionObservation     R R K K K K K K  # read-only observation capability: per daemon, like the flag above
+            sessionObservationBusy       R R K K K K K K  # a bind/unbind in flight; its own request clears it, DSC/SWC drop it with the computer
+            sessionObservationError      R R K K K K K K  # last bind/unbind failure (carries its session id); cleared by the next attempt
             daemonManagedAgents          R R K K K K K K
             managedList                  R R K K K K K K
             managedMissing               R R K K K K K K
@@ -629,6 +632,7 @@ class ResetInventoryTest {
             lastOpenAttempt              R R R C R R K R
             autoFocusComposer            K K R R K K K K
             observing                    K K R K R K R R  # OK-身份
+            sessionObservation           K K R K R K R R  # the open chat's read-only snapshot: written and cleared together with observing
             currentSessionId             K K R K K K K K  # OK-身份
             historySeq                   R R R R R R R R
             historySeqSession            R R R R R R R R

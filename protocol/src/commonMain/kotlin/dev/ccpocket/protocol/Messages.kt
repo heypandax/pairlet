@@ -162,6 +162,15 @@ data class OpenSession(
      */
     val agentPreset: String? = null,
     val diagnostic: DiagnosticContext? = null,
+    /**
+     * Read-only open regardless of writer detection (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.3): the daemon
+     * tails [resumeId]'s existing native record and never resumes, forks or launches it — even when it holds no
+     * live writer, even when this daemon itself drives the session (an independent observe subscription is minted).
+     * Requires [resumeId]; without a readable record the open fails with [ObservationErrors.OBSERVE_UNAVAILABLE]
+     * instead of creating a session. Send it only to a daemon advertising [DaemonInfo.supportsSessionObservationV1]:
+     * an older daemon drops the unknown key and would open normally. Trailing optional; an old App never sends it.
+     */
+    val observeOnly: Boolean = false,
 ) : ToDaemon
 
 /** Restart the live conversation's claude process under a new cwd. */
@@ -925,6 +934,13 @@ data class SessionLive(
     /** One-shot harness summary carried by a full live snapshot. Old clients ignore it, without
      * interpreting it as assistant output or settling a pending prompt. Null on ordinary announces. */
     val compactSummary: String? = null,
+    /**
+     * For a read-only observe view (docs/design/DOTS-SESSION-OBSERVABILITY.md): the member's binding, whether this
+     * view is read-only by policy, and the latest proven turn progress. Re-announced on every observe tick. Null =
+     * an ordinary session, an older daemon, or a peer that did not declare [ClientCaps.supportsSessionObservationV1]
+     * (such a peer still gets `observing = true` + [notice]). Trailing optional both ways.
+     */
+    val observation: SessionObservation? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -1380,6 +1396,13 @@ data class DaemonInfo(
     val voiceMemoVersion: Int = 0,
     val voiceMemoAgents: List<String> = emptyList(),
     val voiceMemoStatus: String = "unknown",
+    /**
+     * Capability advertisement (docs/design/DOTS-SESSION-OBSERVABILITY.md): this daemon honours
+     * [OpenSession.observeOnly], [ImportSession.observation] and [SetSessionObservation], persists read-only
+     * bindings and refuses control requests on bound sessions server-side. ABSENT (older daemon) decodes to false:
+     * the client shows no observation entry and never sends `observeOnly` (it would be silently ignored).
+     */
+    val supportsSessionObservationV1: Boolean = false,
 ) : ToPhone
 
 @Serializable
@@ -2192,6 +2215,10 @@ data class ClientCaps(
     // voice memo → tasks (trailing optional): this connection decodes pocket/memo.state. The daemon never
     // sends that frame — not even a reply — to a connection that did not declare it.
     val supportsVoiceMemo: Boolean = false,
+    // read-only session observation (trailing optional): this connection decodes [SessionObservation] on session
+    // rows, managed entries and SessionLive. The daemon leaves those fields null for a connection that did not
+    // declare it (such a peer still gets the legacy `observing` + notice for a read-only open).
+    val supportsSessionObservationV1: Boolean = false,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────

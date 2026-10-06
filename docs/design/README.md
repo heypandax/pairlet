@@ -21,7 +21,9 @@
 | 审批 | [统一审批方案](APPROVAL-SYSTEM.md)、[风险评估子设计](SMART-APPROVAL.md) |
 | 协作 | [飞书评审信任](FEISHU-REVIEWED-TRUST.md)；已于 2026-10-05 下线、仅作设计史保留（见[案例集](../DECLINED-REQUIREMENTS.md) D3）：[异步评审请求](REVIEW-REQUEST.md)、[运行时接力](SESSION-HANDOFF.md)、[接力实现复审](SESSION-HANDOFF-IMPLEMENTATION-REVIEW.md) |
 | 后端 | [Codex 多 Agent](CODEX-MULTI-AGENT.md)、[DSH ACP](DSH-ACP-TRANSPORT.md)、[DSH 提问桥接](DSH-ASK-BRIDGE.md)、[Kimi 设计](kimi-backend-design.md) |
+| Dot 进度接入 | [Dot 会话与执行进度接入方案](DOTS-SESSION-OBSERVABILITY.md)（P1 通用只读观察已实施：只读绑定、observeOnly、进度快照与手机／桌面入口；Dot 来源字段未证实，绑定只能由用户手工关联，真实 Dot 样例验收待做） |
 | 模型目录 | [Codex 模型目录缓存与更新实施方案](CODEX-MODEL-CATALOG-CACHE.md)（已实施并合入本地 main，2026-10-06；含缓存、目录同步、版本语义、验收条件与实施边界；真机验收待做） |
+| 慢链路 | [慢链路韧性：丢包线路上的会话打开与转写](SLOW-LINK-RESILIENCE.md)（第一期不改协议：看门狗自适应、静默链路不重放打开、历史帧软上限，实施中；压缩与小首窗后置） |
 | 工作区 | [Git 面板](GIT-PANEL.md)、[Worktree](WORKTREE-MANAGEMENT.md)、[回退与 fork](REWIND-FORK.md)、[桌面分屏](SPLIT-PANES.md) |
 | 输入 | [语音输入 v2：说完即发＋发送前校对](VOICE-INPUT-REFINE-SEND.md)（方案稿，2026-10-05，未实施；UI 交接见 [Voice Refine Send v1](claude-design-handoff/voice-refine-send-v1/README.md)）、[语音输入 v1 技术方案](VOICE-INPUT.md)、[语音备忘总体方案](VOICE-MEMO-TO-TASK.md)、[代码设计](VOICE-MEMO-CODE-DESIGN.md)、[UI 交接](claude-design-handoff/voice-memo-tasks/README.md)（UI v2.1 已验收，旧 v1 稿不采用；实现状态以代码为准） |
 | 诊断 | [总体方案](OBSERVABILITY.md)、[配置与验证入口](../observability/README.md)、[核心错误路径](../observability/ERROR-PATHS.md)、[产品分析口径](../observability/PRODUCT-INSIGHTS.md) |

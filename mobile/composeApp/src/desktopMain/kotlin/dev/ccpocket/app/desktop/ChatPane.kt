@@ -1640,6 +1640,15 @@ private fun Modifier.blinkAccent(): Modifier = composed {
  *  on the computer). Take-over forks a branch the app can drive — same gesture as mobile. */
 @Composable
 private fun ObserveBar(model: DesktopModel) {
+    val observation = model.sessionObservation
+    if (observation?.readOnly == true) {
+        // read-only by policy: the same bar the phone shows, no take-over (the daemon refuses it regardless)
+        Column(Modifier.fillMaxWidth()) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+            dev.ccpocket.app.ui.session.ObservedReadOnlyBar(observation, Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp))
+        }
+        return
+    }
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Row(

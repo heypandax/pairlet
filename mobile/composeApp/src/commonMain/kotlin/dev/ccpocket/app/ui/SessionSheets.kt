@@ -66,6 +66,9 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.ui.session.messageRes
+import dev.ccpocket.app.ui.session.observationSourceText
+import dev.ccpocket.app.ui.session.observedProgressText
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.tightCenter
@@ -318,6 +321,63 @@ fun contextColor(frac: Float, base: Color = Tok.accent): Color = when {
 // ════════════════════════════════════════════════════════════════════
 //  Session info (read-only): model · effort · mode · dir · context bar
 // ════════════════════════════════════════════════════════════════════
+/**
+ * Read-only observation (docs/design/DOTS-SESSION-OBSERVABILITY.md §4.2): what the open session is bound to, what its
+ * record proves, and — for a managed member on a daemon that supports bindings — the one control Pairlet keeps for
+ * itself: link / unlink the member as a Dot sub-session. The link is Pairlet metadata; nothing here touches the Dot.
+ */
+@Composable
+private fun SessionObservationSection(repo: PocketRepository) {
+    val sid = repo.sessionKey.value ?: return
+    val workdir = repo.workdir.value ?: return
+    val agent = repo.sessionAgent.value ?: AgentKind.CLAUDE
+    val live = repo.sessionObservation.value
+    val member = repo.managedList.value?.items?.firstOrNull { it.sessionId == sid && it.agent == agent }
+    val binding = live?.binding ?: member?.observation?.binding
+    val offered = repo.daemonSessionObservation.value && member != null
+    if (binding == null && live?.readOnly != true && !offered) return
+    Column(
+        Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
+    ) {
+        AboutRow(
+            stringResource(Res.string.session_observation_label),
+            when {
+                binding != null -> observationSourceText(binding)
+                live?.readOnly == true -> stringResource(Res.string.observe_readonly_short)
+                else -> stringResource(Res.string.value_off)
+            },
+        )
+        if (binding != null) {
+            Hairline()
+            AboutRow(stringResource(Res.string.session_observation_task_ref), binding.parentTaskRef?.takeIf { it.isNotBlank() } ?: stringResource(Res.string.obs_parent_not_linked))
+            Hairline()
+            Text(
+                observedProgressText(live?.progress ?: member?.observation?.progress),
+                color = Tok.tx2, fontSize = 12.5.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            )
+        }
+        if (offered) {
+            Hairline()
+            val busy = repo.sessionObservationBusy.value
+            AboutRow(
+                stringResource(if (binding != null) Res.string.session_observation_unbind else Res.string.session_observation_bind),
+                if (busy) stringResource(Res.string.session_observation_busy) else "›",
+                onClick = {
+                    if (!busy) repo.setSessionObservation(workdir, agent, sid, if (binding != null) null else dev.ccpocket.protocol.ObservationBinding())
+                },
+            )
+            // only the failure that belongs to THIS session: the sheet is per row, the outcome is repository-wide
+            repo.sessionObservationError.value?.takeIf { it.sessionId == sid }?.error?.let { err ->
+                Text(
+                    stringResource(Res.string.session_observation_failed) + " · " + stringResource(err.messageRes()),
+                    color = Tok.danger, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit) {
     val modeLabel =
@@ -379,6 +439,7 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                 Hairline()
                 AboutRow(stringResource(Res.string.label_mode), modeLabel)
             }
+            SessionObservationSection(repo)
             // #320-A: the context block names its evidence shape (both / used only / window only / none) and
             // marks a hand-typed window as the user's value — the gauge's tap lands here, so this is where a
             // blank has to be explained. The per-model write surface below stays the override's entry point.
