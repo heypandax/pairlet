@@ -26,7 +26,7 @@
 | 慢链路 | [慢链路韧性：丢包线路上的会话打开与转写](SLOW-LINK-RESILIENCE.md)（第一期不改协议：看门狗自适应、静默链路不重放打开、历史帧软上限，已实现并合入本地 main；第二期改协议：首屏按字节的小窗口加自动补页、图片先发预览再按需取原图，已实现并合入本地 main；压缩后置） |
 | 传输路径 | [客户端自动选路 v1：直连预算、资格预检与空闲回切](TRANSPORT-AUTO-REPATH-V1.md)（#403 直连预算与资格预检、#404 空闲回切均已合入本地 main；手机端回切 2026-10-06 起默认开启，真机验收进行中） |
 | 工作区 | [Git 面板](GIT-PANEL.md)、[Worktree](WORKTREE-MANAGEMENT.md)、[回退与 fork](REWIND-FORK.md)、[桌面分屏](SPLIT-PANES.md) |
-| 输入 | [语音输入 v2：说完即发＋发送前校对](VOICE-INPUT-REFINE-SEND.md)（2026-10-06 设计板已评审；daemon 与协议实施中，手机端待实施；UI 交接与评审决定见 [Voice Refine Send v1](claude-design-handoff/voice-refine-send-v1/README.md)）、[语音输入 v1 技术方案](VOICE-INPUT.md)、[语音备忘总体方案](VOICE-MEMO-TO-TASK.md)、[代码设计](VOICE-MEMO-CODE-DESIGN.md)、[UI 交接](claude-design-handoff/voice-memo-tasks/README.md)（UI v2.1 已验收，旧 v1 稿不采用；实现状态以代码为准） |
+| 输入 | [语音输入 v2 流程总览与评审稿](VOICE-INPUT-V2-REVIEW.md)（待评审，先读这一份）、[语音输入 v2：说完即发＋发送前校对](VOICE-INPUT-REFINE-SEND.md)（2026-10-06 设计板已评审；daemon 与协议实施中，手机端待实施；UI 交接与评审决定见 [Voice Refine Send v1](claude-design-handoff/voice-refine-send-v1/README.md)）、[语音输入 v1 技术方案](VOICE-INPUT.md)、[语音备忘总体方案](VOICE-MEMO-TO-TASK.md)、[代码设计](VOICE-MEMO-CODE-DESIGN.md)、[UI 交接](claude-design-handoff/voice-memo-tasks/README.md)（UI v2.1 已验收，旧 v1 稿不采用；实现状态以代码为准） |
 | 诊断 | [总体方案](OBSERVABILITY.md)、[配置与验证入口](../observability/README.md)、[核心错误路径](../observability/ERROR-PATHS.md)、[产品分析口径](../observability/PRODUCT-INSIGHTS.md) |
 | 评估与历史探索 | [渠道集成评估](CHANNEL-INTEGRATIONS-EVALUATING.md)、[会话打开诊断评估](SESSION-OPEN-DIAGNOSTICS-EVALUATING.md)、[旧观测供应商评估](OBSERVABILITY-EVALUATING.md)、[已暂停的 Peer Call](PEER-CALL.md)、[已搁置的直连／中继路径选择与 P2P 评估](TRANSPORT-PATH-SELECTION-EVALUATING.md) |
 
