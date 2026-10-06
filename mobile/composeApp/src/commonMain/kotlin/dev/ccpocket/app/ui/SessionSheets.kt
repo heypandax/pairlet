@@ -29,6 +29,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SubdirectoryArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -77,6 +78,11 @@ import dev.ccpocket.protocol.JobStatus
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.CODEX_MODEL_IDS
+import dev.ccpocket.protocol.MODEL_CATALOG_SOURCE_BUILTIN
+import dev.ccpocket.protocol.MODEL_CATALOG_SOURCE_CLI_BUILTIN
+import dev.ccpocket.protocol.MODEL_CATALOG_SOURCE_DYNAMIC
+import dev.ccpocket.protocol.MODEL_CATALOG_SOURCE_FILE
+import dev.ccpocket.protocol.MODEL_CATALOG_SOURCE_LAST_GOOD
 import dev.ccpocket.protocol.ModelsList
 import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import androidx.compose.runtime.LaunchedEffect
@@ -132,18 +138,110 @@ internal fun modelCatalogNotice(agent: AgentKind, result: ModelsList?, hasSelect
     return ModelCatalogNotice.EMPTY.takeUnless { hasSelectableModels }
 }
 
-/** Why a Codex model list is only the built-in fallback, or null. Codex keeps its static fallback, so an
- *  error never empties the list — without this line the built-in trio is indistinguishable from the
- *  user's real catalog. ZCode/dsh surface their catalog errors through [modelCatalogNotice], OpenCode
- *  through its own line in [ModelPicker]. */
+/** Why a Codex model list is only the built-in fallback (or why its last check failed), or null. Codex keeps
+ *  its static fallback, so an error never empties the list — without this line the built-in trio is
+ *  indistinguishable from the user's real catalog. ZCode/dsh surface their catalog errors through
+ *  [modelCatalogNotice], OpenCode through its own line in [ModelPicker]. The daemon's sentence verbatim;
+ *  [codexCatalogStatus] is the localized one-line state that sits above it. */
 internal fun codexCatalogNote(agent: AgentKind, result: ModelsList?): String? =
     if (agent == AgentKind.CODEX) result?.error else null
+
+/**
+ * The one-line STATE of a Codex model list (Codex catalog cache). Rendered by every surface that lists Codex
+ * models — phone picker, new-session sheet, Settings, and the desktop twins — so "which list am I looking at"
+ * reads the same everywhere. Null = a confirmed catalog with nothing to explain.
+ */
+enum class CodexCatalogStatus {
+    /** A check is running; the rows on screen are the cached ones. */
+    REFRESHING,
+
+    /** Rows restored from this device's cache for the bound computer; the daemon has not confirmed them on this link. */
+    PREVIEW,
+
+    /** The daemon answered, but the CLI reported no signed-in account: these are the CLI's built-in rows. */
+    CLI_BUILTIN,
+
+    /** The last check failed; the previous list (or the CLI's file) is being kept. */
+    LAST_GOOD,
+
+    /** Nothing could be read: Pairlet's own built-in ids. */
+    BUILTIN,
+
+    /** A confirmed catalog that lists no model at all — the honest empty state, not the built-in trio. */
+    EMPTY,
+}
+
+internal fun codexCatalogStatus(agent: AgentKind, result: ModelsList?, refreshing: Boolean = false, preview: Boolean = false): CodexCatalogStatus? {
+    if (agent != AgentKind.CODEX) return null
+    if (refreshing) return CodexCatalogStatus.REFRESHING
+    val meta = result?.catalog
+    // A final failure or fallback is still only a preview for capability purposes, but the user
+    // needs its actual outcome. Do not hide an error behind the generic restored-cache label.
+    if (meta?.source == MODEL_CATALOG_SOURCE_BUILTIN) return CodexCatalogStatus.BUILTIN
+    if (result?.error != null && meta != null) return CodexCatalogStatus.LAST_GOOD
+    if (meta?.source == MODEL_CATALOG_SOURCE_CLI_BUILTIN) {
+        return if (result.models.isEmpty()) CodexCatalogStatus.EMPTY else CodexCatalogStatus.CLI_BUILTIN
+    }
+    if (preview) return CodexCatalogStatus.PREVIEW
+    if (meta == null) return null // an older daemon: the raw sentence (codexCatalogNote) is all there is
+    return when (meta.source) {
+        MODEL_CATALOG_SOURCE_BUILTIN -> CodexCatalogStatus.BUILTIN
+        MODEL_CATALOG_SOURCE_LAST_GOOD -> CodexCatalogStatus.LAST_GOOD
+        MODEL_CATALOG_SOURCE_CLI_BUILTIN -> if (result.models.isEmpty()) CodexCatalogStatus.EMPTY else CodexCatalogStatus.CLI_BUILTIN
+        MODEL_CATALOG_SOURCE_FILE, MODEL_CATALOG_SOURCE_DYNAMIC -> when {
+            result.error != null -> CodexCatalogStatus.LAST_GOOD
+            result.models.isEmpty() -> CodexCatalogStatus.EMPTY
+            else -> null
+        }
+        else -> null // a source only a newer daemon knows: rows render, no claim is made about them
+    }
+}
+
+@Composable
+internal fun codexCatalogStatusText(status: CodexCatalogStatus): String = when (status) {
+    CodexCatalogStatus.REFRESHING -> stringResource(Res.string.model_catalog_refreshing)
+    CodexCatalogStatus.PREVIEW -> stringResource(Res.string.model_catalog_preview)
+    CodexCatalogStatus.CLI_BUILTIN -> stringResource(Res.string.model_catalog_cli_builtin)
+    CodexCatalogStatus.LAST_GOOD -> stringResource(Res.string.model_catalog_last_good)
+    CodexCatalogStatus.BUILTIN -> stringResource(Res.string.model_catalog_builtin)
+    CodexCatalogStatus.EMPTY -> stringResource(Res.string.model_models_empty, agentName(AgentKind.CODEX))
+}
 
 /** [codexCatalogNote] as every phone model surface prints it: one muted line on its own, never inside a Row.
  *  [modifier] carries the surface's own spacing. */
 @Composable
 internal fun CodexCatalogNoteLine(note: String, modifier: Modifier = Modifier) {
     Text(note, color = Tok.muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = modifier)
+}
+
+/**
+ * The phone's Codex catalog footer: the localized state line, then the daemon's own sentence when the state is
+ * a failure the user may want the reason for. While a check runs or a preview shows, a stale error is withheld
+ * — it describes a previous check, not what is on screen.
+ */
+@Composable
+internal fun CodexCatalogNotes(agent: AgentKind, result: ModelsList?, refreshing: Boolean, preview: Boolean, modifier: Modifier = Modifier) {
+    val status = codexCatalogStatus(agent, result, refreshing, preview)
+    val detail = if (status == CodexCatalogStatus.REFRESHING || status == CodexCatalogStatus.PREVIEW) null else codexCatalogNote(agent, result)
+    if (status == null && detail == null) return
+    Column(modifier) {
+        status?.let { Text(codexCatalogStatusText(it), color = Tok.muted, fontSize = 12.sp, lineHeight = 16.sp) }
+        detail?.let { CodexCatalogNoteLine(it, if (status != null) Modifier.padding(top = 4.dp) else Modifier) }
+    }
+}
+
+/** The small refresh control beside a Codex model list's title: a spinner while a check runs. 32 dp target. */
+@Composable
+internal fun CodexCatalogRefreshButton(refreshing: Boolean, enabled: Boolean = true, onRefresh: () -> Unit) {
+    val label = stringResource(Res.string.model_catalog_refresh)
+    Box(
+        Modifier.size(32.dp).clip(CircleShape).clickable(enabled = enabled && !refreshing, onClick = onRefresh)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (refreshing) CircularProgressIndicator(Modifier.size(14.dp), color = Tok.accent, strokeWidth = 2.dp)
+        else Icon(Icons.Rounded.Refresh, null, tint = Tok.tx2, modifier = Modifier.size(17.dp))
+    }
 }
 
 /**
@@ -712,7 +810,9 @@ data class ModelChoice(val name: String, val id: String, val pick: String, val c
  * — an invented catalog would offer models the user's providers can't run, so an empty list is the truth.
  */
 internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?): List<ModelChoice> = when (agent) {
-    AgentKind.CODEX -> (daemonModels?.takeIf { it.isNotEmpty() } ?: CODEX_MODEL_OPTIONS).map { ModelChoice(it, it, it, "", false) }
+    // null = no answer yet → the static trio; an ANSWERED empty list stays empty (Codex catalog cache: a
+    // confirmed empty catalog must not be dressed up as the built-in trio — [CodexCatalogStatus.EMPTY] says so)
+    AgentKind.CODEX -> (daemonModels ?: CODEX_MODEL_OPTIONS).map { ModelChoice(it, it, it, "", false) }
     AgentKind.OPENCODE -> (daemonModels ?: emptyList()).map { ModelChoice(it, it, it, "", false) }
     // KIMI (issue #206): daemon-fed aliases from `kimi provider list --json` (FetchModels channel)
     AgentKind.KIMI -> (daemonModels ?: emptyList()).map { ModelChoice(it, it, it, "", false) }
@@ -735,11 +835,24 @@ internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?): Lis
     }
 }
 
+/**
+ * [modelChoicesFor] over the whole daemon answer ([modelChoicesFrom]): Codex rows take their upstream display name
+ * (`GPT-6-Astra` over `gpt-6-astra`) while [ModelChoice.pick] stays the execution id verbatim — a display
+ * name is never turned into an id. Other agents are unchanged.
+ */
+internal fun modelChoicesFrom(agent: AgentKind, list: ModelsList?): List<ModelChoice> {
+    val base = modelChoicesFor(agent, list?.models)
+    if (agent != AgentKind.CODEX || list == null) return base
+    val names = list.modelCapabilities.associate { it.model to it.displayName }
+    return base.map { c -> names[c.pick]?.takeIf { it.isNotBlank() && it != c.pick }?.let { c.copy(name = it) } ?: c }
+}
+
 /** The repo-fed form of [modelChoicesFor] for the NEW-session step (issue #199) — reads the daemon's
- *  cached list for [agent], exactly like the live-session picker does. Called from composition, so the
- *  snapshot read recomposes the sheet when the daemon's ModelsList lands. */
+ *  cached list for [agent] (or, for Codex, the restored preview until the daemon answers — [PocketRepository.modelListFor]),
+ *  exactly like the live-session picker does. Called from composition, so the snapshot read recomposes the
+ *  sheet when the daemon's ModelsList lands. */
 internal fun PocketRepository.newSessionModelChoices(agent: AgentKind): List<ModelChoice> =
-    modelChoicesFor(agent, agentModels[agent]?.models)
+    modelChoicesFrom(agent, modelListFor(agent))
 
 /** Context-window pill — filled terracotta for a 1M window, muted outline otherwise. (internal: the
  *  new-session model rows in Permissions.kt wear the same pill, issue #199.) */
@@ -765,15 +878,18 @@ internal fun CtxPill(ctx: String, big: Boolean) {
 internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: () -> Unit) { // internal (was private) so desktopTest's ShowcaseRender can compose it — SessionsScreen/ChatScreen precedent
     val agent = repo.sessionAgent.value ?: AgentKind.CLAUDE
     val claude = agent == AgentKind.CLAUDE
-    // Fetch dynamic model list from the daemon when any agent picker opens.
+    // Fetch dynamic model list from the daemon when any agent picker opens (Codex: restores the on-device
+    // preview first and reuses a fresh answer — see PocketRepository.fetchModels).
     LaunchedEffect(agent) { repo.fetchModels(agent) }
-    val agentModels = repo.agentModels[agent]
+    val agentModels = repo.modelListFor(agent)
+    val catalogRefreshing = repo.agentModelsRefreshing[agent] == true
+    val catalogPreview = repo.isModelListPreview(agent)
     // Only Claude uses ANTHROPIC_BASE_URL. ZCode may share a GLM vendor with a configured Claude
     // gateway, but its app-server accepts provider/model references, never Claude gateway presets.
     val gatewayUrl = modelPickerGatewayUrl(agent, repo.gatewayBaseUrl.value)
     // daemon list first for codex (real cache: configured default leads, includes ids the static trio
     // lacks); a list may ride WITH an error (last-good + failed refresh). See [modelChoicesFor].
-    val choices = modelChoicesFor(agent, agentModels?.models)
+    val choices = modelChoicesFrom(agent, agentModels)
     val selected = if (claude) modelAlias(repo.model.value) else repo.model.value
     var switchingTo by remember { mutableStateOf<String?>(null) }
     // close once the daemon confirms the switch (model re-announced through SessionLive)…
@@ -798,9 +914,14 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
         Column(if (bounded) Modifier.heightIn(max = maxHeight * 0.86f) else Modifier) {
             // chip-direct opens (ModelSheet) have no quick-actions page to go back to — the title stands alone.
             // Under quick actions the row is pulled back like [OptionPicker]'s, onto the shared 4 dp inset.
-            Row(if (onBack != null) Modifier.offset(x = (-12).dp) else Modifier, verticalAlignment = Alignment.CenterVertically) {
+            Row(if (onBack != null) Modifier.offset(x = (-12).dp).fillMaxWidth() else Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 if (onBack != null) BackTarget(onBack, enabled = switchingTo == null)
                 Text(stringResource(Res.string.qa_model), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold, style = tightCenter(20.sp))
+                // Codex catalog cache: a light manual refresh — never a blocking state; the rows stay tappable
+                if (agent == AgentKind.CODEX) {
+                    Spacer(Modifier.weight(1f))
+                    CodexCatalogRefreshButton(refreshing = catalogRefreshing, enabled = switchingTo == null) { repo.refreshModels(agent) }
+                }
             }
             // the scroll rides WITH the cap: a scrollable container measured with infinite max height
             // throws outright (checkScrollableContainerConstraints), so an unbounded host gets the plain
@@ -823,8 +944,9 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
                 }
             }
             // Codex keeps its static fallback, so an error never empties the list — without this line the
-            // built-in trio is indistinguishable from the user's real catalog ("is the list trimmed?").
-            codexCatalogNote(agent, agentModels)?.let { CodexCatalogNoteLine(it, Modifier.padding(top = 10.dp)) }
+            // built-in trio is indistinguishable from the user's real catalog ("is the list trimmed?"). The
+            // state line above it says whether these rows are cached, previewed, the CLI's built-ins or failed.
+            CodexCatalogNotes(agent, agentModels, catalogRefreshing, catalogPreview, Modifier.padding(top = 10.dp))
             // ZCode has no static fallback: distinguish an in-flight fetch from a completed empty answer,
             // and preserve a refresh error even when last-good provider/model rows remain visible.
             modelCatalogNotice(agent, agentModels, choices.isNotEmpty())?.let { notice ->

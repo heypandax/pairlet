@@ -84,6 +84,8 @@ import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
+import dev.ccpocket.app.ui.CodexCatalogRefreshButton
+import dev.ccpocket.app.ui.CodexCatalogStatus
 import dev.ccpocket.app.ui.UsageScreen
 import kotlinx.coroutines.delay
 import dev.ccpocket.app.ui.AgentGlyph
@@ -339,8 +341,10 @@ private fun GeneralPane(model: DesktopModel) {
             val discovered = model.modelsForAgent(defaultAgent).filter { it.isNotBlank() }
             val options = when (defaultAgent) {
                 AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS
-                AgentKind.CODEX -> (listOfNotNull(defaultModel) + discovered.ifEmpty { CODEX_MODEL_OPTIONS })
-                    .distinct().map { codexModelLabel(it) to it }
+                // Codex catalog cache: the static trio only while nothing is known; an answered empty catalog stays
+                // empty. Labels prefer the upstream display name; the stored value is the execution id.
+                AgentKind.CODEX -> (listOfNotNull(defaultModel) + if (model.modelsKnownFor(defaultAgent)) discovered else CODEX_MODEL_OPTIONS)
+                    .distinct().map { id -> model.modelDisplayName(defaultAgent, id).let { if (it == id) codexModelLabel(id) else it } to id }
                 // OpenCode's provider/model catalog is installation-specific, so only daemon-reported ids
                 // are valid choices. The selected value leads in case a later catalog no longer lists it.
                 AgentKind.OPENCODE -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
@@ -356,9 +360,15 @@ private fun GeneralPane(model: DesktopModel) {
             options.forEach { (label, id) ->
                 PrefRow(label, id, selected = defaultModel == id) { model.setDefaultModelFor(defaultAgent, id) }
             }
-            // a built-in fallback reads exactly like a real catalog — say so before a default is picked from it
-            model.modelsNoteForAgent(defaultAgent)?.let {
-                Text(it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, lineHeight = 16.sp)
+            // a built-in fallback reads exactly like a real catalog — say so before a default is picked from it:
+            // the state line (cached / previewed / CLI built-ins / failed), the daemon's sentence, and the same
+            // light refresh the pickers offer (Codex catalog cache)
+            if (defaultAgent == AgentKind.CODEX) {
+                val codexStatus = model.modelsStatusForAgent(defaultAgent)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    DesktopCodexCatalogNotes(codexStatus, model.modelsNoteForAgent(defaultAgent), Modifier.weight(1f))
+                    CodexCatalogRefreshButton(refreshing = codexStatus == CodexCatalogStatus.REFRESHING) { model.refreshModels(defaultAgent) }
+                }
             }
             if (defaultAgent == AgentKind.OPENCODE && options.isEmpty()) {
                 Text(

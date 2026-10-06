@@ -39,6 +39,8 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class CodexBackend(
     private val codexBin: String?,
+    /** The daemon-wide catalog (Main hands in the SAME instance the router answers `FetchModels` from, so a
+     *  session's effort/tier normalisation sees the rows the picker confirmed for its workdir). */
     private val modelService: CodexModelService = CodexModelService(),
     // id → Codex thread title, as persisted in session_index.jsonl. Injected so the take-over naming path
     // (issue #347) is testable without a real $CODEX_HOME on disk.
@@ -867,8 +869,12 @@ class CodexBackend(
         return false
     }
 
-    override fun supportedEfforts(model: String?): Set<String>? =
-        modelService.capabilitiesFor(model)?.reasoningEfforts?.toSet()
+    /** The catalog row for [model] as read FOR THIS SESSION'S WORKDIR (null = unknown, which keeps the user's
+     *  setting). Before [attach] no workdir is known, so every normalisation passes the value through and the
+     *  attach-time call — the one that shapes the launch — settles it against the right project context. */
+    private fun capabilities(model: String?) = modelService.capabilitiesFor(model, workdir.takeIf { it.isNotEmpty() })
+
+    override fun supportedEfforts(model: String?): Set<String>? = capabilities(model)?.reasoningEfforts?.toSet()
 
     override fun normalizeEffort(model: String?, effort: String?): String? {
         val supported = supportedEfforts(model) ?: return effort
@@ -876,7 +882,7 @@ class CodexBackend(
     }
 
     override fun normalizeServiceTier(model: String?, serviceTier: String?): String? {
-        val caps = modelService.capabilitiesFor(model) ?: return serviceTier
+        val caps = capabilities(model) ?: return serviceTier
         return serviceTier?.takeIf { wanted -> caps.serviceTiers.any { it.id == wanted } }
     }
 

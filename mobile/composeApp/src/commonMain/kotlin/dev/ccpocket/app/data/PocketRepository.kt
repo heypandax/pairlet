@@ -203,6 +203,10 @@ import dev.ccpocket.protocol.DAEMON_SUPPORTED_AGENT_WIRES
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.FetchPresets
 import dev.ccpocket.protocol.ModelsList
+import dev.ccpocket.protocol.MODEL_CATALOG_SOURCE_DYNAMIC
+import dev.ccpocket.protocol.MODEL_CATALOG_SOURCE_DYNAMIC_UNCONFIRMED
+import dev.ccpocket.protocol.MODEL_CATALOG_SOURCE_BUILTIN
+import dev.ccpocket.protocol.MODEL_CATALOG_SOURCE_LAST_GOOD
 import dev.ccpocket.protocol.FetchSkillCatalog
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.SkillCatalog
@@ -2114,7 +2118,7 @@ class PocketRepository(
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
             is PeerPresence -> { Diagnostics.connection(diagnosticConnectionId, f.connectionId?.validated()); val wasOffline = daemonOffline; daemonOffline = !f.online; if (f.online && wasOffline) onComputerBackOnline(); recomputePhase() }
             // a refused credential (revoked / expired pairing) ends this binding's right to its transcripts too
-            is AuthError -> { pairingInvalid = true; sessionCache.clear(); retryJob?.cancel(); recomputePhase() }
+            is AuthError -> { pairingInvalid = true; sessionCache.clear(); forgetPersistedCatalog(paired.value); retryJob?.cancel(); recomputePhase() }
             else -> {}
         }
     }
@@ -2650,7 +2654,7 @@ class PocketRepository(
             }, err, isError = err is ConnectWedgedException && appIsForeground.value)
         Telemetry.track(TelEvent.ConnFailed, mapOf(TelKey.Transport to transportName(), TelKey.Reason to reason, TelKey.Attempt to retryAttempts))
         if (err is RelayAuthException || pairingInvalid) { // expired/invalid pairing — re-pair, never auto-retry
-            pairingInvalid = true; sessionCache.clear(); recomputePhase(); return // same rule as a relay AuthError
+            pairingInvalid = true; sessionCache.clear(); forgetPersistedCatalog(paired.value); recomputePhase(); return // same rule as a relay AuthError
         }
         if (hadReadyThisSession) startReconnectGrace(restart = false) // a blip holds Ready briefly before the banner (#28)
         status.value = StatusMsg(Res.string.status_conn_lost)
@@ -2825,7 +2829,7 @@ class PocketRepository(
         // store it". authState clears for the same reason — the next daemon's account is a fresh fetch.
         authState.value = null
         presetsState.value = null; presetsStateRev.value = 0
-        agentModels.clear() // model/effort capabilities belong to the daemon we just left; UNKNOWN on the next one until it replies
+        resetModelCatalogState() // model/effort capabilities + the catalog preview belong to the daemon we just left; UNKNOWN on the next one until it replies
         gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
         bridgeControl.value = null  // per-daemon truth too — the next daemon re-advertises via DaemonInfo (issue #91)
         daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
@@ -3228,6 +3232,7 @@ class PocketRepository(
         val key = PairingKey(target.relay, target.accountId, target.deviceId)
         registrar.detach(key, forget = true)
         if (attachedPushKey == key) attachedPushKey = null
+        forgetPersistedCatalog(target) // the catalog cache is keyed by this identity, which stops existing here
         val remaining = Pairing.remove(target.accountId) // also re-points the active account if it was this one
         projectPinRegistry.refreshAfterPairingChange { Pairing.loadAll() } // #362: the removed binding holds no pin lease from here
         replace(pairedList, remaining)
@@ -3767,7 +3772,10 @@ class PocketRepository(
             // rev bumps on EVERY reply, including one equal to the last (a no-change save): UI effects
             // key on the rev, not the value, so an identical state still settles spinners/pending forms
             is PresetsState -> { presetsState.value = f; presetsStateRev.value++ }
-            is ModelsList -> {
+            // Codex catalog cache: its own acceptance path (request correlation, trust by source, preview vs
+            // authoritative) — the generic last-good merge below would drop the provenance and carry an old
+            // context's capabilities across a workdir or account change.
+            is ModelsList -> if (f.agent == AgentKind.CODEX) onCodexModelsList(f) else {
                 // keep the LAST-GOOD list under a failed refresh: one `opencode models` timeout must
                 // not wipe a working picker back to the empty state — carry the fresh error alongside
                 val prev = agentModels[f.agent]
@@ -3894,6 +3902,11 @@ class PocketRepository(
                     latestVersion = f.latestVersion,
                     updateCommand = f.updateCommand,
                 )
+                // Codex catalog cache: prefetch once a daemon that ADVERTISES Codex has introduced itself, so the
+                // first picker opens on this link's confirmed answer rather than on the restored preview. Only on
+                // the advertisement (an older daemon without the list is asked when a surface opens), never for a
+                // daemon that lacks the agent, and cheap on the daemon side (its own reuse window answers from memory).
+                if ("codex" in f.supportedAgents && supportsAgent(AgentKind.CODEX)) fetchModels(AgentKind.CODEX)
             }
             // #219 identity guard: a SessionLive that fails [acceptsSessionLive] is a BACKGROUND
             // conversation's announce (turn start / relaunch / mode expiry, fanned out because this
@@ -3924,7 +3937,11 @@ class PocketRepository(
                     clearAskQueue()
                     allowRules.clear()
                 }
+                val workdirChanged = workdir.value != f.workdir
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
+                // Codex catalog cache: the open session's directory is the catalog's target; a session announced in
+                // another directory re-targets it (revoking any request for the previous one)
+                if (f.agent == AgentKind.CODEX && (workdirChanged || codexCatalogTarget != f.workdir)) retargetCodexCatalog(f.workdir)
                 f.sessionId?.let {
                     sessionKey.value = it
                     // #360: only the answer to a brand-new open is "created here" — resuming an existing session is not
@@ -4138,6 +4155,7 @@ class PocketRepository(
                 // here is what is genuinely the focused conversation's — the limit offer, the notification,
                 // the sidebar dot and the usage statusline.
                 val turnWasLive = transcript.endTurn(f.error) // gate the marker/notify on a turn we actually watched run
+                noteModelUnavailable(sessionAgent.value, f.error) // Codex refused the model → re-check the catalog, keep the error + choice
                 // usage-limit hit with a parsed reset moment (issue #137): light the one-tap
                 // "auto-continue after reset" banner. Null (ordinary error / old daemon) = no offer.
                 if (f.error != null) {
@@ -4741,11 +4759,188 @@ class PocketRepository(
     fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
 
     /** Per-agent model lists from the daemon ([FetchModels] → [ModelsList]) — what the picker offers
-     *  beyond the static presets. Keyed by agent so a late reply can't cross-pollute another backend. */
+     *  beyond the static presets. Keyed by agent so a late reply can't cross-pollute another backend.
+     *  This is the AUTHORITATIVE catalog: the one the connected daemon sent on THIS link. Capabilities,
+     *  default-setting reconciliation and launch clamps read only this map, never [agentModelPreview]. */
     val agentModels = mutableStateMapOf<AgentKind, ModelsList>()
 
-    fun modelCapabilities(agent: AgentKind, modelId: String? = model.value): dev.ccpocket.protocol.ModelCapabilities? {
+    /**
+     * The on-device copy of the bound computer's catalog, restored by [fetchModels] before the daemon has
+     * answered (Codex catalog cache). ROWS TO LOOK AT ONLY: it never feeds [modelCapabilities], never runs
+     * [reconcileDefaultCapabilities], and is dropped the moment the daemon's own answer lands or the link to
+     * this computer ends. Surfaces read [modelListFor] so they see whichever of the two exists.
+     */
+    val agentModelPreview = mutableStateMapOf<AgentKind, ModelsList>()
+
+    /** True while a catalog request for the agent is outstanding and rows are already on screen — the
+     *  "updating…" cue. Cleared by the daemon's final answer, by the in-flight timeout, and with the link. */
+    val agentModelsRefreshing = mutableStateMapOf<AgentKind, Boolean>()
+
+    private val modelCatalogPolicy = ModelCatalogRefreshPolicy { epochMillis() }
+    private val modelCatalogStore = ModelCatalogStore(SecureStore::getString, SecureStore::putString, SecureStore::remove)
+
+    /**
+     * The ONE outstanding Codex catalog request (Codex catalog cache): its correlation token (sent as
+     * [FetchModels.requestId], echoed on every frame it produces), and the context it was asked for — binding
+     * identity, connection generation and TARGET working directory. A frame is accepted only when its token
+     * matches and that context is still the current target; the timeout ends exactly this request and no later one.
+     */
+    private data class CodexCatalogRequest(val token: String, val identity: String?, val gen: Int, val workdir: String?)
+    private var codexCatalogRequest: CodexCatalogRequest? = null
+    private var codexCatalogTimeout: Job? = null
+
+    /**
+     * The working directory the Codex catalog is currently being asked FOR — the daemon scopes its answer per
+     * workdir (Codex config/profiles differ per project). Usually the open session's directory; while a new-session
+     * sheet is open it is that sheet's pending directory (project B while session A is still open). Switching the
+     * target revokes the outstanding request and demotes the previous target's list to a preview. Null = unknown.
+     */
+    private var codexCatalogTarget: String? = null
+
+    /** The context (identity|workdir) the AUTHORITATIVE `agentModels[CODEX]` was confirmed for, and the daemon's
+     *  scope marker on that answer. A different context demotes it to a preview until the new context's own answer
+     *  lands; a later weaker answer in another scope demotes it to unknown. */
+    private var codexCatalogContext: String? = null
+    private var codexCatalogScope: String? = null
+
+    /** Does the authoritative Codex list describe [context]? A legacy daemon's list is not scoped at all (one global
+     *  file on that daemon), so it covers every context — exactly the pre-cache behaviour. */
+    private fun codexContextCovers(context: String) = codexCatalogContext == CODEX_ANY_CONTEXT || codexCatalogContext == context
+
+    /** The list a model surface renders for [agent]: the daemon's answer, else the restored preview. */
+    fun modelListFor(agent: AgentKind): ModelsList? = agentModels[agent] ?: agentModelPreview[agent]
+
+    /** Whether [modelListFor] is currently the restored preview (no daemon answer on this link yet). */
+    fun isModelListPreview(agent: AgentKind): Boolean = agentModels[agent] == null && agentModelPreview[agent] != null
+
+    /** Which bound computer a persisted catalog belongs to — the history cache's identity formula (relay, account,
+     *  daemon key, device id; never the credential). Null = no binding / the demo: nothing is stored or restored. */
+    private fun catalogIdentity(of: PairedDaemon? = paired.value): String? =
+        of?.takeIf { !demoMode.value }?.let { "${it.relay}|${it.accountId}|${it.daemonPub}|${it.deviceId}" }
+
+    /** The context of the OPEN session — the only one whose catalog may answer capability questions about it. */
+    private fun activeCodexContext(): String = "${catalogIdentity()}|${workdir.value}"
+
+    /** Drop the persisted Codex catalog of [target] — on unpair and on a refused credential. */
+    private fun forgetPersistedCatalog(target: PairedDaemon?) {
+        val identity = target?.let { "${it.relay}|${it.accountId}|${it.daemonPub}|${it.deviceId}" } ?: return
+        modelCatalogStore.clear(identity, AgentKind.CODEX)
+    }
+
+    private fun clearCodexCatalogRequest() {
+        codexCatalogTimeout?.cancel(); codexCatalogTimeout = null
+        codexCatalogRequest = null
+        agentModelsRefreshing.remove(AgentKind.CODEX)
+    }
+
+    /** Leave the per-link catalog state behind with the link (disconnect / cold switch). */
+    private fun resetModelCatalogState() {
+        agentModels.clear() // model/effort capabilities belong to the daemon we just left; UNKNOWN on the next one until it replies
+        agentModelPreview.clear()
+        agentModelsRefreshing.clear()
+        clearCodexCatalogRequest()
+        codexCatalogContext = null; codexCatalogScope = null; codexCatalogTarget = null
+        modelCatalogPolicy.reset()
+    }
+
+    /**
+     * One Codex [ModelsList]. Order of the gates:
+     *  1. CORRELATION — a frame with a token must match THE outstanding request, and that request's identity,
+     *     generation and target directory must still be current; anything else is a late or foreign answer and
+     *     is dropped. A frame WITHOUT a token is the legacy path: only an older daemon (no `catalog`) sends one,
+     *     it cannot be correlated, and it is taken as the authoritative list exactly as before this cache existed
+     *     — that boundary is the old protocol's, not something a new client can close.
+     *  2. INTERIM (`catalog.refreshing`) — rows to show while the check runs; never the capability basis.
+     *  3. FINAL — the request is closed; what the rows may be used for follows their SOURCE:
+     *     - `dynamic` (confirmed account, no error, scoped): authoritative for its context, the only answer that
+     *       may correct a SAVED preference ([reconcileCodexDefaults]) and the only one persisted;
+     *     - `dynamic-unconfirmed` without error: the CLI's real answer for this install → capabilities for the
+     *       session (temporary), but no saved preference is touched and nothing is persisted;
+     *     - legacy (older daemon): authoritative + reconcile, the pre-cache behaviour, kept as it was;
+     *     - everything else (`file`, `last-good`, `cli-builtin`, `builtin`, errored, unknown): rows to show only.
+     *       With a confirmed list already present for this context, its rows stay and the failure is SHOWN on it
+     *       (error + provenance replace the old meta); same scope keeps the confirmed capabilities, another or
+     *       unknown scope demotes them to unknown. No preview ever reconciles a saved tier/effort.
+     */
+    private fun onCodexModelsList(f: ModelsList) {
+        val req = codexCatalogRequest
+        val legacy = f.requestId == null && f.catalog == null
+        if (!legacy) {
+            if (req == null || f.requestId != req.token) return // late / foreign / unsolicited: not ours
+            if (req.identity != catalogIdentity() || req.gen != connGen.value || req.workdir != codexCatalogTarget) { clearCodexCatalogRequest(); return }
+        } else if (req != null && req.gen != connGen.value) return
+        val context = req?.let { "${it.identity}|${it.workdir}" } ?: activeCodexContext()
+        if (f.catalog?.refreshing == true) {
+            agentModelsRefreshing[AgentKind.CODEX] = true
+            if (agentModels[AgentKind.CODEX] == null) agentModelPreview[AgentKind.CODEX] = f
+            return
+        }
+        clearCodexCatalogRequest()
+        if (f.error == null) modelCatalogPolicy.replied(AgentKind.CODEX, context)
+        else modelCatalogPolicy.invalidate(AgentKind.CODEX)
+        val meta = f.catalog
+        val clean = f.error == null
+        val confirmed = !legacy && clean && meta?.source == MODEL_CATALOG_SOURCE_DYNAMIC && !meta.scope.isNullOrBlank()
+        val trusted = legacy || confirmed || (clean && meta?.source == MODEL_CATALOG_SOURCE_DYNAMIC_UNCONFIRMED)
+        if (trusted) {
+            agentModels[AgentKind.CODEX] = f
+            codexCatalogContext = if (legacy) CODEX_ANY_CONTEXT else context; codexCatalogScope = meta?.scope
+            agentModelPreview.remove(AgentKind.CODEX)
+            // only a CONFIRMED account catalog (or the legacy daemon, as before) may correct a saved preference
+            if (confirmed || legacy) reconcileCodexDefaults(f.modelCapabilities)
+            if (confirmed) catalogIdentity()?.let { id -> modelCatalogStore.save(id, AgentKind.CODEX, f) }
+            return
+        }
+        val existing = agentModels[AgentKind.CODEX]?.takeIf { codexContextCovers(context) }
+        when {
+            existing == null -> agentModelPreview[AgentKind.CODEX] = f // rows to look at, nothing more
+            // the refresh failed or came back weaker: keep the confirmed rows, but SHOW this outcome on them
+            meta?.scope != null && meta.scope == codexCatalogScope ->
+                agentModels[AgentKind.CODEX] = existing.copy(error = f.error, catalog = meta)
+            else -> { // another (or unknown) scope: the confirmed capabilities no longer describe this environment
+                agentModels.remove(AgentKind.CODEX); codexCatalogContext = null; codexCatalogScope = null
+                agentModelPreview[AgentKind.CODEX] = f
+            }
+        }
+    }
+
+    /** The Codex half of [reconcileDefaultCapabilities], against the capabilities of ONE confirmed answer rather
+     *  than whatever list happens to be authoritative — a saved tier is cleared only when the confirmed catalog
+     *  lists the saved default model and that model lacks the tier. */
+    private fun reconcileCodexDefaults(caps: List<dev.ccpocket.protocol.ModelCapabilities>) {
+        val modelId = defaultModelFor(AgentKind.CODEX) ?: return
+        val row = caps.firstOrNull { it.model.equals(modelId, ignoreCase = true) } ?: return
+        val tier = defaultServiceTier.value ?: return
+        if (row.serviceTiers.none { it.id == tier }) setDefaultServiceTier(null)
+    }
+
+    /** Re-target the Codex catalog at [workdir] (an open session's directory changed, a new-session sheet opened
+     *  on another project): the outstanding request is revoked and a request for the new target goes out. */
+    private fun retargetCodexCatalog(workdir: String?) {
+        if (codexCatalogTarget == workdir && codexCatalogRequest != null) return
+        if (codexCatalogTarget != workdir || agentModels[AgentKind.CODEX] == null) fetchModels(AgentKind.CODEX, targetWorkdir = workdir)
+    }
+
+    /**
+     * A Codex turn refused the model (not found / unsupported / retired): the catalog the choice was made from
+     * is suspect, so re-check it now. The user's choice and the error row stay exactly as they are — nothing
+     * here switches models or resends the prompt; the user re-picks from the refreshed list.
+     */
+    private fun noteModelUnavailable(agent: AgentKind?, error: String?) {
+        if (agent != AgentKind.CODEX || error == null || !looksLikeModelUnavailable(error)) return
+        modelCatalogPolicy.invalidate(AgentKind.CODEX)
+        fetchModels(AgentKind.CODEX, force = true)
+    }
+
+    fun modelCapabilities(
+        agent: AgentKind,
+        modelId: String? = model.value,
+        targetWorkdir: String? = workdir.value,
+    ): dev.ccpocket.protocol.ModelCapabilities? {
         val listed = agentModels[agent] ?: return null
+        // Codex catalog cache: a catalog confirmed for ANOTHER target (a new-session sheet on project B while
+        // session A is open) says nothing about the open session — unknown, so saved values pass through
+        if (agent == AgentKind.CODEX && !codexContextCovers("${catalogIdentity()}|$targetWorkdir")) return null
         // null is the CLI's real "Default" selection, not an alias for the first advertised model. The
         // daemon cannot know which concrete model that default will resolve to for this account/session, so
         // its capabilities are UNKNOWN and persisted launch options must pass through unchanged.
@@ -4757,9 +4952,10 @@ class PocketRepository(
      * per-model row wins even when its list is empty; otherwise a non-empty backend-wide advertisement
      * (Claude CLI) applies. Null means an old daemon or an unknown/custom model, so callers preserve the
      * legacy pass-through behaviour instead of guessing that a persisted value is invalid. */
-    private fun supportedReasoningEfforts(agent: AgentKind, modelId: String?): List<String>? {
+    private fun supportedReasoningEfforts(agent: AgentKind, modelId: String?, targetWorkdir: String? = workdir.value): List<String>? {
         val listed = agentModels[agent] ?: return null
-        modelCapabilities(agent, modelId)?.let { return it.reasoningEfforts }
+        if (agent == AgentKind.CODEX && !codexContextCovers("${catalogIdentity()}|$targetWorkdir")) return null
+        modelCapabilities(agent, modelId, targetWorkdir)?.let { return it.reasoningEfforts }
         return listed.supportedEfforts.takeIf { it.isNotEmpty() }
     }
 
@@ -4774,6 +4970,14 @@ class PocketRepository(
      * its launch-time clamp isn't yet uniform across takeOver, so removing it could leak an unsupported
      * tier — tracked with #274 as the same class, to be lifted once that clamp is uniform.) */
     private fun reconcileDefaultCapabilities(agent: AgentKind) {
+        if (agent == AgentKind.CODEX) {
+            val listed = agentModels[agent] ?: return
+            val meta = listed.catalog
+            // Model changes also use this path: temporary/unconfirmed capabilities must never turn
+            // a user's explicit model selection into deletion of a saved preference.
+            if (meta != null && (listed.error != null || meta.refreshing ||
+                    meta.source != MODEL_CATALOG_SOURCE_DYNAMIC || meta.scope.isNullOrBlank())) return
+        }
         val modelId = defaultModelFor(agent)
         modelCapabilities(agent, modelId)?.let { caps ->
             if (agent == AgentKind.CODEX &&
@@ -4816,9 +5020,77 @@ class PocketRepository(
     fun agentPresetsFor(agent: AgentKind): List<dev.ccpocket.protocol.AgentPresetInfo> =
         agentModels[agent]?.agentPresets.orEmpty()
 
-    fun fetchModels(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE) {
-        scope.launch { runCatching { send(FetchModels(agent = agent, workdir = workdir.value)) } }
+    /**
+     * Ask the daemon for [agent]'s catalog. Codex rides the cache rules (design: `CODEX-MODEL-CATALOG-CACHE`):
+     * the persisted preview is restored first so the surface has rows at once, a fresh-enough answer is reused
+     * ([ModelCatalogRefreshPolicy.REUSE_MS]) and an outstanding request is not duplicated; [force] is the user's
+     * refresh. The other backends keep their pre-existing one-request-per-call behaviour untouched.
+     */
+    fun fetchModels(
+        agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE,
+        force: Boolean = false,
+        /** The directory the catalog is FOR (Codex catalog cache): the open session's by default; a new-session
+         *  sheet passes its pending project so the rows and capabilities are that project's, not session A's. */
+        targetWorkdir: String? = workdir.value,
+    ) {
+        if (agent != AgentKind.CODEX) {
+            scope.launch { runCatching { send(FetchModels(agent = agent, workdir = targetWorkdir, forceRefresh = force)) } }
+            return
+        }
+        // the send() guard withholds the frame anyway once the daemon is known not to run Codex; checked here
+        // too so no cue is raised for a request that will never leave
+        if (daemonAgentsKnown && !supportsAgent(agent)) return
+        val identity = catalogIdentity()
+        val wd = targetWorkdir
+        val context = "$identity|$wd"
+        // switching the TARGET revokes the outstanding request — its answer describes another directory
+        if (codexCatalogTarget != wd) { codexCatalogTarget = wd; clearCodexCatalogRequest() }
+        // a catalog confirmed for ANOTHER context is only rows to look at here — the daemon scopes its answer per
+        // working directory, so capabilities wait for this context's own answer
+        if (agentModels[agent] != null && !codexContextCovers(context)) {
+            agentModelPreview[agent] = agentModels.remove(agent)!!
+            codexCatalogContext = null; codexCatalogScope = null
+        }
+        if (modelListFor(agent) == null) identity?.let { id -> modelCatalogStore.load(id, agent)?.let { agentModelPreview[agent] = it } }
+        codexCatalogRequest?.let { req ->
+            if (req.identity == identity && req.gen == connGen.value) return // outstanding for this very target: merge
+            clearCodexCatalogRequest() // another binding/link: its answer would be dropped anyway
+        }
+        if (!force && modelListFor(agent) != null && modelCatalogPolicy.reusable(agent, context)) return
+        val token = "cat-${connGen.value}-${epochMillis().toString(36)}-${kotlin.random.Random.nextInt(0x10000).toString(16)}"
+        codexCatalogRequest = CodexCatalogRequest(token, identity, connGen.value, wd)
+        if (modelListFor(agent) != null) agentModelsRefreshing[agent] = true
+        // the cue must end even if no answer ever comes (dead link, a daemon that dropped the frame) — and must end
+        // THIS request only: a later request's own timer governs it
+        codexCatalogTimeout?.cancel()
+        codexCatalogTimeout = scope.launch {
+            delay(ModelCatalogRefreshPolicy.IN_FLIGHT_MS)
+            failCodexCatalogRequest(token, "The model list did not arrive in time. Try refreshing it.")
+        }
+        scope.launch {
+            if (codexCatalogRequest?.token != token) return@launch
+            runCatching { send(FetchModels(agent = agent, workdir = wd, forceRefresh = force, requestId = token)) }
+                .onFailure { error ->
+                    if (error !is kotlinx.coroutines.CancellationException) {
+                        failCodexCatalogRequest(token, "The model list could not be requested. Try refreshing it.")
+                    }
+                }
+        }
     }
+
+    private fun failCodexCatalogRequest(token: String, reason: String) {
+        if (codexCatalogRequest?.token != token) return
+        val rows = modelListFor(AgentKind.CODEX) ?: ModelsList(
+            agent = AgentKind.CODEX,
+            models = dev.ccpocket.protocol.CODEX_MODEL_IDS,
+            catalog = dev.ccpocket.protocol.ModelCatalogMeta(source = MODEL_CATALOG_SOURCE_BUILTIN),
+        )
+        val meta = rows.catalog ?: dev.ccpocket.protocol.ModelCatalogMeta(source = MODEL_CATALOG_SOURCE_LAST_GOOD)
+        onCodexModelsList(rows.copy(error = reason, requestId = token, catalog = meta.copy(refreshing = false)))
+    }
+
+    /** The user's explicit refresh of [agent]'s catalog, for [targetWorkdir] (see [fetchModels]). */
+    fun refreshModels(agent: AgentKind, targetWorkdir: String? = workdir.value) = fetchModels(agent, force = true, targetWorkdir = targetWorkdir)
 
     /** Create (null [id]) / update one preset. [token] is write-only plaintext (E2E protects the
      *  transport; the daemon stores it and only ever echoes a mask); null token on update = keep. */
@@ -5934,8 +6206,8 @@ class PocketRepository(
             } else {
                 null
         }
-        val knownCapabilities = modelCapabilities(openAgent, openModel)
-        val knownEfforts = supportedReasoningEfforts(openAgent, openModel)
+        val knownCapabilities = modelCapabilities(openAgent, openModel, targetWorkdir = wd)
+        val knownEfforts = supportedReasoningEfforts(openAgent, openModel, targetWorkdir = wd)
         // Same boundary for effort. A Codex resume never inherits a newly-selected default, while Claude
         // and the other existing backends retain their historical null/missing-row fallback.
         val requestedEffort = saved?.effort ?: if (resumeId == null || openAgent != AgentKind.CODEX) {
@@ -5960,7 +6232,7 @@ class PocketRepository(
         sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
         // Pre-fetch OpenCode model list so the picker has it ready when the user opens it,
         // rather than only fetching on picker-open (SessionSheets.kt ModelPicker LaunchedEffect).
-        fetchModels(openAgent)
+        fetchModels(openAgent, targetWorkdir = wd) // for the directory being opened — the previous session's is history
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0,
             TelKey.Backend to openAgent.name.lowercase()) + demoTag()) // resume=0 + backend = which agent a NEW session picked
@@ -7780,7 +8052,7 @@ class PocketRepository(
             val savedModel = saved?.model
             val takeoverModel = compatibleModelForAgent(agent, savedModel)
             val requestedEffort = saved?.effort ?: if (agent == AgentKind.CODEX) null else defaultEffortFor(agent)
-            val supportedEfforts = supportedReasoningEfforts(agent, takeoverModel)
+            val supportedEfforts = supportedReasoningEfforts(agent, takeoverModel, targetWorkdir = wd)
             val takeoverEffort = requestedEffort.takeIf { candidate ->
                 candidate == null || supportedEfforts == null || candidate in supportedEfforts
             }
@@ -7964,6 +8236,9 @@ class PocketRepository(
          *  boundary — a 200 MB video is 274 frames, and an exact multiple must NOT emit a trailing empty
          *  chunk — stays unit-testable (issues #90/#98). */
         fun fileChunkParts(total: Int): Int = ((total + FILE_CHUNK_RAW - 1) / FILE_CHUNK_RAW).coerceAtLeast(1)
+
+        /** [codexCatalogContext] of a legacy (unscoped, older-daemon) Codex list: it describes every directory. */
+        private const val CODEX_ANY_CONTEXT = "*"
 
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
         const val K_PRIVACY_CONSENT = "privacy_disclosure_accepted" // SecureStore flag: "1" = the 5.1.2(i) data disclosure was accepted

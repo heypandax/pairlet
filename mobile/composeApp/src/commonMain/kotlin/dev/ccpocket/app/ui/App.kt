@@ -1659,7 +1659,8 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
         )
         // wants a different agent/mode for the new path → the standard picker, then open the session there
         newPathTarget?.let { path ->
-            LaunchedEffect(path) { repo.fetchModels(AgentKind.CLAUDE) }
+            // the sheet's catalog is for the project being created in — never the still-open session's directory
+            LaunchedEffect(path) { repo.fetchModels(AgentKind.CLAUDE, targetWorkdir = path) }
             StartSessionModeSheet(
                 workdir = path,
                 selected = repo.defaultMode.value,
@@ -1670,12 +1671,14 @@ internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted 
                 availableAgents = repo.availableAgents,
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
-                modelsNoteFor = { a -> codexCatalogNote(a, repo.agentModels[a]) },
+                modelsNoteFor = { a -> codexCatalogNote(a, repo.modelListFor(a)) },
+                modelsStatusFor = { a -> codexCatalogStatus(a, repo.modelListFor(a), repo.agentModelsRefreshing[a] == true, repo.isModelListPreview(a)) },
+                onRefreshModels = { a -> repo.refreshModels(a, targetWorkdir = path) },
                 modePresetsFor = { a -> repo.modePresetsFor(a) },
                 agentPresetsFor = { a -> repo.agentPresetsFor(a) },
                 fullAccessConfirmed = repo.fullAccessConfirmed.value,
                 onFullAccessConfirmed = repo::acknowledgeFullAccess,
-                onAgentPicked = { a -> repo.fetchModels(a) },
+                onAgentPicked = { a -> repo.fetchModels(a, targetWorkdir = path) },
                 onPick = { m, a, native, model, preset ->
                     newPathTarget = null
                     repo.setDefaultAgent(a)
@@ -2533,7 +2536,8 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
         }
         if (showQuota) QuotaSheet(repo) { showQuota = false }
         if (pickMode) {
-            LaunchedEffect(Unit) { repo.fetchModels(AgentKind.CLAUDE) }
+            // the sheet's catalog is for the project being created in — never the still-open session's directory
+            LaunchedEffect(dir) { repo.fetchModels(AgentKind.CLAUDE, targetWorkdir = dir) }
             StartSessionModeSheet(
                 workdir = dir,
                 selected = repo.defaultMode.value,
@@ -2544,12 +2548,14 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 availableAgents = repo.availableAgents,
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
-                modelsNoteFor = { a -> codexCatalogNote(a, repo.agentModels[a]) },
+                modelsNoteFor = { a -> codexCatalogNote(a, repo.modelListFor(a)) },
+                modelsStatusFor = { a -> codexCatalogStatus(a, repo.modelListFor(a), repo.agentModelsRefreshing[a] == true, repo.isModelListPreview(a)) },
+                onRefreshModels = { a -> repo.refreshModels(a, targetWorkdir = dir) },
                 modePresetsFor = { a -> repo.modePresetsFor(a) },
                 agentPresetsFor = { a -> repo.agentPresetsFor(a) },
                 fullAccessConfirmed = repo.fullAccessConfirmed.value,
                 onFullAccessConfirmed = repo::acknowledgeFullAccess,
-                onAgentPicked = { a -> repo.fetchModels(a) },
+                onAgentPicked = { a -> repo.fetchModels(a, targetWorkdir = dir) },
                 onPick = { m, a, native, model, preset ->
                     pickMode = false
                     repo.setDefaultAgent(a)

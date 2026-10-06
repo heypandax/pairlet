@@ -869,6 +869,27 @@ interface DesktopModel {
      *  Null by default: a seed/preview model has no daemon whose cache could be missing. */
     fun modelsNoteForAgent(agent: AgentKind): String? = null
 
+    /** Codex catalog cache: the STATE of [modelsForAgent]'s rows (updating / restored preview / CLI built-ins /
+     *  failed refresh / confirmed empty); null = a confirmed catalog with nothing to say. Same enum the phone
+     *  surfaces render, so both read the same about the same list. */
+    fun modelsStatusForAgent(agent: AgentKind): dev.ccpocket.app.ui.CodexCatalogStatus? = null
+
+    /** Codex catalog cache: the user's manual refresh of [agent]'s catalog (merges into a running check). */
+    fun refreshModels(agent: AgentKind) {}
+
+    /** Codex catalog cache: fetch / refresh [agent]'s catalog FOR [workdir] — the new-session popover's pending
+     *  project, not the open chat's directory. Default no-ops like the one-argument forms. */
+    fun fetchModels(agent: AgentKind, workdir: String) {}
+    fun refreshModels(agent: AgentKind, workdir: String) {}
+
+    /** Codex catalog cache: the upstream display name for a Codex execution id ([id] itself when none is known).
+     *  Display only — the value sent to the daemon is always the id. */
+    fun modelDisplayName(agent: AgentKind, id: String): String = id
+
+    /** Codex catalog cache: whether the daemon has ANSWERED for [agent] on this link (or a preview is restored). False
+     *  = no rows known yet, which is the only case the Codex surfaces fall back to the static trio. */
+    fun modelsKnownFor(agent: AgentKind): Boolean = modelsForAgent(agent).isNotEmpty()
+
     /** The daemon's advertised AGENT presets for [agent] (issue #333) — same [fetchModels] answer as the
      *  model list. Empty = not advertised, and the new-session popover then shows no preset row at all:
      *  a daemon that never sends them also never reads the choice back. */

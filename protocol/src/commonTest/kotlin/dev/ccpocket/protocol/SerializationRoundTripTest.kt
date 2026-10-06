@@ -38,6 +38,30 @@ private data class OldModelsList(
     val gatewayModels: List<String> = emptyList(),
 )
 
+/** The pre-catalog-cache `pocket/models.fetch` shape (no `forceRefresh`/`requestId`) — an older daemon's view of a
+ *  new app's request. */
+@Serializable
+private data class OldFetchModels(val agent: AgentKind = AgentKind.CLAUDE, val workdir: String? = null)
+
+/** The pre-catalog-cache capability row (no display/visibility/upgrade facts). */
+@Serializable
+private data class OldModelCapabilities(
+    val model: String,
+    val reasoningEfforts: List<String> = emptyList(),
+    val defaultReasoningEffort: String? = null,
+    val serviceTiers: List<ModelServiceTier> = emptyList(),
+)
+
+/** The pre-catalog-cache list shape WITH capability rows (post-#183, pre-2026-10): an already-shipped phone that
+ *  reconciles preferences from the rows must still decode a new daemon's frame row by row. */
+@Serializable
+private data class OldCapabilityModelsList(
+    val agent: AgentKind = AgentKind.CLAUDE,
+    val models: List<String> = emptyList(),
+    val error: String? = null,
+    val modelCapabilities: List<OldModelCapabilities> = emptyList(),
+)
+
 /** The pre-#332 tool-event shape — proves an already-shipped client skips the new images array. */
 @Serializable
 private data class OldToolEvent(
@@ -208,6 +232,86 @@ class SerializationRoundTripTest {
             OldModelsList(agent = AgentKind.CODEX, models = listOf("gpt-5.6-sol")),
             PocketJson.decodeFromString<OldModelsList>(PocketJson.encodeToString(models)),
         )
+    }
+
+    @Test
+    fun modelCatalogMeta_and_display_facts_are_additive_and_legacy_safe() {
+        // Codex catalog cache (2026-10): provenance rides a trailing optional object; display facts ride
+        // trailing defaults on the capability row. Full round-trip first.
+        val list = ModelsList(
+            agent = AgentKind.CODEX,
+            models = listOf("gpt-6-astra", "gpt-6-sol"),
+            modelCapabilities = listOf(
+                ModelCapabilities(
+                    "gpt-6-astra", listOf("low", "high"), "medium", listOf(ModelServiceTier("priority", "Fast", "2x")),
+                    displayName = "GPT-6-Astra", isDefault = true,
+                ),
+                ModelCapabilities("gpt-5.5", hidden = true, upgradeTo = "gpt-6-astra", defaultServiceTier = "priority"),
+            ),
+            catalog = ModelCatalogMeta(
+                source = MODEL_CATALOG_SOURCE_DYNAMIC, scope = "0123456789abcdef", contentVersion = "fedcba9876543210",
+                checkedAt = 1_700_000_000_000, changedAt = 1_699_000_000_000, upstreamAt = null, refreshing = true, cliVersion = "0.155.1",
+            ),
+        )
+        val json = PocketJson.encodeToString(list)
+        assertEquals(list, PocketJson.decodeFromString<ModelsList>(json))
+        assertTrue("\"refreshing\":true" in json, json)
+        assertFalse("upstreamAt" in json, "an unknown upstream time stays OFF the wire (explicitNulls=false), never reads as 'now'")
+
+        // an older daemon's frame: no catalog → null = compatibility mode; sparse capability rows keep their defaults
+        val legacy = PocketJson.decodeFromString<ModelsList>("""{"agent":"codex","models":["gpt-5.5"],"modelCapabilities":[{"model":"gpt-5.5"}]}""")
+        assertNull(legacy.catalog)
+        assertEquals(ModelCapabilities("gpt-5.5"), legacy.modelCapabilities.single())
+
+        // a FUTURE daemon's source label is a tolerant string, not an enum — it decodes, the client renders "unknown"
+        val future = PocketJson.decodeFromString<ModelCatalogMeta>("""{"source":"quantum-sync","scope":"x","novelField":1}""")
+        assertEquals("quantum-sync", future.source)
+        assertFalse(future.refreshing)
+
+        // an already-shipped phone's concrete serializer skips the populated object and the new row fields
+        assertEquals(
+            OldModelsList(agent = AgentKind.CODEX, models = listOf("gpt-6-astra", "gpt-6-sol")),
+            PocketJson.decodeFromString<OldModelsList>(json),
+        )
+
+        // the refresh request flag: default false, omitted-by-old-app decodes false, old daemon ignores it
+        val legacyRequest = PocketJson.decodeFromString<FetchModels>("""{"agent":"codex"}""")
+        assertFalse(legacyRequest.forceRefresh)
+        assertNull(legacyRequest.requestId, "an already-shipped app sends no requestId — the daemon's one-frame path")
+        val forced = FetchModels(agent = AgentKind.CODEX, forceRefresh = true, requestId = "r-7", workdir = "/w")
+        assertTrue("\"forceRefresh\":true" in PocketJson.encodeToString(forced))
+        assertTrue("\"requestId\":\"r-7\"" in PocketJson.encodeToString(forced))
+        assertEquals(forced, PocketJson.decodeFromString<FetchModels>(PocketJson.encodeToString(forced)))
+
+        // the echo: absent from an older daemon / an untagged request, carried verbatim otherwise, skipped by an old app
+        assertNull(legacy.requestId)
+        val echoed = list.copy(requestId = "r-7", catalog = list.catalog?.copy(source = MODEL_CATALOG_SOURCE_DYNAMIC_UNCONFIRMED))
+        val echoedJson = PocketJson.encodeToString(echoed)
+        assertEquals(echoed, PocketJson.decodeFromString<ModelsList>(echoedJson))
+        assertFalse("requestId" in json, "no request id → no key on the wire")
+        assertEquals(OldModelsList(agent = AgentKind.CODEX, models = listOf("gpt-6-astra", "gpt-6-sol")), PocketJson.decodeFromString<OldModelsList>(echoedJson))
+
+        // ① an OLD DAEMON decodes a new app's request (token + flag present) as the plain request it knows
+        assertEquals(
+            OldFetchModels(agent = AgentKind.CODEX, workdir = "/w"),
+            PocketJson.decodeFromString<OldFetchModels>(PocketJson.encodeToString(forced)),
+        )
+        // ② an OLD APP's capability-row serializer skips the new display/visibility/upgrade fields row by row
+        assertEquals(
+            OldCapabilityModelsList(
+                agent = AgentKind.CODEX, models = listOf("gpt-6-astra", "gpt-6-sol"),
+                modelCapabilities = listOf(
+                    OldModelCapabilities("gpt-6-astra", listOf("low", "high"), "medium", listOf(ModelServiceTier("priority", "Fast", "2x"))),
+                    OldModelCapabilities("gpt-5.5"),
+                ),
+            ),
+            PocketJson.decodeFromString<OldCapabilityModelsList>(echoedJson),
+        )
+        // ③ a list without provenance (any non-Codex backend, an untagged answer) puts NO catalog/requestId key on the wire
+        val plainJson = PocketJson.encodeToString(ModelsList(agent = AgentKind.CLAUDE, models = listOf("fable")))
+        assertFalse("catalog" in plainJson, plainJson)
+        assertFalse("requestId" in plainJson, plainJson)
+        assertNull(PocketJson.decodeFromString<ModelsList>(plainJson).catalog)
     }
 
     @Test

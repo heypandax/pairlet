@@ -276,13 +276,19 @@ fun DesktopApp(
                     model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
                     // same table the live-session picker reads (issue #199) — one definition of "which models"
                     modelsFor = { a ->
-                        dev.ccpocket.app.ui.modelChoicesFor(a, model.modelsForAgent(a))
+                        // Codex catalog cache: null until the daemon answered (static trio), an answered empty list
+                        // stays empty; rows wear the upstream display name while picking the execution id
+                        dev.ccpocket.app.ui.modelChoicesFor(a, model.modelsForAgent(a).takeIf { model.modelsKnownFor(a) })
+                            .map { c -> c.copy(name = model.modelDisplayName(a, c.pick).takeIf { c.name == c.pick } ?: c.name) }
                     },
                     defaultModelFor = { a -> model.defaultModelFor(a) },
                     modelsNoteFor = { a -> model.modelsNoteForAgent(a) },
+                    modelsStatusFor = { a -> model.modelsStatusForAgent(a) },
+                    onRefreshModels = { a, dir -> model.refreshModels(a, dir) },
                     // #333: the same daemon answer the model rows come from — empty means no preset row
                     agentPresetsFor = { a -> model.agentPresetsForAgent(a) },
-                    onAgentPicked = { a -> model.fetchModels(a) },
+                    // the catalog is the typed project's (Codex catalog cache); onCatalogContext carries the directory
+                    onCatalogContext = { a, dir -> model.fetchModels(a, dir) },
                 ) { dir, agent, mode, native, pickedModel, preset ->
                     model.newSession(dir, agent, mode, native, pickedModel, preset)
                 }

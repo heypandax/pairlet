@@ -52,7 +52,9 @@ class DaemonCore(
     openCodeModels: OpenCodeModelService = OpenCodeModelService(),
     kimiModels: dev.ccpocket.daemon.kimi.KimiModelService = dev.ccpocket.daemon.kimi.KimiModelService(),
     zcodeModels: dev.ccpocket.daemon.zcode.ZCodeModelService = dev.ccpocket.daemon.zcode.ZCodeModelService(),
-    codexModels: CodexModelService = CodexModelService(),
+    /** Codex model catalog (cache + background check). Defaulted to resolve the same `--codex-bin` the backend and
+     *  the quota reader use — a catalog read off a different codex install would describe another account. */
+    codexModels: CodexModelService = CodexModelService(codexBin = codexBin),
     dshModels: dev.ccpocket.daemon.dsh.DshModelService = dev.ccpocket.daemon.dsh.DshModelService(),
     /** Project-pin sync (issue #362). The file store reads lazily — an embedded core that never receives a pin
      *  request never touches ~/.cc-pocket — and tests hand in a temp-file or in-memory store instead. */
