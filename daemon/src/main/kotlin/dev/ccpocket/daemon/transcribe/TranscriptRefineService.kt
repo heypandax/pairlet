@@ -34,8 +34,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * - One model at a time across the whole daemon: a refine whose conversation differs from the running one waits for
  *   the single slot, at most [MAX_WAITING] of them; one more is answered [TranscriptRefineError.UNAVAILABLE] at once.
  *   Supersede and [AudioCancel] work on a waiting refine the same as on a running one.
- * - A hard limit of [HARD_TIMEOUT_MS], counting the wait for the slot too — the phone's own budget plus margin for its late-result rule — after which the
- *   answer is [TranscriptRefineError.TIMEOUT] and the refiner's process is gone.
+ * - A hard limit of [HARD_TIMEOUT_MS], counting the wait for the slot too, after which the answer is
+ *   [TranscriptRefineError.TIMEOUT] and the refiner's process is gone. The phone gives up on its own, earlier.
  * - [AudioCancel] for the running capture cancels it silently: nobody is waiting any more.
  * - Text longer than [TranscriptRefineLimits.MAX_TEXT_CHARS] is answered [TranscriptRefineError.UNAVAILABLE] without
  *   starting a model.
@@ -153,8 +153,8 @@ class TranscriptRefineService(
         val agent = agentOf(f.convoId) ?: TranscriptRefiners.agentOf(f.agentHint)
         val refiner = refiners.usableFor(agent) ?: return failure(f, TranscriptRefineError.UNAVAILABLE, null)
         run.agent = refiner.agent
-        // nothing to correct, and nothing for a model to answer
-        if (f.text.isBlank()) return TranscriptRefined(f.convoId, f.captureId, ok = true, text = f.text, agent = refiner.agent.wireName(), autoSend = true)
+        // nothing to correct, and nothing for a model to answer — and nothing to send either: autoSend stays false
+        if (f.text.isBlank()) return TranscriptRefined(f.convoId, f.captureId, ok = true, text = f.text, agent = refiner.agent.wireName())
         // the hard limit covers the glossary read and the wait for the slot too: a slow disk or a queue must not
         // stretch the phone's wait past the 12 s either — a refine that runs out while queued is a TIMEOUT
         // the validator's glossary rule checks against the same list the refiner was handed
@@ -235,8 +235,8 @@ class TranscriptRefineService(
     }
 
     companion object {
-        /** The phone waits 8 s before falling back to the composer and applies a late result for 7 s more
-         *  (design §3.4); 12 s bounds the work well inside that window. */
+        /** The phone waits 10 s from its own clock, then falls back to the composer and ignores a late answer
+         *  (review §11); 12 s only bounds the work and the process here. */
         const val HARD_TIMEOUT_MS = 12_000L
 
         /** Refines that may wait for the slot behind the running one; the next is turned away. */

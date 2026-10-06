@@ -108,8 +108,8 @@ object RefineContract {
 /**
  * The words a refiner is told the speaker is likely to say (design §4.2): fixed seeds — the agents and the words of
  * this product that dictation gets wrong — then the same project vocabulary whisper's prompt uses ([ProjectTerms]),
- * led by the project's directory name. Capped at [MAX_CHARS] when joined with the widest separator the user message uses,
- * seeds first so they always fit. Words that are too long to be vocabulary, or that carry control or invisible
+ * led by the project's directory name. Capped at [MAX_CHARS] when joined with the widest separator the user message
+ * uses, seeds first so they always fit. Words that are too long to be vocabulary, or that carry control or invisible
  * characters, are skipped: they go into the model's user message ([RefineContract.userMessage]).
  */
 object RefineGlossary {

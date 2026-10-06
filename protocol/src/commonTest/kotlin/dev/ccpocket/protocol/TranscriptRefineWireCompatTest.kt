@@ -122,6 +122,26 @@ class TranscriptRefineWireCompatTest {
     }
 
     @Test
+    fun auto_send_is_only_ever_true_when_the_daemon_wrote_true() {
+        // defaults are encoded: a "no" is on the wire as an explicit false, not as an absent key
+        val refused = TranscriptRefined("c", "k", ok = true, text = "Hi", agent = "claude")
+        assertTrue(bodyJson(refused).contains("\"autoSend\":false"))
+        // a null reads as the default…
+        val fromNull = assertIs<TranscriptRefined>(
+            body("""{"t":"pocket/transcript.refined","convoId":"c","captureId":"k","ok":true,"text":"Hi","autoSend":null}"""),
+        )
+        assertFalse(fromNull.autoSend)
+        // …and a value that is not a boolean never reads as true: the frame does not decode at all. (A quoted
+        // "true" is a boolean to kotlinx.serialization even in strict mode, so it is not in this list.)
+        for (mistyped in listOf("1", "\"yes\"", "[true]")) {
+            val frame = runCatching {
+                body("""{"t":"pocket/transcript.refined","convoId":"c","captureId":"k","ok":true,"text":"Hi","autoSend":$mistyped}""")
+            }.getOrNull()
+            assertFalse((frame as? TranscriptRefined)?.autoSend == true, "autoSend=$mistyped")
+        }
+    }
+
+    @Test
     fun legacy_capability_json_decodes_to_no_refine() {
         // what an older App / daemon actually puts on the wire: other capabilities present, the new keys absent
         val caps = assertIs<ClientCaps>(

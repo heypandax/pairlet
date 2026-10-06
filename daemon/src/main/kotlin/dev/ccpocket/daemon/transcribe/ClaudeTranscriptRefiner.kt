@@ -22,9 +22,10 @@ import kotlin.coroutines.cancellation.CancellationException
 /**
  * Transcript refiner over a ONE-SHOT, tool-less `claude --print` (design §4.3). The isolation recipe is
  * [dev.ccpocket.daemon.memo.ClaudeMemoSummarizer]'s: no tools, no MCP, safe mode, no slash commands, no session
- * persistence, a fixed system prompt (no variable part at all), a fresh owner-only empty working directory, and the main backend's
- * [ClaudeRuntime] for binary, credential store and preset env. Process lifetime is the memo pipeline's
- * [MemoProcessRunner]: stdin carries the user message ([RefineContract.userMessage]: glossary, then the transcript), timeout and cancellation both tear the whole tree down.
+ * persistence, a fixed system prompt (no variable part at all), a fresh owner-only empty working directory, and the
+ * main backend's [ClaudeRuntime] for binary, credential store and preset env. Process lifetime is the memo pipeline's
+ * [MemoProcessRunner]: stdin carries the user message ([RefineContract.userMessage]: glossary, then the transcript),
+ * timeout and cancellation both tear the whole tree down.
  *
  * Model (design §4.3, measured 2026-10-05): sonnet at low effort answers a replacement list in ~2–2.5 s of API time;
  * haiku was 44–100 s on the owner's account and the session's own model may be opus/max. The memo summarizer passes

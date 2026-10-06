@@ -470,7 +470,7 @@ class TranscriptRefineServiceTest {
         assertTrue(r.ok)
         assertEquals("  ", r.text)
         assertTrue(r.edits.isEmpty())
-        assertTrue(r.autoSend)
+        assertFalse(r.autoSend) // nothing to send: a blank answer must not authorise an empty message
         assertEquals(0, claude.calls.get())
     }
 
