@@ -333,7 +333,8 @@ class ResetInventoryTest {
                 .forEach { put(it, "constructor dependency / transport instance") }
             listOf("directLinkUp", "pushDial", "registrarOverride", "linkHealthOverride", "downlinkFramesOverride", "onSendForTest",
                 "pinWriterForTest", "memoWriterForTest", "memoStoreForTest", "redeemForTest", "dialForTest", "voiceUploadForTest",
-                "directConnectForTest", "networkSnapshotProvider", "sameMachineClient", "tcpProbeForTest", "repathEnabledOverride")
+                "directConnectForTest", "networkSnapshotProvider", "sameMachineClient", "tcpProbeForTest", "repathEnabledOverride",
+                "voiceNowMs", "nativeDictationForTest", "recordForTest", "beforeVoiceSubmitForTest")
                 .forEach { put(it, "test seam / injected function") }
             listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply", "composerProbe")
                 .forEach { put(it, "shell callback wiring, not state") }
@@ -346,6 +347,7 @@ class ResetInventoryTest {
                 .forEach { put(it, "owned helper; its internal state is outside S0 (modules join the inventory from S1)") }
             listOf("repath")
                 .forEach { put(it, "owned helper (#404); disconnect() calls its reset(), which voids every timer and pending evaluation") }
+            put("voiceFlow", "owned helper (voice input v2): the pure send decision; its capture ends with the one tabled as voiceCapture")
             listOf("claudeQuota")
                 .forEach { put(it, "derived view over the CLAUDE slot of quotaByAgent") }
             EXPANDED.keys.forEach { put(it, "expanded: its fields are tabled under the '${EXPANDED.getValue(it)}.' prefix") }
@@ -694,6 +696,10 @@ class ResetInventoryTest {
             voiceStartJob                R R R R R R K R
             interruptJob                 R R R R R R K R
             voiceBarModeState            R R R R R R K R  # voice input v2: the capture's bar goes with the capture (clearVoice)
+            voiceCapture                 R R R R R R K R  # voice input v2: every exit but TKO abandons the capture (abandonVoice)
+            voiceRefineDeadline          R R R R R R K R  # …with its refine budget
+            voiceHoldJob                 R R R R R R K R  # …and its highlight hold
+            voiceComposerReasonState     R R R R R R K R  # the reason line belongs to the composer being left
             pairFailure                  K K K K K K K K
             pairFailureSeq               K K K K K K K K
             pairVerifying                K K K K K K K K
