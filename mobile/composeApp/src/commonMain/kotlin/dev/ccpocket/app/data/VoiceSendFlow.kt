@@ -238,21 +238,28 @@ class VoiceSendFlow {
     private fun downgrade(c: Capture, cause: VoiceDowngrade): List<Effect> {
         if (c.phase == Phase.SUBMITTED) return emptyList() // the app's send recovery owns the message now
         c.editOnly = true
-        val original = c.original
+        // The best text the capture has: the refined text while it is being previewed (the daemon vouched for it
+        // and the user was looking at it — it lands as "corrected, check before sending"), else the original.
+        val refined = c.refined
+        val text = refined ?: c.original
         return when (cause) {
             VoiceDowngrade.LeftConversation, VoiceDowngrade.Disconnected -> {
                 // The capture is abandoned: keep whatever text exists, never claim text that does not.
-                val reason = if (cause == VoiceDowngrade.Disconnected) VoiceComposerReason.DISCONNECTED else null
+                val reason = when {
+                    cause == VoiceDowngrade.Disconnected -> VoiceComposerReason.DISCONNECTED
+                    refined != null -> VoiceComposerReason.REVIEW
+                    else -> null
+                }
                 val partial = c.partial?.trim()?.takeIf { it.isNotBlank() }
                 when {
-                    original != null -> toComposer(c, original, reason)
+                    text != null -> toComposer(c, text, reason)
                     partial != null -> toComposer(c, partial, reason)
                     else -> finish(c, listOf(Effect.Discard))
                 }
             }
             VoiceDowngrade.Backgrounded, VoiceDowngrade.ComposerChanged, VoiceDowngrade.EligibilityLost ->
                 // Without text yet the capture carries on edit-only; its final transcript lands later.
-                if (original != null) toComposer(c, original, null) else emptyList()
+                if (text != null) toComposer(c, text, if (refined != null) VoiceComposerReason.REVIEW else null) else emptyList()
         }
     }
 

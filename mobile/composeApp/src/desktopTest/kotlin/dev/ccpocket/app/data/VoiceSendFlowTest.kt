@@ -267,8 +267,10 @@ class VoiceSendFlowTest {
         )
     }
 
-    @Test fun disconnectDuringHoldKeepsTheOriginalWithoutCancel() {
-        assertEquals(listOf(composer(original, DISCONNECTED), Finished(id)), holding().on(Downgrade(VoiceDowngrade.Disconnected)))
+    @Test fun disconnectDuringHoldKeepsTheRefinedTextWithoutCancel() {
+        // the daemon vouched for the refined text and the user was looking at it: it is what is kept
+        assertEquals(listOf(composer(refinedText, DISCONNECTED), Finished(id)), holding().on(Downgrade(VoiceDowngrade.Disconnected)))
+        assertEquals(listOf(composer(refinedText, REVIEW), Finished(id)), holding().on(Downgrade(VoiceDowngrade.LeftConversation)))
     }
 
     @Test fun leavingKeepsTheFinalTheThenPartialElseDiscards() {
@@ -287,7 +289,8 @@ class VoiceSendFlowTest {
     @Test fun otherDowngradesLandTheOriginalOnceTextExists() {
         for (cause in listOf(VoiceDowngrade.Backgrounded, VoiceDowngrade.ComposerChanged, VoiceDowngrade.EligibilityLost)) {
             assertEquals(listOf(CancelRefine(id), composer(original), Finished(id)), refining().on(Downgrade(cause)), "$cause")
-            assertEquals(listOf(composer(original), Finished(id)), holding().on(Downgrade(cause)), "$cause")
+            // during the hold the refined text is kept, marked for review (an unseen swap to the original would be worse)
+            assertEquals(listOf(composer(refinedText, REVIEW), Finished(id)), holding().on(Downgrade(cause)), "$cause")
             val waiting = flow().also { it.on(TapSend(true)) }
             assertEquals(emptyList(), waiting.on(Downgrade(cause)), "$cause")
             assertEquals(listOf(composer(original), Finished(id)), waiting.on(TranscriptFinal(original)), "$cause")
