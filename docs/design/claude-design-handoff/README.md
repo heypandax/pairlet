@@ -17,10 +17,12 @@
 - [Entry Flow UI 2.0](entry-flow-ui-2.0/README.md) 与 [Implementation Brief](entry-flow-ui-2.0/IMPLEMENTATION_BRIEF.md)：入口流程。
 - [First Run · Send to Computer v1](first-run-send-to-computer-v1/README.md)：#342 首启页以「把设置链接发到电脑」为第一个动作，演示结束后给出下一步（用户评审不通过：辅助入口接管了主路径，不按此稿实现）。
 - [Read Aloud v1](read-aloud-v1/README.md)：朗读从文件查看器里的一个按钮变成全 App 的小播放器，可离开界面继续读、可调倍率，入口覆盖文档、回复、子 Agent 报告和语音备忘（用户评审不通过：干扰聊天主路径，不按此稿实现）。
+- [New Session From Chat v1](new-session-from-chat-v1/README.md)：会话界面顶栏「⋯」左侧加一个「+」，一键打开预填当前项目与智能体的 Fast Start 弹层新开会话；离开的会话原样不动（已评审，实现中）。
 - [Supporting Surfaces UI 2.0](supporting-surfaces-ui-2.0/README.md)：辅助页面。
 - [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md)：聊天快捷操作。
 - [Settings + Bridges UI 2.1](settings-bridges-ui-2.1/README.md)：设置与桥接修订。
 - [Defaults + Voice + Results UI 2.1](defaults-voice-results-ui-2.1/README.md)：默认值、语音与结果展示。
+- [Voice Refine Send v1](voice-refine-send-v1/README.md)：语音说完后的结束态——✓ 经校对后直接发送、前导控件转为文字放入输入框、等待与回退（2026-10-05 投递，待评审）。
 
 ## 按主题查询
 
@@ -42,8 +44,10 @@
 | `tool-process-live-v1` | [Tool Process Live v1 — 执行过程折叠的实时行](tool-process-live-v1/README.md) |
 | `recent-row-actions-v1` | [Recent Row Actions v1 — 桌面侧栏「最近」项目行操作簇](recent-row-actions-v1/README.md) |
 | `read-aloud-v1` | [Read Aloud v1 — 朗读从一个按钮变成全 App 的小播放器](read-aloud-v1/README.md)（评审不通过，不实现） |
+| `new-session-from-chat-v1` | [New Session From Chat v1 — 会话界面里的新建会话入口](new-session-from-chat-v1/README.md)（已评审，实现中） |
 | `chat-quick-actions-ui-2.0` | [Chat Quick Actions UI 2.0](chat-quick-actions-ui-2.0/README.md) |
 | `context-statusline` | [上下文占用指示器入驻 composer 设计交付](context-statusline/README.md) |
+| `voice-refine-send-v1` | [Voice Refine Send v1 — 语音说完即发与发送前校对](voice-refine-send-v1/README.md)（待评审） |
 | `defaults-voice-results-ui-2.1` | [Defaults + Voice + Results UI 2.1 — Claude Design handoff](defaults-voice-results-ui-2.1/README.md) |
 | `desktop-chrome-redesign` | [Desktop Chrome Redesign——顶栏拆除＋侧栏直通窗顶（2026-09-02）](desktop-chrome-redesign/README.md) |
 | `embedded-terminal` | [内嵌终端（issue #153）设计交付](embedded-terminal/README.md) |
