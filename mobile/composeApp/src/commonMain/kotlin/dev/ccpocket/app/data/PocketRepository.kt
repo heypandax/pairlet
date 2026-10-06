@@ -3371,6 +3371,7 @@ class PocketRepository(
     private var demoAsked = false        // the one-time tool + permission demo has fired this session
     private var demoPendingReply = false // a turn is paused on the demo permission prompt
     private var demoDepth = "none" // none | opened | prompted — reported once by demo_exited
+    private var demoNewOpens = 0 // numbers each brand-new demo open's convoId (see OpenSession in demoRespond)
 
     /** Enter the demo: seed the project list + slash commands, then render like a connected session. */
     fun enterDemo() {
@@ -3433,7 +3434,10 @@ class PocketRepository(
             // entry stays hidden anyway — this just keeps every sendable frame answered)
             is RenameSession -> handle(Sessions(frame.workdir, DemoData.sessions(frame.workdir)))
             is OpenSession -> {
-                val cid = "demo-convo-${frame.resumeId ?: "new"}"
+                // a brand-new open gets a convoId of its own, as the daemon mints one per open: the chat header's "+"
+                // starts a new session FROM a new one, and startTaskWithPrompt only sends once the convoId differs
+                // from the chat it left — a reused "demo-convo-new" kept that wait open until its 30s timeout
+                val cid = "demo-convo-${frame.resumeId ?: "new-${++demoNewOpens}"}"
                 handle(
                     SessionLive(
                         cid,
@@ -4760,6 +4764,11 @@ class PocketRepository(
         return true
     }
 
+    /** new_session_entry: the chat header's "+" opened the Fast Start sheet — the tap that could start one. Kept
+     *  beside [followNewTaskFromChat] so the entry and its result share one vocabulary ([NEW_SESSION_FROM_HEADER]). */
+    fun noteNewSessionEntry() =
+        useFeature(ProductFeature.NEW_SESSION_ENTRY, mapOf(TelKey.Target to NEW_SESSION_FROM_HEADER))
+
     /**
      * A Fast Start sent from INSIDE a chat — the chat header's "+": [startTaskWithPrompt] accepted it and the sheet
      * is closing. Three things the Projects FAB never needed, because it is not a chat:
@@ -4768,9 +4777,10 @@ class PocketRepository(
      *    it waits and the router drops a chat with no conversation, so without the hold the user bounced onto a
      *    list for the length of the open — and a refused send after landing found no chat left to hand the draft
      *    back on. Only while the open is really in flight: every path that ends one ([opening]) releases it.
-     *  - Once the prompt is DELIVERED, point BACK at the landed session's project ([pointBackAtSessions]), so
-     *    backing out of the new chat lands where it lives rather than in the project it was started from. Not
-     *    before: a failed open leaves the back stack exactly as it was, not on a list the user never visited.
+     *  - Once the new session has LANDED — delivered, or open with its prompt refused — point BACK at its project
+     *    ([pointBackAtSessions]), so backing out of the new chat lands where it lives rather than in the project it
+     *    was started from. Not before: a failed OPEN leaves the back stack exactly as it was, not on a list the user
+     *    never visited.
      *  - Report new_session_result — `delivered`, or the [NewTaskError] that ended it.
      *
      * Settled on this repository's scope, not the caller's: the chat that sent the task may be gone by then (a
@@ -4782,7 +4792,7 @@ class PocketRepository(
             // the flag startTaskWithPrompt publishes LAST, so the outcome is already readable when it drops
             snapshotFlow { newTaskStarting.value }.first { !it }
             val failure = newTaskError.value
-            if (failure == null) workdir.value?.let(::pointBackAtSessions)
+            if (failure == null || failure == NewTaskError.SEND_REFUSED) workdir.value?.let(::pointBackAtSessions)
             useFeature(
                 ProductFeature.NEW_SESSION_RESULT,
                 mapOf(TelKey.Target to NEW_SESSION_FROM_HEADER, TelKey.Result to (failure?.name?.lowercase() ?: "delivered")),

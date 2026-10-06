@@ -684,6 +684,7 @@ class ResetInventoryTest {
             demoAsked                    K K K K K K K K
             demoPendingReply             K K K K K K K K
             demoDepth                    K K K K K K K K
+            demoNewOpens                 K K K K K K K K
             authState                    R R K K K K K K
             pushPrefs                    R R K K K K K K  # FIX-偏好
             approvalPrefs                R R K K K K K K  # FIX-偏好

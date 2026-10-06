@@ -135,3 +135,14 @@ value_reached 目前由会话内容布局、提示输出实际可见、文件可
 | bridge_admin | 打开 IM 桥接管理页 | 手机、桌面 |
 
 定时任务创建沿用既有 `background_task`。daemon 没有产品分析通道，命令行直接触发的功能（如 `pairlet agent`、IM 桥接消息本身）不在此列。页面类触发点每次进入各记一条，事件量不等于独立使用次数，按安装去重读数。
+
+## 8. 会话内新建会话入口（2026-10-05）
+
+手机聊天顶栏「⋯」左侧的「+」（设计见 `docs/design/claude-design-handoff/new-session-from-chat-v1/`）。沿用 `feature_used`，不新增事件名或参数键；与第 7 节不同，这两条各多带固定词表参数，用来把入口和结果连起来：
+
+| feature | 触发点 | 额外参数 | 平台 |
+|---|---|---|---|
+| new_session_entry | 可用状态下点「+」、Fast Start 弹层打开（`noteNewSessionEntry`）。离线时点灰色「+」只显示原因、不计；失败回弹自动重开不计 | `target=header` | 手机 |
+| new_session_result | 从该弹层发出的任务结束时一条（`followNewTaskFromChat`）：首条提示送达，或打开 / 发送失败 | `target=header`，`result=delivered / open_refused / timeout / send_refused` | 手机 |
+
+取值都是固定枚举（`result` 的失败值即 `NewTaskError` 的小写名），不带项目路径、会话 ID 或提示内容。项目页悬浮按钮的 Fast Start 不上报这两条。

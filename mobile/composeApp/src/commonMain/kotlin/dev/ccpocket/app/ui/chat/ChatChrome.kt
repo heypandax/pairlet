@@ -212,6 +212,32 @@ fun ChatHeader(
 }
 
 /**
+ * The chat header's "+" (new-session-from-chat-v1): a new session from inside a chat, instead of a walk back out to
+ * the session list's dock or the Projects FAB. It sits left of "⋯" in the same ink and weight and stays as quiet —
+ * no fill, no badge, no label: Send remains the screen's one filled control, the pinned approval its loudest.
+ *
+ * Unreachable, it greys out but keeps its place: the header must not re-flow under a dropped link, and a control
+ * that vanished could not explain itself. So it stays tappable — [onClick] answers with why — while its semantics
+ * say disabled and its name says unavailable, for the reader who cannot see the grey.
+ */
+@Composable
+fun NewSessionHeaderButton(available: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val label = stringResource(if (available) Res.string.new_session_title else Res.string.new_session_unavailable)
+    Box(
+        modifier.size(Metric.touch).clip(CircleShape)
+            .clickable(onClick = onClick)
+            .semantics {
+                role = Role.Button
+                contentDescription = label
+                if (!available) disabled()
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.Add, contentDescription = null, tint = if (available) Tok.tx2 else Tok.muted, modifier = Modifier.size(16.dp))
+    }
+}
+
+/**
  * The expanded context as an overlay (Chat Rhythm v1, phone): the same facts, full path and pinned Session info
  * as [ChatHeader]'s inline region, on a raised sheet the host places over the top of its stream. Covering part of
  * the transcript for a moment is the trade: laid out inline, a 320pt screen at large type had the header, the
