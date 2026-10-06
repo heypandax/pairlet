@@ -2662,9 +2662,11 @@ class PocketRepository(
     internal var repathEnabledOverride: Boolean? = null
 
     /**
-     * #404 idle relay→direct re-path (TRANSPORT-AUTO-REPATH-V1 4.5). Desktop defaults on (loopback is always
-     * dialable, no network-ownership question); phones default off until verified on a device across Wi‑Fi and
-     * cellular (4.7) — SecureStore [K_REPATH_AUTO] "on"/"off" overrides either default. Reset on disconnect.
+     * #404 idle relay→direct re-path (TRANSPORT-AUTO-REPATH-V1 4.5). On by default everywhere since 2026-10-06:
+     * LAN direct was confirmed on a real phone (58–92 ms opens against seconds over the relay), and a phone that
+     * leaves Wi‑Fi and comes back otherwise stays on the relay for as long as that link holds. Off the home
+     * network nothing is dialed: the eligibility check skips cellular and foreign subnets, and the probe must
+     * connect before any link is touched. SecureStore [K_REPATH_AUTO] = "off" is the kill switch. Reset on disconnect.
      */
     private val repath = RepathController(
         scope = scope,
@@ -2673,7 +2675,7 @@ class PocketRepository(
             repathEnabledOverride ?: when (SecureStore.getString(K_REPATH_AUTO)) {
                 "on" -> true
                 "off" -> false
-                else -> sameMachineClient
+                else -> true
             }
         },
         isOnRelay = {
@@ -8657,7 +8659,7 @@ class PocketRepository(
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
         const val K_ACCENT_THEME = "appearance_accent_theme"  // SecureStore: AccentTheme name (POCKET/CODEX; issue #204)
-        const val K_REPATH_AUTO = "repath_auto" // SecureStore: "on" / "off" overrides the #404 idle re-path default (desktop on, phone off)
+        const val K_REPATH_AUTO = "repath_auto" // SecureStore: "off" disables the #404 idle re-path (on by default on every platform)
         const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
         const val K_FILES_HIDDEN_PREFIX = "files_show_hidden:" // SecureStore: "files_show_hidden:<workdir>" → "1" = 文件浏览显示 . 开头的隐藏项
         const val FILE_TREE_LIMIT = 2_000                      // 文件浏览每层的条目上限（= daemon listPathEntries 的硬上限）
