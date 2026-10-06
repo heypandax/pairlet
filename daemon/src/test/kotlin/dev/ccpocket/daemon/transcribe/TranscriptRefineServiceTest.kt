@@ -248,6 +248,127 @@ class TranscriptRefineServiceTest {
         assertTrue(inbox.frames.isEmpty(), "the phone cancelled — nothing is sent, not even a timeout")
     }
 
+    // ── one refine at a time, daemon-wide ──────────────────────────────────────────────────────
+
+    /** Conversation `c-i` dictates `TEXT + i`; [plan] decides each one's answer and [started] records the order. */
+    private val started = CopyOnWriteArrayList<Int>()
+    private fun planned(plan: Map<Int, suspend () -> RefineOutcome>) {
+        claude.behavior = { text ->
+            val i = text.removePrefix(TEXT).toInt()
+            started += i
+            plan.getValue(i)()
+        }
+    }
+    private fun queued(i: Int) = req(text = "$TEXT$i", capture = "cap-$i", convo = "c-$i")
+    private val empty: suspend () -> RefineOutcome = { RefineOutcome.Edits(emptyList()) }
+    private val forever: suspend () -> RefineOutcome = { awaitCancellation() }
+
+    @Test
+    fun a_second_conversation_starts_only_after_the_first_finishes() = runTest {
+        val gate1 = CompletableDeferred<Unit>(); val gate2 = CompletableDeferred<Unit>()
+        planned(mapOf(1 to { gate1.await(); RefineOutcome.Edits(emptyList()) }, 2 to { gate2.await(); RefineOutcome.Edits(emptyList()) }))
+        val s = service(); val a = Inbox(); val b = Inbox()
+        s.onRefine(queued(1), a); runCurrent()
+        s.onRefine(queued(2), b); runCurrent()
+        assertEquals(listOf(1), started, "the second waits for the slot")
+        assertTrue(s.isRefining())
+        gate1.complete(Unit); runCurrent()
+        assertTrue(a.only().ok)
+        assertEquals(listOf(1, 2), started)
+        assertTrue(b.frames.isEmpty())
+        gate2.complete(Unit); runCurrent()
+        assertTrue(b.only().ok)
+        assertFalse(s.isRefining())
+    }
+
+    @Test
+    fun the_wait_for_the_slot_counts_against_the_hard_limit() = runTest {
+        // c-1 holds the slot for 8 s, so c-2 has only the 4 s left of its 12
+        planned(mapOf(1 to { kotlinx.coroutines.delay(8_000); RefineOutcome.Edits(emptyList()) }, 2 to forever))
+        val s = service(); val a = Inbox(); val b = Inbox()
+        s.onRefine(queued(1), a); s.onRefine(queued(2), b); runCurrent()
+        advanceTimeBy(8_000); runCurrent()
+        assertTrue(a.only().ok)
+        assertEquals(listOf(1, 2), started)
+        advanceTimeBy(TranscriptRefineService.HARD_TIMEOUT_MS - 8_000 - 1); runCurrent()
+        assertTrue(b.frames.isEmpty())
+        advanceTimeBy(1); runCurrent()
+        assertEquals(TranscriptRefineError.TIMEOUT, b.only().error)
+        assertEquals(1, claude.cancelled.get())
+        assertFalse(s.isRefining())
+    }
+
+    @Test
+    fun a_refine_that_runs_out_while_queued_is_a_timeout_and_never_runs() = runTest {
+        planned(mapOf(1 to forever, 2 to empty))
+        val s = service(); val a = Inbox(); val b = Inbox()
+        s.onRefine(queued(1), a); s.onRefine(queued(2), b); runCurrent()
+        advanceTimeBy(TranscriptRefineService.HARD_TIMEOUT_MS); runCurrent()
+        assertEquals(TranscriptRefineError.TIMEOUT, a.only().error)
+        assertEquals(TranscriptRefineError.TIMEOUT, b.only().error)
+        assertEquals("claude", b.only().agent)
+        assertEquals(listOf(1), started, "the queued one never reached the model")
+        assertFalse(s.isRefining())
+    }
+
+    @Test
+    fun the_fifth_waiter_is_unavailable_at_once() = runTest {
+        planned((1..7).associateWith { forever })
+        val s = service()
+        val inboxes = (1..7).associateWith { Inbox() }
+        for (i in 1..5) s.onRefine(queued(i), inboxes.getValue(i)) // one running, four waiting
+        runCurrent()
+        s.onRefine(queued(6), inboxes.getValue(6)); runCurrent()
+        val r = inboxes.getValue(6).only()
+        assertEquals(TranscriptRefineError.UNAVAILABLE, r.error)
+        assertEquals("claude", r.agent)
+        assertTrue((1..5).all { inboxes.getValue(it).frames.isEmpty() })
+        assertEquals(listOf(1), started)
+        assertEquals(TranscriptRefineService.MAX_WAITING, 4)
+        // a waiter that leaves makes room for one more
+        s.onCancel(AudioCancel("c-2", "cap-2")); runCurrent()
+        s.onRefine(queued(7), inboxes.getValue(7)); runCurrent()
+        assertTrue(inboxes.getValue(7).frames.isEmpty(), "queued, not turned away")
+        s.close()
+    }
+
+    @Test
+    fun cancelling_a_queued_refine_lets_the_next_one_run_and_leaks_no_slot() = runTest {
+        val gate1 = CompletableDeferred<Unit>()
+        planned(mapOf(1 to { gate1.await(); RefineOutcome.Edits(emptyList()) }, 2 to empty, 3 to empty, 4 to empty, 5 to empty))
+        val s = service()
+        val inboxes = (1..5).associateWith { Inbox() }
+        for (i in 1..4) s.onRefine(queued(i), inboxes.getValue(i))
+        runCurrent()
+        s.onCancel(AudioCancel("c-2", "cap-2")) // cancelled while waiting
+        s.onRefine(req(text = "${TEXT}5", capture = "cap-5", convo = "c-3"), inboxes.getValue(5)) // supersedes c-3 while waiting
+        runCurrent()
+        assertEquals(TranscriptRefineError.SUPERSEDED, inboxes.getValue(3).only().error)
+        assertEquals(listOf(1), started)
+        gate1.complete(Unit); runCurrent()
+        assertEquals(listOf(1, 4, 5), started, "the cancelled and the superseded waiters never ran")
+        assertTrue(inboxes.getValue(2).frames.isEmpty())
+        assertTrue(inboxes.getValue(4).only().ok && inboxes.getValue(5).only().ok)
+        assertFalse(s.isRefining())
+        // nothing leaked: a later request runs at once
+        s.onRefine(queued(2), Inbox()); runCurrent()
+        assertEquals(listOf(1, 4, 5, 2), started)
+    }
+
+    @Test
+    fun cancelling_the_running_refine_frees_the_slot() = runTest {
+        planned(mapOf(1 to forever, 2 to empty))
+        val s = service(); val a = Inbox(); val b = Inbox()
+        s.onRefine(queued(1), a); s.onRefine(queued(2), b); runCurrent()
+        assertEquals(listOf(1), started)
+        s.onCancel(AudioCancel("c-1", "cap-1")); runCurrent()
+        assertEquals(1, claude.cancelled.get())
+        assertEquals(listOf(1, 2), started)
+        assertTrue(b.only().ok)
+        assertTrue(a.frames.isEmpty())
+        assertFalse(s.isRefining())
+    }
+
     @Test
     fun the_conversations_own_agent_wins_over_the_hint() = runTest {
         val codex = FakeTranscriptRefiner(AgentKind.CODEX)
