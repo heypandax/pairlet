@@ -2590,8 +2590,9 @@ class PocketRepository(
      */
     internal fun repathIdle(): Boolean {
         val panes = sidePanes.panes
-        // streaming output, main chat and every pane
-        if (streaming.value || thinking.value == true || panes.any { it.streaming.value }) return false
+        // streaming output, main chat and every pane. (`thinking` is NOT consulted: it is the session's
+        // extended-thinking SETTING (#345), not activity — a turn that is thinking is already `streaming`.)
+        if (streaming.value || panes.any { it.streaming.value }) return false
         // prompts not yet on the wire / stalled, and queued turns
         if (turnQueued.value || sendStalled.value) return false
         if (messages.any { it is ChatItem.User && it.pending } ||

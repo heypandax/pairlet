@@ -31,7 +31,13 @@ class RepathIdleTest {
     }
 
     @Test fun mainChatStreaming() = busy("main streaming") { streaming.value = true }
-    @Test fun mainChatThinking() = busy("main thinking") { thinking.value = true }
+    // extended thinking is a per-session SETTING (#345), not activity: a session that has it on is idle
+    // between turns like any other, or the planned switch would never happen for it
+    @Test fun thinkingSettingAloneDoesNotBlock() {
+        val r = PocketRepository(scope)
+        r.thinking.value = true
+        assertTrue(r.repathIdle(), "the thinking setting is not activity")
+    }
     @Test fun sidePaneStreaming() = busy("side pane streaming") { pane(this).streaming.value = true }
     @Test fun queuedTurn() = busy("queued turn") { turnQueued.value = true }
     @Test fun stalledSend() = busy("stalled send") { sendStalled.value = true }
