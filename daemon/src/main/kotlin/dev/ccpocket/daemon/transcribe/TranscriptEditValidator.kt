@@ -45,7 +45,8 @@ import dev.ccpocket.protocol.TextEdit
  *    — 不/别/没/无/… and the English no/not/never/…/n't (`negation`), or the shell characters `/ \ ~ $ | ; & > <` and
  *    the backtick (`command`) it carries. Edits are unique and disjoint, so leaving one out cannot disturb another;
  *  - every applied edit must be allow-listed for `autoSend` to stay set: a case/space-only change, a `to` that is a
- *    glossary term verbatim, or a near-homophone — after the common prefix and suffix are stripped, two Han cores of
+ *    glossary term verbatim (unless `from` is a glossary term too: trading one known name for another, main for
+ *    dev, is not a recognition fix), or a near-homophone — after the common prefix and suffix are stripped, two Han cores of
  *    equal length whose characters pairwise share a reading under [Pinyin.near]. An edit that is none of these is
  *    still applied; the user sees it in the composer;
  *  - an applied edit whose `to` brings in a destructive word its `from` lacks (删, 清空, 重置, delete, force, rm, …)
@@ -55,7 +56,8 @@ import dev.ccpocket.protocol.TextEdit
  *  - 用功 → 用户 is mis-heard but not a near-homophone: it is applied without `autoSend`;
  *  - 看下 → 看一下 adds a numeral and is dropped;
  *  - the glossary rule only looks at `to`, so edit → effort passes when `effort` is a glossary term even where the
- *    speaker meant "edit". The harm is bounded: a short glossary noun swapped in for a word of similar size.
+ *    speaker meant "edit". The harm is bounded: a short glossary noun swapped in for a word of similar size;
+ *  - readings are compared without tones, so 买 → 卖 counts as a near-homophone.
  */
 object TranscriptEditValidator {
     const val MAX_EDITS = 12
@@ -139,10 +141,11 @@ object TranscriptEditValidator {
         else -> null
     }
 
-    /** Case/space-only, a glossary term verbatim (case-sensitive), or a near-homophone of Han characters. */
+    /** Case/space-only, a glossary term verbatim (case-sensitive) replacing something that is not itself a
+     *  glossary term, or a near-homophone of Han characters. */
     internal fun allowListed(edit: TextEdit, glossary: List<String>): Boolean =
         edit.from.filterNot(Char::isWhitespace).equals(edit.to.filterNot(Char::isWhitespace), ignoreCase = true) ||
-            edit.to.trim() in glossary ||
+            (edit.to.trim() in glossary && glossary.none { it.equals(edit.from.trim(), ignoreCase = true) }) ||
             nearHomophone(edit.from, edit.to)
 
     /** [edit]'s `to` carries a destructive word that its `from` does not. */

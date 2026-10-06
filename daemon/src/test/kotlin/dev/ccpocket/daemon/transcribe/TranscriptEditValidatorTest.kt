@@ -258,6 +258,12 @@ class TranscriptEditValidatorTest {
         val glossarySwap = single(TextEdit("edit", "effort"))
         assertEquals(1, glossarySwap.edits.size)
         assertTrue(glossarySwap.autoSend)
+        // …but not another glossary term: one known name traded for another is not a recognition fix
+        for (e in listOf(TextEdit("relay", "daemon"), TextEdit("codex", "Claude"), TextEdit("Claude", "Claude Code"))) {
+            val r = single(e)
+            assertEquals(listOf(e), r.edits, "still applied: $e")
+            assertFalse(r.autoSend, "no auto-send: $e")
+        }
     }
 
     @Test
