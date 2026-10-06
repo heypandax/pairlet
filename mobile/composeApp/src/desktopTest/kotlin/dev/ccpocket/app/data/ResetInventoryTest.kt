@@ -470,6 +470,8 @@ class ResetInventoryTest {
             themeMode                    K K K K K K K K
             accentTheme                  K K K K K K K K
             voiceWhisper                 K K K K K K K K
+            voiceAfterDictationState     K K K K K K K K  # voice input v2: a device setting, like the row above
+            voiceRefineAckedState        K K K K K K K K  # …and its one-way disclosure flag
             pinnedPaths                  K R K K K K K K
             workingSetMru                K R K K K K K K
             unseenSessions               R R K K K K K K
@@ -713,6 +715,7 @@ class ResetInventoryTest {
             daemonUsageAgentFilter       R R K K K K K K
             daemonOwnsPromptRecovery     R R K K K K K K
             daemonLeanHistory            R R K K K K K K  # a daemon capability: cleared with the binding, like the row above
+            daemonTranscriptRefineAgentsState R R K K K K K K  # voice input v2: the computer's refiners, likewise
             newTaskDraft                 K K K K K K K K
             newTaskDir                   K K K K K K K K
             newTaskAgent                 K K K K K K K K

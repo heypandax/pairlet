@@ -20,6 +20,7 @@ import dev.ccpocket.observability.SafeMetrics
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
@@ -847,6 +848,32 @@ class PocketRepository(
         if (on == voiceWhisper.value) return
         voiceWhisper.value = on
         SecureStore.putString(K_VOICE_ENGINE, if (on) "whisper" else "")
+    }
+
+    // Voice input v2 (docs/design/VOICE-INPUT-V2-REVIEW.md §11): what ✓ does after dictation, per device. COMPOSE —
+    // today's bar, the text lands unrefined — for everyone until the user turns SEND on in Settings, which first
+    // needs the one-time disclosure ([voiceRefineAcked]).
+    private val voiceAfterDictationState = mutableStateOf(VoiceAfterDictation.from(SecureStore.getString(K_VOICE_AFTER_DICTATION)))
+    val voiceAfterDictation: State<VoiceAfterDictation> get() = voiceAfterDictationState
+
+    /** Set what ✓ does. SEND is refused (false, nothing changes) until [acknowledgeVoiceRefineDisclosure] — the UI
+     *  shows the disclosure sheet first, then calls acknowledge + set. Leaving SEND mid-capture makes that capture
+     *  edit-only. */
+    fun setVoiceAfterDictation(v: VoiceAfterDictation): Boolean {
+        if (v == VoiceAfterDictation.SEND && !voiceRefineAckedState.value) return false
+        if (v == voiceAfterDictationState.value) return true
+        voiceAfterDictationState.value = v
+        SecureStore.putString(K_VOICE_AFTER_DICTATION, v.wire)
+        return true
+    }
+
+    /** The "correct before sending" disclosure was accepted on this device. One-way; another device asks again. */
+    private val voiceRefineAckedState = mutableStateOf(SecureStore.getString(K_VOICE_REFINE_ACK) == "1")
+    val voiceRefineAcked: State<Boolean> get() = voiceRefineAckedState
+    fun acknowledgeVoiceRefineDisclosure() {
+        if (voiceRefineAckedState.value) return
+        SecureStore.putString(K_VOICE_REFINE_ACK, "1")
+        voiceRefineAckedState.value = true
     }
 
     /** App Lock (issue #109): the biometric gate state machine + its persisted enable/auto-lock prefs. Lazy so
@@ -1989,6 +2016,13 @@ class PocketRepository(
     // The UI (App.kt) appends it after the current draft, drops the caret at the end and takes focus, then
     // clears this back to null.
     val pendingVoiceText = mutableStateOf<String?>(null)
+
+    /** Voice input v2: the agents (wire names) whose transcript refiner the connected computer can launch right now,
+     *  from its [DaemonInfo]. Empty = no refiner, or an older daemon; reset with the rest of the daemon's truth on
+     *  [disconnect]. A local launchability check on the computer, never a promise that the account is signed in. */
+    private val daemonTranscriptRefineAgentsState = mutableStateOf<List<String>>(emptyList())
+    val daemonTranscriptRefineAgents: State<List<String>> get() = daemonTranscriptRefineAgentsState
+
     private val recorder by lazy { VoiceRecorder() }
     private var usingNative = false
     private var preferRemote = false                         // sticky after a native-engine failure
@@ -3103,6 +3137,7 @@ class PocketRepository(
         daemonDiagnostics = false
         daemonOwnsPromptRecovery = false // ditto: an older next daemon still needs the legacy fallback
         daemonLeanHistory.value = false // ditto: an older next daemon's history pages are not byte-bounded
+        daemonTranscriptRefineAgentsState.value = emptyList() // voice input v2: the next machine re-advertises its refiners
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
@@ -3270,6 +3305,8 @@ class PocketRepository(
         themeMode.value = from.themeMode.value
         accentTheme.value = from.accentTheme.value
         voiceWhisper.value = from.voiceWhisper.value
+        voiceAfterDictationState.value = from.voiceAfterDictationState.value
+        voiceRefineAckedState.value = voiceRefineAckedState.value || from.voiceRefineAckedState.value // one-way, like fullAccessConfirmed
         // #362: pins are NOT copied from the outgoing primary — each computer has its own; rebound below
         // #165: NOT copied from the outgoing primary — the working set is per-computer, and this promote is
         // precisely the moment the machine changes. Load this satellite's own instead.
@@ -3540,7 +3577,10 @@ class PocketRepository(
         ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true, maxFrameBytes = dev.ccpocket.app.net.RelayE2EConnection.MAX_FRAME_BYTES, supportsVoiceMemo = true, supportsSessionObservationV1 = true,
             // lean history (SLOW-LINK-RESILIENCE §6): both are promises about what the chat UI does, so they
             // follow the UI that is running — see [leanHistory]
-            supportsImagePreviews = leanHistory, supportsShortHistoryWindow = leanHistory)
+            supportsImagePreviews = leanHistory, supportsShortHistoryWindow = leanHistory,
+            // voice input v2: this build decodes pocket/transcript.refined. Declaring it asks for nothing — a refine
+            // only runs when this phone sends a TranscriptRefine, which needs the user's SEND setting
+            supportsTranscriptRefine = true)
 
     /**
      * Declare the capabilities again, on the session that just proved itself live.
@@ -4137,6 +4177,11 @@ class PocketRepository(
                 daemonDiagnostics = f.supportsDiagnostics
                 daemonOwnsPromptRecovery = f.supportsPromptRecovery
                 daemonLeanHistory.value = f.supportsLeanHistory
+                // voice input v2: the agents whose transcript refiner this computer can launch. Unconditional, incl.
+                // the empty list of an older daemon; a re-announcement of the same list changes nothing
+                if (f.transcriptRefineAgents != daemonTranscriptRefineAgentsState.value) {
+                    daemonTranscriptRefineAgentsState.value = f.transcriptRefineAgents
+                }
                 // #360: this link's managed-list capability. Losing it (or its agent set changing) retires every
                 // pending managed reply and every accepted list, back to the legacy rows.
                 val managedAgentsNow = if (f.supportsManagedSessions) managedAgentsOf(f.managedAgents) else emptySet()
@@ -8660,6 +8705,8 @@ class PocketRepository(
         const val K_ACCENT_THEME = "appearance_accent_theme"  // SecureStore: AccentTheme name (POCKET/CODEX; issue #204)
         const val K_REPATH_AUTO = "repath_auto" // SecureStore: "off" disables the #404 idle re-path (on by default on every platform)
         const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
+        const val K_VOICE_AFTER_DICTATION = "voice_after_dictation" // SecureStore: "send" = ✓ refines then sends (voice input v2); anything else = into the composer
+        const val K_VOICE_REFINE_ACK = "voice_refine_ack"     // SecureStore flag: "1" = the voice-refine disclosure was accepted on this device
         const val K_FILES_HIDDEN_PREFIX = "files_show_hidden:" // SecureStore: "files_show_hidden:<workdir>" → "1" = 文件浏览显示 . 开头的隐藏项
         const val FILE_TREE_LIMIT = 2_000                      // 文件浏览每层的条目上限（= daemon listPathEntries 的硬上限）
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
