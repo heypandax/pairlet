@@ -22,3 +22,5 @@ actual fun isPreviewMode(): Boolean = System.getProperty("ccpPreview") == "true"
 
 // The desktop app updates itself from Settings ▸ About (issue #87) — no web hand-off needed.
 actual fun appUpdateRoute(): AppUpdateRoute = AppUpdateRoute.DESKTOP_IN_APP
+
+actual fun supportsLeanHistory(): Boolean = false // split columns do not page; see the expect's KDoc

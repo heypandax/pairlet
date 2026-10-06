@@ -119,6 +119,8 @@ import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.ConvoHistoryPage
 import dev.ccpocket.protocol.FetchHistoryPage
+import dev.ccpocket.protocol.FetchImage
+import dev.ccpocket.protocol.ImageContent
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
@@ -393,6 +395,10 @@ sealed interface ChatItem {
         val seq: Long? = null,
         val uuid: String? = null,
         val compactSummary: Boolean = false,
+        /** Lean history: for each of [images], the daemon's ref when that picture is a PREVIEW whose full
+         *  version can be fetched (`ImageData.ref`), else null. Empty when none of them is a preview — every
+         *  locally composed bubble, and everything from a daemon or a connection without previews. */
+        val imageRefs: List<String?> = emptyList(),
     ) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
@@ -421,6 +427,11 @@ sealed interface ChatItem {
         /** The daemon's replay budget shed some of the result's pictures — rendered even with an empty
          *  [images], so "there was a screenshot you can't see" never reads as "there was no screenshot". */
         val imagesTruncated: Boolean = false,
+        /** Lean history: per-picture preview refs, same contract as [User.imageRefs]. */
+        val imageRefs: List<String?> = emptyList(),
+        /** This row's transcript cursor when it was replayed (`HistoryMessage.seq`) — where the daemon can read
+         *  a previewed picture's full version back from. Null on a card that only ever arrived live. */
+        val seq: Long? = null,
     ) : ChatItem
     data class Sys(val text: String, val isError: Boolean = true) : ChatItem
     data class RuleChip(val rule: String) : ChatItem // "Always allowing X this session" confirmation
@@ -1564,6 +1575,12 @@ class PocketRepository(
     val historyHasMore = mutableStateOf(false)
     val historyLoadingOlder = mutableStateOf(false)
     private var historyPageDeadline: Job? = null
+    /** Alive for [HISTORY_PAGE_RESEND_MS] after an older-history request went out: while it is, asking for the
+     *  SAME page again is a no-op. The spinner's deadline is 10 s, but a page that is merely slow is still on
+     *  its way (and still accepted), and the callers that retry — the chat list re-evaluating as rows stream in,
+     *  a reader nudging the top — must not hand a slow link the same 64 KB again every time something on screen
+     *  changes. Cancelled the moment a page lands or the window is re-anchored. */
+    private var historyPageCooldown: Job? = null
     /** The anchor (beforeSeq) of an outstanding older-history request, or null when none is in flight
      *  (issue #147). This — NOT [historyLoadingOlder] — is what gates an incoming [ConvoHistoryPage]:
      *  on a slow cross-border link the reply deadline may already have collapsed the spinner, yet the
@@ -1572,11 +1589,94 @@ class PocketRepository(
      *  duplicate late fan-out) or the transcript/anchor is reset out from under it. An unsolicited page
      *  (null here) is dropped — the old `historyLoadingOlder` guard's role, now anchored on the request. */
     private var historyPageAnchor: Long? = null
+    /**
+     * Is [f] the reply to the older-history request that is outstanding right now? A page frame carries no
+     * request id, but it does carry cursors, and a reply to "rows before X" can only hold rows before X.
+     *
+     * This is what makes a re-sent request safe. On a slow link the same page can be asked for twice (the
+     * 30 s lost-page retry), and both replies arrive — the second one after the first has already moved the
+     * anchor down and the NEXT page has been requested. Accepting it on "some request is outstanding" alone
+     * prepended the same rows a second time and then threw the real next page away as unsolicited.
+     */
+    private fun answersOutstandingPage(f: ConvoHistoryPage): Boolean {
+        val anchor = historyPageAnchor ?: return false
+        if (f.messages.any { row -> row.seq?.let { it >= anchor } == true }) return false
+        val first = f.firstSeq ?: return true // no cursor at all: an older daemon's shape, accepted as it always was
+        // rows start strictly before the anchor; an empty page (a read failure that keeps the cursor) names the
+        // very anchor it answered
+        return if (f.messages.isEmpty()) first <= anchor else first < anchor
+    }
+
+    /** Bumped each time a FULL window replaces this conversation's history (an open, a reattach that could not
+     *  continue as a delta, a long-absence delta the daemon turned into a first window). The chat list starts
+     *  its short-window paging budget afresh on it: what the previous window's pages showed says nothing about
+     *  this one. Like [historyPrependGen], a counter that only ever grows. */
+    val historyWindowGen = mutableStateOf(0)
+
     /** How many rows the last page PREPENDED (read with [historyPrependGen]) — the chat list scrolls
      *  by this to keep the viewport anchored on the row the user was reading. */
     var lastHistoryPrependCount = 0
         private set
     val historyPrependGen = mutableStateOf(0)
+
+    // ── lean history (docs/design/SLOW-LINK-RESILIENCE.md §6) ─────────────────────────────────────────
+    /** Whether this app declares the lean-history capabilities: its chat pages a window that does not fill the
+     *  screen and fetches a previewed picture's full version on open. The platform's answer; a test seam so the
+     *  phone behaviour can be exercised on the desktop test runtime. Read when the capabilities are declared. */
+    internal var leanHistory: Boolean = dev.ccpocket.app.supportsLeanHistory()
+
+    /** The connected daemon advertised lean history (`DaemonInfo.supportsLeanHistory`): its older-history pages
+     *  are bounded by bytes, so a window too short to scroll may fetch a few of them on its own. Against an
+     *  older daemon a page is up to a hundred full rows, and the chat keeps to the single automatic page it
+     *  always fetched. Follows the handshake like every other daemon capability. */
+    val daemonLeanHistory = mutableStateOf(false)
+
+    /** Full versions of pictures the daemon sent as previews, by their ref (`ImageData.ref`). Filled by
+     *  [requestFullImage] when the viewer opens one; the viewer swaps the preview for it in place. A handful at
+     *  most ([FULL_IMAGES_KEPT]) — the transcript on the computer is the store, this is only what is on screen. */
+    val fullImages = mutableStateMapOf<String, ByteArray>()
+    /** Refs with a [FetchImage] in flight → that request's id. A reply for any other id is stale and ignored. */
+    val fullImagePending = mutableStateMapOf<String, String>()
+    /** Refs the daemon could not produce (or did not answer in time). The viewer keeps the preview and says so;
+     *  opening the picture again asks again. */
+    val fullImageUnavailable = mutableStateMapOf<String, Boolean>()
+    /** The refs in [fullImages], oldest first — which one makes room for the next. */
+    private val fullImageOrder = ArrayDeque<String>()
+
+    /**
+     * The viewer is showing the picture [ref] stands for — fetch its full version unless it is already here or
+     * on its way. [seq] is the row's transcript cursor (null on a card that only arrived live) and [index] the
+     * picture's position on the row: with them the daemon can read the picture back off the transcript even
+     * after a restart. One request per ref at a time; a daemon that never answers is given up on after
+     * [FULL_IMAGE_TIMEOUT_MS] so the indicator cannot spin for ever, and the preview stays either way.
+     */
+    fun requestFullImage(ref: String, seq: Long?, index: Int) {
+        val convo = convoId.value ?: return
+        if (demoMode.value || ref in fullImages || ref in fullImagePending) return
+        val requestId = newPromptId()
+        fullImagePending[ref] = requestId
+        fullImageUnavailable.remove(ref)
+        scope.launch { send(FetchImage(convo, ref, seq = seq, index = index, requestId = requestId)) }
+        scope.launch {
+            delay(FULL_IMAGE_TIMEOUT_MS)
+            if (fullImagePending[ref] == requestId) { fullImagePending.remove(ref); fullImageUnavailable[ref] = true }
+        }
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    private fun onImageContent(f: ImageContent) {
+        // only the reply to the request that is still outstanding for this ref: a late answer to one the
+        // session switch (or the deadline) already retired must not resurrect state for a chat we left
+        val outstanding = fullImagePending[f.ref] ?: return
+        if (outstanding != f.requestId) return
+        fullImagePending.remove(f.ref)
+        val bytes = f.image?.let { runCatching { Base64.Default.decode(it.base64) }.getOrNull() }
+        if (bytes == null) { fullImageUnavailable[f.ref] = true; return }
+        // the oldest goes first once the bound is reached (the state map itself keeps no order)
+        while (fullImageOrder.size >= FULL_IMAGES_KEPT) fullImages.remove(fullImageOrder.removeFirst())
+        fullImageOrder.addLast(f.ref)
+        fullImages[f.ref] = bytes
+    }
 
     /** The cursor to ride an [OpenSession] re-open (issue #147): the stored seq only when the target
      *  session still matches the one it was recorded for AND we still hold its transcript; else 0 =
@@ -1591,8 +1691,12 @@ class PocketRepository(
         historySeq = null; historySeqSession = null; historyFirstSeq = null; historyRows = null
         historyHasMore.value = false; historyLoadingOlder.value = false
         historyPageDeadline?.cancel(); historyPageDeadline = null
+        historyPageCooldown?.cancel(); historyPageCooldown = null
         historyPageAnchor = null
         lastHistoryPrependCount = 0
+        // the fetched full pictures belong to the transcript being dropped; an answer still on its way finds
+        // no pending request and is ignored
+        fullImages.clear(); fullImageOrder.clear(); fullImagePending.clear(); fullImageUnavailable.clear()
     }
 
     // ── recently left sessions, kept in memory for a delta reopen (session-open latency, plan #1) ────────
@@ -1634,9 +1738,13 @@ class PocketRepository(
         val convo = convoId.value ?: return
         val before = historyFirstSeq ?: return
         if (!historyHasMore.value || historyLoadingOlder.value) return
+        // this very page was asked for moments ago and may still be in transit — see [historyPageCooldown]
+        if (historyPageAnchor == before && historyPageCooldown?.isActive == true) return
         historyLoadingOlder.value = true
         historyPageAnchor = before // the request is outstanding until a page lands, even past the deadline
         scope.launch { send(FetchHistoryPage(convo, beforeSeq = before)) }
+        historyPageCooldown?.cancel()
+        historyPageCooldown = scope.launch { delay(HISTORY_PAGE_RESEND_MS) }
         historyPageDeadline?.cancel()
         historyPageDeadline = scope.launch {
             delay(10_000)
@@ -2896,6 +3004,7 @@ class PocketRepository(
         promptOutcomes.reset()
         daemonDiagnostics = false
         daemonOwnsPromptRecovery = false // ditto: an older next daemon still needs the legacy fallback
+        daemonLeanHistory.value = false // ditto: an older next daemon's history pages are not byte-bounded
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
@@ -3330,7 +3439,10 @@ class PocketRepository(
 
     /** What this build declares to the daemon. One definition, because it is sent from two places. */
     private fun clientCaps() =
-        ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true, maxFrameBytes = dev.ccpocket.app.net.RelayE2EConnection.MAX_FRAME_BYTES, supportsVoiceMemo = true, supportsSessionObservationV1 = true)
+        ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE, AGENT_WIRE_DSH), supportsApprovalV2 = true, supportsDiagnostics = true, supportsProjectPins = true, supportsManagedSessions = true, supportsToolOutcomes = true, maxFrameBytes = dev.ccpocket.app.net.RelayE2EConnection.MAX_FRAME_BYTES, supportsVoiceMemo = true, supportsSessionObservationV1 = true,
+            // lean history (SLOW-LINK-RESILIENCE §6): both are promises about what the chat UI does, so they
+            // follow the UI that is running — see [leanHistory]
+            supportsImagePreviews = leanHistory, supportsShortHistoryWindow = leanHistory)
 
     /**
      * Declare the capabilities again, on the session that just proved itself live.
@@ -3925,6 +4037,7 @@ class PocketRepository(
                 }
                 daemonDiagnostics = f.supportsDiagnostics
                 daemonOwnsPromptRecovery = f.supportsPromptRecovery
+                daemonLeanHistory.value = f.supportsLeanHistory
                 // #360: this link's managed-list capability. Losing it (or its agent set changing) retires every
                 // pending managed reply and every accepted list, back to the legacy rows.
                 val managedAgentsNow = if (f.supportsManagedSessions) managedAgentsOf(f.managedAgents) else emptySet()
@@ -4400,9 +4513,11 @@ class PocketRepository(
                     historyRows = replayRows.takeIf { lastSeq != null }
                     historyFirstSeq = f.firstSeq
                     historyHasMore.value = f.hasMore && f.firstSeq != null
+                    historyWindowGen.value++
                     // a full replay re-anchors the window; a page still in flight against the OLD anchor
                     // would prepend misaligned rows, so retire that outstanding request.
                     historyPageAnchor = null; historyPageDeadline?.cancel(); historyPageDeadline = null
+                    historyPageCooldown?.cancel(); historyPageCooldown = null
                     historyLoadingOlder.value = false
                 }
             }
@@ -4411,9 +4526,10 @@ class PocketRepository(
             // link deadline collapsed the spinner is still a valid reply and must be accepted (the fixed
             // bug). Clearing the anchor here dedupes a duplicate late fan-out; a page for a client that
             // never asked (anchor null) is dropped.
-            is ConvoHistoryPage -> if (f.convoId == convoId.value && historyPageAnchor != null) {
+            is ConvoHistoryPage -> if (f.convoId == convoId.value && answersOutstandingPage(f)) {
                 historyPageAnchor = null
                 historyPageDeadline?.cancel(); historyPageDeadline = null
+                historyPageCooldown?.cancel(); historyPageCooldown = null
                 historyLoadingOlder.value = false
                 val older = f.messages.map(::historyItem)
                 if (older.isNotEmpty()) {
@@ -4425,6 +4541,7 @@ class PocketRepository(
                 historyFirstSeq = f.firstSeq ?: historyFirstSeq
                 historyHasMore.value = f.hasMore && f.firstSeq != null
             }
+            is ImageContent -> if (f.convoId == convoId.value) onImageContent(f)
             is CommandList -> if (f.convoId == convoId.value) replace(slashCommands, f.commands)
             is Transcript -> onTranscript(f)
             // file upload receipt (issue #90) — matched on captureId inside; convo guard like CommandList
@@ -8379,6 +8496,14 @@ class PocketRepository(
         const val TRANSCRIBE_TIMEOUT_MS = 15_000L
         const val TRANSCRIBE_GIVE_UP_MS = 90_000L
         const val NATIVE_FINAL_TIMEOUT_MS = 8_000L   // native engine: stop() → Final guard
+        /** Lean history: how many fetched full pictures are kept at once — what one viewer session pages through. */
+        /** How long after an older-history request the same page is not asked for again. Just under the chat
+         *  list's own retry interval (`HISTORY_PAGE_RETRY_MS`, 30 s), so that retry goes through. */
+        const val HISTORY_PAGE_RESEND_MS = 25_000L
+        const val FULL_IMAGES_KEPT = 8
+        /** How long a full-picture request may go unanswered before the viewer stops waiting. A 150 KB picture
+         *  took 6–16 s over the lossy link this was measured on, so the bound is generous on purpose. */
+        const val FULL_IMAGE_TIMEOUT_MS = 45_000L
 
         // file uploads (issue #90)
         const val MAX_FILES = 6                      // staged at once — matches the chip strip's comfortable width

@@ -229,9 +229,13 @@ class ToolProcessCollapseUiTest {
             onSend = { f -> if (f is FetchHistoryPage) pageRequests.add(f) },
         )
         armed = repo
+        // today's daemon: its pages are byte-bounded, which is what lets the chat fetch more than one unasked
+        repo.receiveForTest(dev.ccpocket.protocol.DaemonInfo(supportsLeanHistory = true))
         waitForIdle()
-        // the window is short, so ONE automatic page is today's short-window behaviour; answer every request
-        // with another page that folds away entirely and make sure it does not become a loop
+        // the window is short, so it pages on its own (lean history, SLOW-LINK-RESILIENCE §6); answer every
+        // request with another page that folds away entirely and make sure it does not become a loop. The
+        // first page still adds a row (a second fold above "start"); the next one disappears into that fold,
+        // puts nothing new on screen, and that is where the chat must stop — not at the end of the session.
         var seq = 100L
         repeat(8) {
             if (pageRequests.size > it) {
@@ -240,7 +244,7 @@ class ToolProcessCollapseUiTest {
             }
             waitForIdle()
         }
-        assertTrue(pageRequests.size <= 1, "folded pages must not keep paging history in (${pageRequests.size} requests)")
+        assertTrue(pageRequests.size <= 2, "folded pages must not keep paging history in (${pageRequests.size} requests)")
     }
 
     // ── review P1-4 / P2-5 ───────────────────────────────────────────────────────────────────────

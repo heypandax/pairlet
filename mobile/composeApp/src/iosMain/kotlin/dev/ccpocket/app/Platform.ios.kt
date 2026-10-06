@@ -35,3 +35,5 @@ actual fun isPreviewMode(): Boolean = NSUserDefaults.standardUserDefaults.boolFo
 
 // No in-app update path on iOS by store rule — the nudge points at the listing and stops there.
 actual fun appUpdateRoute(): AppUpdateRoute = AppUpdateRoute.IOS_STORE
+
+actual fun supportsLeanHistory(): Boolean = true

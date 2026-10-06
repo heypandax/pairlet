@@ -675,6 +675,8 @@
     <string name="image_zoom_out">Zoom out</string>
     <string name="image_zoom_fit">Fit</string>
     <string name="img_replay_truncated">· some images weren\'t synced (too large or too many)</string>
+    <string name="img_full_loading">Loading the full image…</string>
+    <string name="img_full_unavailable">Full image unavailable right now — showing the preview</string>
 
     <!-- ── session info + quick actions ──────────────────────────── -->
     <string name="session_info_title">Session</string>

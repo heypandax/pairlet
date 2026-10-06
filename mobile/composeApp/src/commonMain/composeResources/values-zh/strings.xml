@@ -675,6 +675,8 @@
     <string name="image_zoom_out">缩小</string>
     <string name="image_zoom_fit">适应窗口</string>
     <string name="img_replay_truncated">· 部分图片过大或过多，未同步</string>
+    <string name="img_full_loading">正在加载原图…</string>
+    <string name="img_full_unavailable">暂时取不到原图，当前显示的是预览</string>
 
     <!-- ── 会话信息 + 快捷操作 ───────────────────────────────────── -->
     <string name="session_info_title">会话</string>

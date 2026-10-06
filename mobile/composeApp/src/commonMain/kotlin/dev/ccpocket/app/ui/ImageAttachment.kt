@@ -60,6 +60,8 @@ import dev.ccpocket.app.data.PendingImage
 import dev.ccpocket.app.media.decodeImageBitmap
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.tightCenter
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /** Decode once per distinct byte array; cached across recompositions. */
@@ -246,6 +248,42 @@ private val TOOL_THUMB_HEIGHT = 92.dp
 const val TOOL_IMAGES_TAG = "tool-result-images"
 const val TOOL_IMAGE_TILE_TAG = "tool-result-image-"
 
+/**
+ * The pictures of one chat row as the viewer needs them (lean history, docs/design/SLOW-LINK-RESILIENCE.md §6):
+ * the bytes on screen, and — where the daemon sent a preview — its ref plus the row's transcript cursor, which is
+ * everything a request for the full version carries. [refs] is empty or index-aligned with [images].
+ */
+class ChatImages(val images: List<ByteArray>, val refs: List<String?> = emptyList(), val seq: Long? = null) {
+    fun refAt(index: Int): String? = refs.getOrNull(index)
+}
+
+/** What the viewer is showing on one page (lean history, docs/design/SLOW-LINK-RESILIENCE.md §6). */
+enum class ViewerPicture {
+    /** The picture itself — every page before previews existed, and a preview once its full version landed. */
+    FULL,
+    /** A preview, with the full version requested and not here yet. */
+    LOADING,
+    /** A preview whose full version the computer could not produce; the preview is all there is for now. */
+    UNAVAILABLE,
+}
+
+const val VIEWER_PICTURE_NOTE_TAG = "viewer-picture-note"
+
+/** The one-line status under a previewed picture: a small spinner while the full version loads, plain text when
+ *  it cannot be had. The label shares a row with the spinner, hence [tightCenter] (AGENTS.md, Compose rule). */
+@Composable
+private fun ViewerPictureNote(label: StringResource, busy: Boolean, modifier: Modifier) {
+    Row(
+        modifier.testTag(VIEWER_PICTURE_NOTE_TAG).clip(RoundedCornerShape(50)).background(Tok.raised)
+            .border(1.dp, Tok.hair, RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (busy) CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.6.dp)
+        Text(stringResource(label), color = Tok.tx2, style = tightCenter(11.5.sp))
+    }
+}
+
 /** Stand-in for bytes the platform decoder refused (issue #254). Before this, a null bitmap drew
  *  NOTHING — the tile was an empty rounded rectangle and the full-screen viewer opened pure black,
  *  which is exactly what "tap it and it's blank" looked like. Same wording as the file preview's
@@ -267,12 +305,22 @@ private fun BoxScope.UndecodableFill(fontSize: TextUnit) {
  * ([ImageZoomState]) and a double tap for 2.5x.
  */
 @Composable
-fun ImageViewer(images: List<ByteArray>, startIndex: Int, onClose: () -> Unit) {
+fun ImageViewer(
+    images: List<ByteArray>,
+    startIndex: Int,
+    /** Lean history: what the page being looked at is — see [ViewerPicture]. Default: every page is the picture itself. */
+    pictureAt: (Int) -> ViewerPicture = { ViewerPicture.FULL },
+    /** Called with the page that came into view (and once for [startIndex]) — where a preview's full version is requested. */
+    onPageShown: (Int) -> Unit = {},
+    onClose: () -> Unit,
+) {
     if (images.isEmpty()) return
     // Android back closes the viewer only. Registered after the root chat handler (LIFO), so without it
     // back fell through to backToBrowse() and closed the whole chat.
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onClose() }
     val pager = rememberPagerState(initialPage = startIndex.coerceIn(0, images.size - 1)) { images.size }
+    val currentOnPageShown by rememberUpdatedState(onPageShown)
+    LaunchedEffect(pager.currentPage) { currentOnPageShown(pager.currentPage) }
     var dragY by remember { mutableStateOf(0f) }
     // swipe-down-to-dismiss belongs to the ZOOMED-OUT state only: while zoomed, a vertical drag is a
     // pan, and dismissing the viewer under the finger that was reading the bottom of a tall screenshot
@@ -382,6 +430,13 @@ fun ImageViewer(images: List<ByteArray>, startIndex: Int, onClose: () -> Unit) {
                     Box(Modifier.size(width = if (cur) 18.dp else 6.dp, height = 6.dp).clip(CircleShape).background(if (cur) Tok.accent else Tok.hair))
                 }
             }
+        }
+        // lean history: the page on screen is a preview — say that the real picture is on its way, or that it
+        // could not be had (the preview stays either way). Sits above the dots and the gesture hint.
+        when (pictureAt(pager.currentPage)) {
+            ViewerPicture.FULL -> {}
+            ViewerPicture.LOADING -> ViewerPictureNote(Res.string.img_full_loading, busy = true, Modifier.align(Alignment.BottomCenter).padding(bottom = 68.dp))
+            ViewerPicture.UNAVAILABLE -> ViewerPictureNote(Res.string.img_full_unavailable, busy = false, Modifier.align(Alignment.BottomCenter).padding(bottom = 68.dp))
         }
         Text(
             stringResource(Res.string.viewer_hint),
