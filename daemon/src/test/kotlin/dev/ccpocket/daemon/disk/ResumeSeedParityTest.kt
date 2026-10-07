@@ -58,6 +58,20 @@ class ResumeSeedParityTest {
     }
 
     @Test
+    fun a_relocated_session_seeds_the_branch_it_moved_to() {
+        // claude moved the session into a worktree mid-way; the cold resume must seed the worktree's branch
+        assertParity(
+            "sess-moved",
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"start"},"cwd":"/repo","gitBranch":"main"}""",
+                """{"type":"relocated","relocatedCwd":"/repo/.claude/worktrees/w"}""",
+                """{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":10,"output_tokens":1},"content":[]},"cwd":"/repo/.claude/worktrees/w","gitBranch":"worktree-w"}""",
+                """{"type":"relocated","relocatedCwd":"/repo/.claude/worktrees/w"}""",
+            ),
+        )
+    }
+
+    @Test
     fun sidechain_and_synthetic_records_are_skipped_the_same_way() {
         // a Task subagent's turn shares the file but ran the SUBAGENT's model against the SUBAGENT's window;
         // `<synthetic>` is an API-error placeholder. Neither may win the model, and the sidechain's usage

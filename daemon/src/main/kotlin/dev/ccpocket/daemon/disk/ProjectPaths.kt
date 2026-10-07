@@ -112,18 +112,53 @@ object ProjectPaths {
         }
     }
 
-    /** The `cwd` recorded in [projectDir]'s newest `.jsonl`, or null if none/unreadable. */
+    /** The home cwd ([homeCwd]) of [projectDir]'s newest `.jsonl`, or null if none/unreadable. */
     private fun recordedCwd(projectDir: Path): String? {
         val newest = runCatching {
             Files.newDirectoryStream(projectDir, "*.jsonl").use { it.toList() }
         }.getOrNull()?.maxByOrNull { it.getLastModifiedTime().toMillis() } ?: return null
-        return runCatching {
-            newest.bufferedReader().useLines { lines ->
-                lines.firstNotNullOfOrNull { raw ->
-                    val obj = runCatching { json.parseToJsonElement(raw.trim()) }.getOrNull() as? JsonObject
-                    (obj?.get("cwd") as? JsonPrimitive)?.contentOrNull
+        return homeCwd(newest)
+    }
+
+    /** Claude's own record of a session that changed home: `{"type":"relocated","relocatedCwd":"<new cwd>"}`. */
+    const val RELOCATED_TYPE = "relocated"
+    const val RELOCATED_CWD = "relocatedCwd"
+
+    /**
+     * The working directory a [transcript] belongs to NOW.
+     *
+     * Claude Code ≥ 2.1.169 moves a session's file into the new cwd's project folder when the session
+     * changes directory (`/cd`, the EnterWorktree tool) and appends a [RELOCATED_TYPE] record naming the
+     * new cwd; every record written before the move keeps the old `cwd`. Reading the first `cwd` — the
+     * rule for every never-moved transcript — therefore files a moved session under the directory it
+     * LEFT, which (a) folds the worktree's project folder into the old project's row, so the worktree
+     * never appears, and (b) attributes the session to a project whose folder no longer holds the file,
+     * so it can be listed but not opened. The home is the LAST relocated record's cwd when one exists
+     * (a session can move more than once — EnterWorktree then ExitWorktree moves it back), else the
+     * first recorded cwd.
+     *
+     * Cost: the head of the file is read as before; the full read happens only when the first cwd's
+     * [dirKey] disagrees with the folder the file sits in — the one signature a move leaves behind. A
+     * folder claude named differently from [dirKey] (the Windows/lossy case) also takes the full read
+     * and, finding no relocated record, answers the first cwd exactly as before.
+     */
+    fun homeCwd(transcript: Path): String? = runCatching {
+        val folder = transcript.parent?.fileName?.toString()
+        var first: String? = null
+        var relocated: String? = null
+        transcript.bufferedReader().useLines { lines ->
+            for (raw in lines) {
+                val obj = runCatching { json.parseToJsonElement(raw.trim()) }.getOrNull() as? JsonObject ?: continue
+                if ((obj["type"] as? JsonPrimitive)?.contentOrNull == RELOCATED_TYPE) {
+                    (obj[RELOCATED_CWD] as? JsonPrimitive)?.contentOrNull?.let { relocated = it }
+                    continue
+                }
+                if (first == null) (obj["cwd"] as? JsonPrimitive)?.contentOrNull?.let { cwd ->
+                    first = cwd
+                    if (folder != null && dirKey(cwd) == folder) return@useLines // never moved: stop at the head
                 }
             }
-        }.getOrNull()
-    }
+        }
+        relocated ?: first
+    }.getOrNull()
 }

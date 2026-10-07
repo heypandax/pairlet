@@ -36,6 +36,32 @@ class ProjectPathsTest {
     }
 
     @Test
+    fun homeCwd_is_the_first_cwd_for_a_never_moved_transcript_and_the_last_relocation_otherwise() {
+        val root = Files.createTempDirectory("ccp-home")
+        val stay = root.resolve(ProjectPaths.dirKey("/w/stay")).createDirectories().resolve("a.jsonl")
+        stay.writeText("""{"type":"user","cwd":"/w/stay"}""" + "\n" + """{"type":"user","cwd":"/w/stay/sub"}""" + "\n")
+        assertEquals("/w/stay", ProjectPaths.homeCwd(stay), "a transcript in its own folder: the first cwd, later shell cds ignored")
+
+        // moved /w/stay → /w/wt1 → /w/wt2: the file now sits in wt2's folder, its head still says /w/stay
+        val moved = root.resolve(ProjectPaths.dirKey("/w/wt2")).createDirectories().resolve("b.jsonl")
+        moved.writeText(
+            listOf(
+                """{"type":"user","cwd":"/w/stay"}""",
+                """{"type":"relocated","relocatedCwd":"/w/wt1"}""",
+                """{"type":"user","cwd":"/w/wt1"}""",
+                """{"type":"relocated","relocatedCwd":"/w/wt2"}""",
+                """{"type":"user","cwd":"/w/wt2"}""",
+            ).joinToString("\n"),
+        )
+        assertEquals("/w/wt2", ProjectPaths.homeCwd(moved), "the LAST relocation wins")
+
+        // a folder claude named differently from dirKey (Windows / lossy case) with no relocation: still the first cwd
+        val odd = root.resolve("C--odd-name").createDirectories().resolve("c.jsonl")
+        odd.writeText("""{"type":"user","cwd":"C:\\odd name"}""" + "\n")
+        assertEquals("C:\\odd name", ProjectPaths.homeCwd(odd))
+    }
+
+    @Test
     fun dirForUnder_uses_fast_dirkey_path_when_that_dir_exists() {
         val root = Files.createTempDirectory("ccp-proj")
         try {

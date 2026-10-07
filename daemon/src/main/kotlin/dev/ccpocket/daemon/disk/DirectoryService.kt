@@ -5,14 +5,9 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PATH_FILTER_SMART
 import dev.ccpocket.protocol.PathEntry
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
-import kotlin.io.path.bufferedReader
 import kotlin.io.path.exists
 import kotlin.io.path.getLastModifiedTime
 import kotlin.io.path.isDirectory
@@ -38,7 +33,6 @@ class DirectoryService(
     // this to emptyList() to opt out of the noise filter; production uses the machine's temp roots.
     private val tempNoiseRoots: List<String>? = null,
 ) {
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val recents = LinkedHashSet<String>()
 
     private companion object { const val ACTIVE_WINDOW_MS = 30_000L } // wrote within 30s = actively executing
@@ -153,8 +147,14 @@ class DirectoryService(
         // dozens of throwaway cwds under the system temp dir and drown the project list. Hide temp rows
         // unless something keeps them relevant — a live/busy conversation, or the user having opened the
         // dir themselves (recent). Sessions stay on disk; only the list denoises.
-        fun keep(e: DirectoryEntry): Boolean = e.open || e.busy || e.recent ||
-            !(tempNoiseRoots?.let { TempDirs.isUnderSystemTemp(e.path, it) } ?: TempDirs.isUnderSystemTemp(e.path))
+        // A directory that no longer exists — a worktree removed with `git worktree remove`, a deleted
+        // project — keeps its transcripts under ~/.claude/projects forever, and the row stayed on the list
+        // until someone deleted that folder by hand (user feedback, 2026-10-07). Nothing can be opened there
+        // (validateWorkdir refuses it), so the row goes; the records stay on disk and the row returns the
+        // moment the directory does. A live/busy conversation keeps its row: that is the daemon's own state,
+        // and a cwd pulled out from under a running process must stay reachable so it can be stopped.
+        fun keep(e: DirectoryEntry): Boolean = e.open || e.busy || (directoryExists(e.path) && (e.recent ||
+            !(tempNoiseRoots?.let { TempDirs.isUnderSystemTemp(e.path, it) } ?: TempDirs.isUnderSystemTemp(e.path))))
         // issue #188: the App's agent filter needs PROJECT-level provenance, not just the backend of any
         // currently-live session. Keep it additive on DirectoryEntry so each client can apply its own
         // persisted filter without turning that preference into daemon-global state.
@@ -297,19 +297,18 @@ class DirectoryService(
             .distinctBy { ProjectPaths.canonicalKey(it.path) }
     }
 
-    /** The dir's `cwd` (from its newest transcript), that transcript's mtime, and the transcript file. */
+    /** The dir's home `cwd` (from its newest transcript — [ProjectPaths.homeCwd], which honours a session that
+     *  claude moved into this folder), that transcript's mtime, and the transcript file. */
     private fun scanProject(projectDir: Path): Triple<String, Long, Path>? {
         val newest = Files.newDirectoryStream(projectDir, "*.jsonl").use { it.toList() }
             .maxByOrNull { it.getLastModifiedTime().toMillis() } ?: return null
         val mtime = newest.getLastModifiedTime().toMillis()
-        newest.bufferedReader().useLines { lines ->
-            for (raw in lines) {
-                val obj = runCatching { json.parseToJsonElement(raw.trim()) }.getOrNull() as? JsonObject ?: continue
-                (obj["cwd"] as? JsonPrimitive)?.contentOrNull?.let { return Triple(it, mtime, newest) }
-            }
-        }
-        return null
+        return ProjectPaths.homeCwd(newest)?.let { Triple(it, mtime, newest) }
     }
+
+    /** Whether [path] (any recorded spelling — tilde, symlink, variant separators) is a directory right now. */
+    private fun directoryExists(path: String): Boolean =
+        runCatching { Path.of(ProjectPaths.expandTilde(path)).isDirectory() }.getOrDefault(false)
 
     fun validateWorkdir(path: String): Path? {
         val p = runCatching { Path.of(ProjectPaths.expandTilde(path)).toRealPath() }.getOrNull() ?: return null

@@ -41,6 +41,28 @@ class TranscriptScannerTest {
     }
 
     @Test
+    fun a_relocated_transcript_reports_where_it_lives_now_and_the_branch_there() {
+        // Claude Code ≥ 2.1.169 moved this session from /repo into a worktree (ProjectPaths.homeCwd). The first
+        // user turn still says /repo — that is where it STARTED; the row must belong to where it IS.
+        val f = Files.createTempDirectory("ccp-scan").resolve("moved.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"do the thing"},"cwd":"/repo","gitBranch":"main","version":"2.1.290"}""",
+                """{"type":"assistant","message":{"model":"claude-opus-4-8","content":[]},"cwd":"/repo","gitBranch":"main"}""",
+                """{"type":"relocated","sessionId":"moved","relocatedCwd":"/repo/.claude/worktrees/thing"}""",
+                """{"type":"worktree-state","worktreeSession":{"originalCwd":"/repo"}}""",
+                """{"type":"user","toolUseResult":{"x":1},"message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]},"cwd":"/repo/.claude/worktrees/thing","gitBranch":"worktree-thing"}""",
+                """{"type":"relocated","sessionId":"moved","relocatedCwd":"/repo/.claude/worktrees/thing"}""",
+            ).joinToString("\n"),
+        )
+        val s = TranscriptScanner.summarize(f)!!
+        assertEquals("/repo/.claude/worktrees/thing", s.cwd)
+        assertEquals("worktree-thing", s.gitBranch, "the branch after the move, not the one it started on")
+        assertEquals("do the thing", s.firstPrompt, "everything else still reads as before")
+        assertEquals(1, s.messageCount)
+    }
+
+    @Test
     fun custom_title_overrides_ai_title_last_write_wins() {
         // Claude Code persists the user's session rename as a `custom-title` record (issue #14); it must win
         // over the AI-generated `ai-title`, and a later rename overrides an earlier one.

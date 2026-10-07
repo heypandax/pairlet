@@ -132,6 +132,12 @@ object TranscriptScanner {
         var fbCwd: String? = null
         var fbGitBranch: String? = null
         var fbVersion: String? = null
+        // A session claude moved to another directory (`/cd`, EnterWorktree — ProjectPaths.homeCwd): the LAST
+        // `relocated` record names where it lives now, and the first branch recorded after that move is its
+        // branch there. Everything captured above still describes where the session STARTED.
+        var relocatedCwd: String? = null
+        var relocatedBranch: String? = null
+        var awaitingMovedBranch = false
         var model: String? = null       // last assistant turn's model — same rules as [lastModel], captured in this pass
         var userCount = 0
         var sourceRows = 0L
@@ -149,7 +155,16 @@ object TranscriptScanner {
                     fbGitBranch = obj.str("gitBranch")
                     fbVersion = obj.str("version")
                 }
+                if (awaitingMovedBranch) obj.str("gitBranch")?.let { relocatedBranch = it; awaitingMovedBranch = false }
                 when (obj.str("type")) {
+                    // claude re-stamps the same destination at session end: only a NEW destination resets the branch
+                    ProjectPaths.RELOCATED_TYPE -> obj.str(ProjectPaths.RELOCATED_CWD)?.let {
+                        if (it != relocatedCwd) {
+                            relocatedCwd = it
+                            relocatedBranch = null
+                            awaitingMovedBranch = true
+                        }
+                    }
                     "user" -> if (isRealUserTurn(obj)) {
                         userCount++
                         if (firstPrompt == null) {
@@ -184,9 +199,9 @@ object TranscriptScanner {
             title = title,
             firstPrompt = fp,
             messageCount = userCount,
-            cwd = cwd ?: fbCwd ?: "",
+            cwd = relocatedCwd ?: cwd ?: fbCwd ?: "",
             lastModified = mtime,
-            gitBranch = gitBranch ?: fbGitBranch,
+            gitBranch = if (relocatedCwd != null) relocatedBranch ?: gitBranch ?: fbGitBranch else gitBranch ?: fbGitBranch,
             version = version ?: fbVersion,
             live = clock() - mtime < LIVE_WINDOW_MS,
             model = model,
@@ -236,6 +251,9 @@ object TranscriptScanner {
         var lastPrompt: String? = null // slash-command-opened sessions carry their prompt only here (issue #341)
         var fbCwd: String? = null // envelope fallback, same cwd-keyed rule as summarize (issue #341)
         var fbGitBranch: String? = null
+        var relocatedCwd: String? = null // a moved session (summarize's rule): the branch after the move wins
+        var relocatedBranch: String? = null
+        var awaitingMovedBranch = false
         var model: String? = null
         var contextTokens: Long? = null
 
@@ -248,7 +266,15 @@ object TranscriptScanner {
                     fbCwd = it
                     fbGitBranch = obj.str("gitBranch")
                 }
+                if (awaitingMovedBranch) obj.str("gitBranch")?.let { relocatedBranch = it; awaitingMovedBranch = false }
                 when (obj.str("type")) {
+                    ProjectPaths.RELOCATED_TYPE -> obj.str(ProjectPaths.RELOCATED_CWD)?.let {
+                        if (it != relocatedCwd) {
+                            relocatedCwd = it
+                            relocatedBranch = null
+                            awaitingMovedBranch = true
+                        }
+                    }
                     "user" -> if (isRealUserTurn(obj) && firstPrompt == null) {
                         firstPrompt = extractUserText(obj)
                         gitBranch = obj.str("gitBranch")
@@ -276,7 +302,8 @@ object TranscriptScanner {
         // ResumeSeedParityTest pins seed.gitBranch to summary?.gitBranch, which is null when summarize bails
         return ResumeSeed(
             title = title,
-            gitBranch = gitBranch ?: fbGitBranch?.takeIf { title != null },
+            gitBranch = (if (relocatedCwd != null) relocatedBranch ?: gitBranch ?: fbGitBranch else gitBranch ?: fbGitBranch)
+                ?.takeIf { title != null },
             model = model,
             contextTokens = contextTokens,
         )

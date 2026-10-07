@@ -45,6 +45,24 @@ class ClaudeProjectScanCwdTest {
     }
 
     @Test
+    fun a_session_claude_moved_into_a_worktree_is_the_worktrees_not_the_main_checkouts() {
+        val main = Files.createDirectories(tmp.resolve("repo")).toString()
+        val worktree = Files.createDirectories(tmp.resolve("repo/_local/worktrees/f")).toString()
+        val dir = Files.createDirectories(tmp.resolve("projects").resolve(ProjectPaths.dirKey(worktree)))
+        dir.resolve("moved.jsonl").writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"hi"},"cwd":"$main"}""",
+                """{"type":"relocated","relocatedCwd":"$worktree"}""",
+                """{"type":"user","toolUseResult":{},"message":{"role":"user","content":[{"type":"tool_result","content":"r"}]},"cwd":"$worktree"}""",
+            ).joinToString("\n") + "\n",
+        )
+        val scan = claudeProjectScan(dir, worktree)
+        assertEquals(listOf("moved"), scan.items.map { it.sessionId }, "listed under the directory it moved to")
+        assertEquals(ScanCompleteness.COMPLETE, scan.completeness)
+        assertEquals(worktree, scan.items.single().cwd)
+    }
+
+    @Test
     fun a_row_without_a_recorded_cwd_is_kept_but_the_scan_is_no_longer_complete() {
         val project = Files.createDirectories(tmp.resolve("p")).toString()
         val dir = Files.createDirectories(tmp.resolve("projects/p"))
