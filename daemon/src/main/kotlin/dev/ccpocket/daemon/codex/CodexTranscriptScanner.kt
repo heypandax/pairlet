@@ -29,7 +29,7 @@ object CodexTranscriptScanner {
         val contextUsed: Long? = null,
     )
 
-    /** All Codex sessions whose recorded cwd is [workdir], newest-first. */
+    /** Top-level Codex sessions whose recorded cwd is [workdir], newest-first. */
     fun scan(workdir: String): List<SessionSummary> {
         val titles = threadNames() // one index read per listing, shared across every rollout summarized below
         return CodexPaths.sessionFiles().mapNotNull { runCatching { summarize(it, workdir, titles) }.getOrNull() }
@@ -79,7 +79,7 @@ object CodexTranscriptScanner {
      *
      * Returned keys preserve the caller's cwd spelling; matching itself uses [ProjectPaths.canonicalKey].
      *
-     * A cwd is answered by its NEWEST rollout, prompt or no prompt (PR #296 review). Falling back to an
+     * A cwd is answered by its NEWEST top-level rollout, prompt or no prompt (PR #296 review). Falling back to an
      * older rollout when the newest one had no real user turn yet — a terminal sitting at a fresh `codex`
      * prompt, or a session the phone just opened — resurrected yesterday's finished session as this
      * project's "active" row (a ghost second row downstream, whose id differs from the daemon's), and left
@@ -120,6 +120,7 @@ object CodexTranscriptScanner {
     private fun summarizeActive(file: Path, titles: Map<String, String>): SessionSummary? {
         val stamp = stampOf(file)
         val parsed = scanned(file, stamp, workdir = null)?.parsed ?: return null
+        if (parsed.isSubagent) return null
         val sid = parsed.id ?: return null
         val recorded = parsed.cwd ?: return null
         val fp = parsed.firstPrompt
@@ -177,7 +178,7 @@ object CodexTranscriptScanner {
     // anyway in case a file is replaced)
     private val cwdCache = java.util.concurrent.ConcurrentHashMap<Path, Pair<Long, String?>>()
 
-    /** Every cwd with Codex history → its newest rollout mtime. First-line reads only, memoized —
+    /** Every cwd with top-level Codex history → its newest rollout mtime. First-line reads only, memoized —
      *  cheap enough for the directory list, which must surface dirs that have no Claude history at all. */
     fun cwdsByNewest(files: List<Path> = CodexPaths.sessionFiles()): Map<String, Long> {
         val out = HashMap<String, Long>()
@@ -189,7 +190,7 @@ object CodexTranscriptScanner {
         return out
     }
 
-    /** The rollout's recorded cwd, memoized by (path, mtime) — a first-line read at most once per version of
+    /** A top-level rollout's recorded cwd, memoized by (path, mtime) — a first-line read at most once per version of
      *  the file. Shared by [cwdsByNewest] and [activeSummaries]' prefilter, which run back-to-back on the
      *  same file list every 10 seconds, so the second of them pays a stat and nothing more. */
     private fun cwdOf(file: Path, mtime: Long = runCatching { file.getLastModifiedTime().toMillis() }.getOrDefault(0L)): String? {
@@ -197,7 +198,16 @@ object CodexTranscriptScanner {
         return runCatching { readCwd(file) }.getOrNull().also { cwdCache[file] = mtime to it }
     }
 
-    private fun readCwd(file: Path): String? = file.bufferedReader().use { metaPayload(it)?.str("cwd") }
+    private fun readCwd(file: Path): String? = file.bufferedReader().use {
+        metaPayload(it)?.takeUnless(::isSubagent)?.str("cwd")
+    }
+
+    /** Codex stores child tasks alongside user sessions. The source marker, not their prompt or
+     *  forked_from_id (also used by manual forks), decides whether they belong in user-facing lists.
+     *  All subagent variants count, including thread_spawn and internal review/compaction tasks. */
+    private fun isSubagent(meta: JsonObject): Boolean =
+        meta.obj("source")?.containsKey("subagent") == true ||
+            meta.str("source") == "subagent" || meta.str("thread_source") == "subagent"
 
     /**
      * A bounded LRU keyed by file path and stamped with that file's mtime. Rollouts are append-only, so a
@@ -345,6 +355,7 @@ object CodexTranscriptScanner {
         val version: String?,
         val firstPrompt: String?,
         val userCount: Int,
+        val isSubagent: Boolean,
     )
 
     /** Everything ONE read of a rollout yields: the summary material ([parsed], null when the file has no
@@ -365,7 +376,7 @@ object CodexTranscriptScanner {
         ?: scanRollout(file, workdir, requireMeta)?.also { scanCache.put(file, stamp, it) }
 
     /** The single full read of a rollout, keeping the cheap first-line filters it always had: a rollout for
-     *  another project (or, when [requireMeta], one with no session_meta header) must still cost one line,
+     *  another project (or, when [requireMeta], a child task or one with no session_meta header) must cost one line,
      *  not a whole read — a session listing runs this over ~800 files. Returns null for those, uncached:
      *  what a one-line read decided must not be remembered as if the body had been seen. */
     private fun scanRollout(file: Path, workdir: String?, requireMeta: Boolean): Scanned? {
@@ -375,6 +386,7 @@ object CodexTranscriptScanner {
         var firstPrompt: String? = null
         var userCount = 0
         var hasMeta = false
+        var subagent = false
         var runtime = RuntimeState()
         var turns: TurnEvidence? = null
         file.bufferedReader().use { r ->
@@ -387,6 +399,10 @@ object CodexTranscriptScanner {
                 if (requireMeta || workdir != null) return null
             } else {
                 hasMeta = true
+                subagent = isSubagent(meta)
+                // Listings need no child body. Explicit runtime/turn reads still work and cache the
+                // marker with the parse, so they cannot later resurrect a child in a session list.
+                if (requireMeta && subagent) return null
                 id = meta.str("id"); cwd = meta.str("cwd"); version = meta.str("cli_version")
                 // Canonical-key compare (slashes / trailing sep / Windows case / symlinks / tilde): codex records
                 // the cwd its own way, and an exact string compare silently dropped sessions on Windows (issue
@@ -417,18 +433,19 @@ object CodexTranscriptScanner {
             }
         }
         return Scanned(
-            parsed = if (hasMeta) Parsed(id, cwd, version, firstPrompt, userCount) else null,
+            parsed = if (hasMeta) Parsed(id, cwd, version, firstPrompt, userCount, subagent) else null,
             runtime = runtime,
             turns = turns,
         )
     }
 
-    /** Returns null if [file] isn't a rollout for [workdir] (cheap first-line cwd filter) or has no real turn.
+    /** Returns null if [file] isn't a top-level rollout for [workdir] (cheap header filter) or has no real turn.
      *  [titles] (id → Codex thread title) supplies the session name; a listing passes one shared map. */
     fun summarize(file: Path, workdir: String?, titles: Map<String, String> = threadNames()): SessionSummary? {
         val stamp = stampOf(file)
         val scan = scanned(file, stamp, workdir) ?: return null
         val parsed = scan.parsed ?: return null
+        if (parsed.isSubagent) return null
         // A cached parse still re-checks the caller's workdir: the memo is keyed by the FILE, and the same
         // rollout is summarized by both a project-scoped listing and the observe/resume paths.
         val recorded = parsed.cwd
