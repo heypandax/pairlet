@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -23,14 +24,18 @@ import kotlinx.coroutines.withTimeoutOrNull
  * on the sink the request arrived on — like [TranscribeService]'s [dev.ccpocket.protocol.Transcript], the result only
  * reaches the device that dictated — unless the phone cancelled, in which case nothing is sent.
  *
- * - Which refiner: the conversation's own agent when it has one here, else the phone's default agent
- *   ([TranscriptRefine.agentHint]) when THAT has one, else none → [TranscriptRefineError.UNAVAILABLE]. Deliberately no
- *   further fallback: the owner's quota is spent only on the agent they are using (a Codex user's dictation must not
- *   quietly run on their Claude account).
+ * - Which refiner: when the daemon knows the conversation's agent (it is live here), that agent's refiner and no
+ *   other — none, or one whose CLI is missing, is [TranscriptRefineError.UNAVAILABLE]. Only for a conversation with no
+ *   agent here yet (not started, or no longer live) does the phone's default agent ([TranscriptRefine.agentHint])
+ *   pick, with the same rule. Deliberately no fallback between the two: the owner's quota is spent only on the agent
+ *   they are using (a Codex user's dictation must not quietly run on their Claude account).
  * - One refine per conversation. A different request replaces the running one, whose requester is answered
  *   [TranscriptRefineError.SUPERSEDED]; the identical request re-sent (a reconnect) joins the running one instead.
- * - A hard limit of [HARD_TIMEOUT_MS] — the phone's own budget plus margin for its late-result rule — after which the
- *   answer is [TranscriptRefineError.TIMEOUT] and the refiner's process is gone.
+ * - One model at a time across the whole daemon: a refine whose conversation differs from the running one waits for
+ *   the single slot, at most [MAX_WAITING] of them; one more is answered [TranscriptRefineError.UNAVAILABLE] at once.
+ *   Supersede and [AudioCancel] work on a waiting refine the same as on a running one.
+ * - A hard limit of [HARD_TIMEOUT_MS], counting the wait for the slot too, after which the answer is
+ *   [TranscriptRefineError.TIMEOUT] and the refiner's process is gone. The phone gives up on its own, earlier.
  * - [AudioCancel] for the running capture cancels it silently: nobody is waiting any more.
  * - Text longer than [TranscriptRefineLimits.MAX_TEXT_CHARS] is answered [TranscriptRefineError.UNAVAILABLE] without
  *   starting a model.
@@ -40,7 +45,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class TranscriptRefineService(
     private val scope: CoroutineScope,
     private val refiners: TranscriptRefiners,
-    /** The agent driving a live conversation; null when it is not live here. */
+    /** The agent driving a live conversation; null when it is not live here (production: not started, or reaped). */
     private val agentOf: suspend (convoId: String) -> AgentKind?,
     /** The glossary for a conversation's refine ([RefineGlossary]); production reads the project off disk. */
     private val glossaryOf: suspend (convoId: String) -> List<String>,
@@ -55,12 +60,16 @@ class TranscriptRefineService(
 
     private val log = logger("Refine")
     private val lock = Any()
-    private val runs = HashMap<String, Run>() // convoId -> refine in flight; guarded by [lock]
+    private val runs = HashMap<String, Run>() // convoId -> refine in flight, waiting or running; guarded by [lock]
+
+    /** The one refiner call allowed to run at a time, daemon-wide (one service per daemon). */
+    private val slot = Semaphore(1)
+    private var waiting = 0 // refines suspended on [slot]; guarded by [lock]
 
     /** [dev.ccpocket.protocol.DaemonInfo.transcriptRefineAgents]: the refiners that can launch right now. */
     fun advertisedAgents(): List<String> = refiners.available()
 
-    /** True while any refine is running (the auto-update idle gate reads this). */
+    /** True while any refine is waiting or running (the auto-update idle gate reads this). */
     fun isRefining(): Boolean = synchronized(lock) { runs.isNotEmpty() }
 
     suspend fun onRefine(f: TranscriptRefine, sink: OutboundSink) {
@@ -140,29 +149,38 @@ class TranscriptRefineService(
     private suspend fun produce(run: Run): TranscriptRefined {
         val f = run.request
         if (f.text.length > TranscriptRefineLimits.MAX_TEXT_CHARS) return failure(f, TranscriptRefineError.UNAVAILABLE, null)
-        val refiner = refiners.usableFor(agentOf(f.convoId))
-            ?: refiners.usableFor(TranscriptRefiners.agentOf(f.agentHint))
-            ?: return failure(f, TranscriptRefineError.UNAVAILABLE, null)
+        // the conversation's known agent decides alone; the phone's hint only stands in when there is none
+        val agent = agentOf(f.convoId) ?: TranscriptRefiners.agentOf(f.agentHint)
+        val refiner = refiners.usableFor(agent) ?: return failure(f, TranscriptRefineError.UNAVAILABLE, null)
         run.agent = refiner.agent
-        // nothing to correct, and nothing for a model to answer
+        // nothing to correct, and nothing for a model to answer — and nothing to send either: autoSend stays false
         if (f.text.isBlank()) return TranscriptRefined(f.convoId, f.captureId, ok = true, text = f.text, agent = refiner.agent.wireName())
-        // the hard limit covers the glossary read too: it walks the project on disk, and a slow disk must not stretch
-        // the phone's wait past the 12 s either
+        // the hard limit covers the glossary read and the wait for the slot too: a slow disk or a queue must not
+        // stretch the phone's wait past the 12 s either — a refine that runs out while queued is a TIMEOUT
+        // the validator's glossary rule checks against the same list the refiner was handed
+        var glossary = emptyList<String>()
         val outcome = withTimeoutOrNull(hardTimeoutMs) {
-            val glossary = try {
+            glossary = try {
                 glossaryOf(f.convoId)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 emptyList()
             }
-            refiner.refine(f.text, f.locale, glossary, hardTimeoutMs)
+            withSlot(f) { refiner.refine(f.text, f.locale, glossary, hardTimeoutMs) }
         } ?: RefineOutcome.TimedOut
         return when (outcome) {
-            is RefineOutcome.Edits -> when (val checked = TranscriptEditValidator.check(f.text, outcome.edits)) {
-                is TranscriptEditValidator.Result.Accepted -> TranscriptRefined(
-                    f.convoId, f.captureId, ok = true, text = checked.text, edits = checked.edits, agent = refiner.agent.wireName(),
-                )
+            is RefineOutcome.Edits -> when (val checked = TranscriptEditValidator.check(f.text, outcome.edits, glossary)) {
+                is TranscriptEditValidator.Result.Accepted -> {
+                    log.info(
+                        "${f.convoId} refine edits applied=${checked.edits.size} " +
+                            "dropped=${outcome.edits.size - checked.edits.size} autoSend=${checked.autoSend}",
+                    )
+                    TranscriptRefined(
+                        f.convoId, f.captureId, ok = true, text = checked.text, edits = checked.edits,
+                        agent = refiner.agent.wireName(), autoSend = checked.autoSend,
+                    )
+                }
                 is TranscriptEditValidator.Result.Rejected -> {
                     log.info("${f.convoId} refine edits rejected rule=${checked.rule} proposed=${outcome.edits.size}")
                     failure(f, TranscriptRefineError.INVALID, refiner.agent)
@@ -171,6 +189,34 @@ class TranscriptRefineService(
             RefineOutcome.Unavailable -> failure(f, TranscriptRefineError.UNAVAILABLE, refiner.agent)
             RefineOutcome.Failed -> failure(f, TranscriptRefineError.FAILED, refiner.agent)
             RefineOutcome.TimedOut -> failure(f, TranscriptRefineError.TIMEOUT, refiner.agent)
+        }
+    }
+
+    /**
+     * Runs [block] holding the daemon-wide [slot], waiting for it when another refine holds it — or answers
+     * [RefineOutcome.Unavailable] at once when [MAX_WAITING] refines are already waiting. A refine cancelled while
+     * waiting never held the permit and gives nothing back; one cancelled while running releases it only once
+     * [block] has returned, i.e. after the refiner tore its process down.
+     */
+    private suspend fun withSlot(f: TranscriptRefine, block: suspend () -> RefineOutcome): RefineOutcome {
+        if (!slot.tryAcquire()) {
+            synchronized(lock) {
+                if (waiting >= MAX_WAITING) {
+                    log.info("${f.convoId} refine queue full ($MAX_WAITING waiting)")
+                    return RefineOutcome.Unavailable
+                }
+                waiting++
+            }
+            try {
+                slot.acquire()
+            } finally {
+                synchronized(lock) { waiting-- }
+            }
+        }
+        try {
+            return block()
+        } finally {
+            slot.release()
         }
     }
 
@@ -189,9 +235,12 @@ class TranscriptRefineService(
     }
 
     companion object {
-        /** The phone waits 8 s before falling back to the composer and applies a late result for 7 s more
-         *  (design §3.4); 12 s bounds the work well inside that window. */
+        /** The phone waits 10 s from its own clock, then falls back to the composer and ignores a late answer
+         *  (review §11); 12 s only bounds the work and the process here. */
         const val HARD_TIMEOUT_MS = 12_000L
+
+        /** Refines that may wait for the slot behind the running one; the next is turned away. */
+        const val MAX_WAITING = 4
 
         /** How long shutdown waits for cancelled refines to finish tearing their processes down. */
         const val CLOSE_WAIT_MS = 5_000L

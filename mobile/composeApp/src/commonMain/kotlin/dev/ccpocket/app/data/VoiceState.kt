@@ -24,6 +24,19 @@ sealed interface VoiceState {
     data object StillWaiting : VoiceState
 
     /**
+     * Voice input v2, send bar (docs/design/VOICE-INPUT-V2-REVIEW.md §11): ✓ was "finish and send" and the final
+     * transcript is in; the computer is refining it before it is sent. [original] is the dictated text (shown above
+     * the bar), [agent] the wire name of the session's agent doing the refine. Busy, like recording.
+     */
+    data class Refining(val original: String, val agent: String) : VoiceState
+
+    /**
+     * Voice input v2, send bar: the refined [text] with the corrected fragments at [ranges] (UTF-16 indices into
+     * [text]) highlighted, held briefly before it is sent. Busy, like recording.
+     */
+    data class Preview(val text: String, val ranges: List<IntRange>) : VoiceState
+
+    /**
      * S5 — error chip + retry mic (retry re-sends the kept audio, or re-records when none is kept).
      * [detail] (daemon- or OS-provided text) wins over the localized [res] fallback when present.
      */

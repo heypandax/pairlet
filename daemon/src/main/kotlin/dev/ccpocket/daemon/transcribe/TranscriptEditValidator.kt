@@ -34,7 +34,31 @@ import dev.ccpocket.protocol.TextEdit
  *  - "control character" includes the invisible format characters (zero-width, bidirectional overrides) and the
  *    Unicode line/paragraph separators, the same characters [dev.ccpocket.daemon.memo.MemoOrganizerContract.visible]
  *    treats as invisible: an edit must not be able to make the sent text read differently from how it looks.
- *  - a fragment with an unpaired surrogate is refused: replacing it could split a character in two.
+ *  - a fragment with an unpaired surrogate is refused: replacing it could split a character in two;
+ *  - all `to`s together may outgrow their `from`s by at most [TOTAL_GROWTH_SLACK] + 1/5 of the original
+ *    (`total_growth`). The per-edit bound alone let twelve one-letter edits each add five letters.
+ *
+ * The rules above void the whole list. What survives them is sorted edit by edit into two tiers, because the phone
+ * sends a corrected text WITHOUT a further look when [Result.Accepted.autoSend] is set (review §5, §11):
+ *  - hard blocks DROP the edit (it is not applied; the rest still are) and clear `autoSend`. An edit may not blank
+ *    its fragment (`empty_to`), nor change the digits and Chinese numerals (`numeral`), the count of negation markers
+ *    — 不/别/没/无/… and the English no/not/never/…/n't (`negation`), or the shell characters `/ \ ~ $ | ; & > <` and
+ *    the backtick (`command`) it carries. Edits are unique and disjoint, so leaving one out cannot disturb another;
+ *  - every applied edit must be allow-listed for `autoSend` to stay set: a case/space-only change, a `to` that is a
+ *    glossary term verbatim (unless `from` is a glossary term too: trading one known name for another, main for
+ *    dev, is not a recognition fix), or a near-homophone — after the common prefix and suffix are stripped, two Han cores of
+ *    equal length whose characters pairwise share a reading under [Pinyin.near]. The first two also hold when they hold
+ *    once the context the model repeated on both sides is cut away at word boundaries ("cloud 的输出" → "Claude
+ *    的输出"). An edit that is none of these is still applied; the user sees it in the composer;
+ *  - an applied edit whose `to` brings in a destructive word its `from` lacks (删, 清空, 重置, delete, force, rm, …)
+ *    clears `autoSend` too, even when allow-listed: a correct 山 → 删 is the user's to confirm.
+ *
+ * Known and accepted consequences of the allow list — tests pin them so nobody "fixes" them by accident:
+ *  - 用功 → 用户 is mis-heard but not a near-homophone: it is applied without `autoSend`;
+ *  - 看下 → 看一下 adds a numeral and is dropped;
+ *  - the glossary rule only looks at `to`, so edit → effort passes when `effort` is a glossary term even where the
+ *    speaker meant "edit". The harm is bounded: a short glossary noun swapped in for a word of similar size;
+ *  - readings are compared without tones, so 买 → 卖 counts as a near-homophone.
  */
 object TranscriptEditValidator {
     const val MAX_EDITS = 12
@@ -45,17 +69,23 @@ object TranscriptEditValidator {
     const val SHORT_FROM_CHARS = 32
     const val SHORT_FROM_SHARE_PERCENT = 75
     const val GROWTH_SLACK = 4
+    /** `total_growth`: the whole list may add at most this many characters plus a fifth of the original. */
+    const val TOTAL_GROWTH_SLACK = 12
 
     sealed interface Result {
-        /** [text] is the original with every edit applied; [edits] are in the order they occur in the original. */
-        data class Accepted(val text: String, val edits: List<TextEdit>) : Result
+        /**
+         * [text] is the original with [edits] applied — the edits that survived the hard blocks, in the order they
+         * occur in the original. [autoSend] is true only when no edit was dropped and every applied one is
+         * allow-listed and free of destructive words; otherwise the phone puts [text] in the composer.
+         */
+        data class Accepted(val text: String, val edits: List<TextEdit>, val autoSend: Boolean) : Result
 
         /** [rule] names the broken rule for the daemon log — never any of the text. */
         data class Rejected(val rule: String) : Result
     }
 
-    fun check(original: String, edits: List<TextEdit>): Result {
-        if (edits.isEmpty()) return Result.Accepted(original, emptyList())
+    fun check(original: String, edits: List<TextEdit>, glossary: List<String>): Result {
+        if (edits.isEmpty()) return Result.Accepted(original, emptyList(), autoSend = true)
         if (edits.size > MAX_EDITS) return Result.Rejected("count")
         val placed = ArrayList<Placed>(edits.size)
         var fromTotal = 0L
@@ -82,15 +112,126 @@ object TranscriptEditValidator {
         for (i in 1 until placed.size) {
             if (placed[i].at < placed[i - 1].end) return Result.Rejected("overlap")
         }
-        val out = StringBuilder(original.length + placed.sumOf { it.edit.to.length })
+        val growth = placed.sumOf { it.edit.to.length.toLong() - it.edit.from.length }
+        if (growth > TOTAL_GROWTH_SLACK + original.length / 5) return Result.Rejected("total_growth")
+        var autoSend = true
+        val applied = placed.filter { p ->
+            if (hardBlock(p.edit) != null) {
+                autoSend = false
+                return@filter false
+            }
+            if (!allowListed(p.edit, glossary) || destructive(p.edit)) autoSend = false
+            true
+        }
+        val out = StringBuilder(original.length + applied.sumOf { it.edit.to.length })
         var cursor = 0
-        for (p in placed) {
+        for (p in applied) {
             out.append(original, cursor, p.at).append(p.edit.to)
             cursor = p.end
         }
         out.append(original, cursor, original.length)
-        return Result.Accepted(out.toString(), placed.map { it.edit })
+        return Result.Accepted(out.toString(), applied.map { it.edit }, autoSend)
     }
+
+    /** The hard block [edit] breaks — `empty_to`, `numeral`, `negation` or `command`, in that order — or null. */
+    internal fun hardBlock(edit: TextEdit): String? = when {
+        edit.to.isBlank() -> "empty_to"
+        numerals(edit.from) != numerals(edit.to) -> "numeral"
+        negations(edit.from) != negations(edit.to) -> "negation"
+        commandChars(edit.from) != commandChars(edit.to) -> "command"
+        else -> null
+    }
+
+    /** Case/space-only, a glossary term verbatim (case-sensitive) replacing something that is not itself a
+     *  glossary term, or a near-homophone of Han characters — on the fragments as given, or on their [core]. */
+    internal fun allowListed(edit: TextEdit, glossary: List<String>): Boolean =
+        caseOrTerm(edit.from, edit.to, glossary) ||
+            core(edit)?.let { (from, to) -> caseOrTerm(from, to, glossary) } == true ||
+            nearHomophone(edit.from, edit.to)
+
+    private fun caseOrTerm(from: String, to: String, glossary: List<String>): Boolean =
+        from.filterNot(Char::isWhitespace).equals(to.filterNot(Char::isWhitespace), ignoreCase = true) ||
+            (to.trim() in glossary && glossary.none { it.equals(from.trim(), ignoreCase = true) })
+
+    /**
+     * What [edit] really changes, without the context a model repeats on both sides to make its `from` unique
+     * (measured against the real CLI: "cloud 的输出" → "Claude 的输出"). The shared prefix and suffix are cut only
+     * at word boundaries, so "cloud code" → "Claude Code" keeps its whole words. Null when nothing is shared, or
+     * when either side would be left blank — an insertion or a deletion is not a recognition fix.
+     */
+    private fun core(edit: TextEdit): Pair<String, String>? {
+        val a = edit.from
+        val b = edit.to
+        var prefix = 0
+        while (prefix < a.length && prefix < b.length && a[prefix] == b[prefix]) prefix++
+        while (prefix > 0 && (splitsWord(a, prefix) || splitsWord(b, prefix))) prefix--
+        var suffix = 0
+        while (suffix < a.length - prefix && suffix < b.length - prefix && a[a.length - 1 - suffix] == b[b.length - 1 - suffix]) suffix++
+        while (suffix > 0 && (splitsWord(a, a.length - suffix) || splitsWord(b, b.length - suffix))) suffix--
+        if (prefix == 0 && suffix == 0) return null
+        val from = a.substring(prefix, a.length - suffix)
+        val to = b.substring(prefix, b.length - suffix)
+        return if (from.isBlank() || to.isBlank()) null else from to to
+    }
+
+    /** True when cutting [s] at [index] would split a Latin word, a number, or a surrogate pair. */
+    private fun splitsWord(s: String, index: Int): Boolean {
+        if (index <= 0 || index >= s.length) return false
+        val before = s[index - 1]
+        val after = s[index]
+        return (wordChar(before) && wordChar(after)) || (before.isHighSurrogate() && after.isLowSurrogate())
+    }
+
+    private fun wordChar(c: Char): Boolean = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_' || c == '-' || c == '.'
+
+    /** [edit]'s `to` carries a destructive word that its `from` does not. */
+    internal fun destructive(edit: TextEdit): Boolean {
+        if (DESTRUCTIVE_HAN.any { it in edit.to && it !in edit.from }) return true
+        val before = latinWords(edit.from)
+        return latinWords(edit.to).any { it in DESTRUCTIVE_LATIN && it !in before }
+    }
+
+    private const val NUMERAL_HAN = "零〇一二两三四五六七八九十百千万亿"
+    private const val NEGATION_HAN = "不别沒没无無勿非未否莫"
+    private const val COMMAND_CHARS = "/\\~$|;&><`"
+    private val NEGATION_LATIN = setOf("no", "not", "never", "none", "without", "cannot", "dont")
+    private val CONTRACTED_NOT = Regex("n['’]t", RegexOption.IGNORE_CASE)
+    private val LATIN_WORD = Regex("[A-Za-z]+")
+    private val DESTRUCTIVE_HAN = listOf("删", "除", "清空", "销毁", "覆盖", "重置", "格式化", "强推", "回滚", "卸载", "关闭", "停止", "杀")
+    private val DESTRUCTIVE_LATIN =
+        setOf("delete", "remove", "drop", "reset", "force", "rm", "wipe", "kill", "purge", "destroy", "overwrite")
+
+    private fun numerals(s: String): String = s.filter { Character.isDigit(it) || it in NUMERAL_HAN }
+
+    private fun commandChars(s: String): String = s.filter { it in COMMAND_CHARS }
+
+    private fun latinWords(s: String): List<String> = LATIN_WORD.findAll(s).map { it.value.lowercase() }.toList()
+
+    private fun negations(s: String): Int =
+        s.count { it in NEGATION_HAN } + latinWords(s).count { it in NEGATION_LATIN } + CONTRACTED_NOT.findAll(s).count()
+
+    /** After the common prefix and suffix go, two non-empty Han cores of one length, pairwise [Pinyin.near]. */
+    private fun nearHomophone(from: String, to: String): Boolean {
+        val a = from.codePoints().toArray()
+        val b = to.codePoints().toArray()
+        var start = 0
+        while (start < a.size && start < b.size && a[start] == b[start]) start++
+        var endA = a.size
+        var endB = b.size
+        while (endA > start && endB > start && a[endA - 1] == b[endB - 1]) {
+            endA--
+            endB--
+        }
+        if (endA == start || endA - start != endB - start) return false
+        for (i in 0 until endA - start) {
+            val x = a[start + i]
+            val y = b[start + i]
+            if (!isHan(x) || !isHan(y) || !Pinyin.near(x, y)) return false
+        }
+        return true
+    }
+
+    private fun isHan(cp: Int): Boolean = Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN
 
     private class Placed(val at: Int, val edit: TextEdit) {
         val end: Int get() = at + edit.from.length

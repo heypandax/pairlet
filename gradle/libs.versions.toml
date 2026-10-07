@@ -81,6 +81,9 @@ zstd-jni = { module = "com.github.luben:zstd-jni", version = "1.5.7-13" }
 # Feishu official SDK — the daemon's BUILT-IN feishu bridge (issue #91 follow-up). Shades its own
 # okhttp (com.lark.oapi.okhttp), so it can't fight ktor; external deps are just gson/commons-codec/slf4j.
 lark-oapi-sdk = { module = "com.larksuite.oapi:oapi-sdk", version = "2.4.19" }
+# Han-character readings for the voice-refine validator's homophone rule (daemon-only). Pure Java, BSD,
+# no transitive dependencies; its own pinyin table ships inside the jar.
+pinyin4j = { module = "com.belerweb:pinyin4j", version = "2.5.1" }
 qrkit = { module = "network.chaintech:qr-kit", version = "3.0.6" }
 # KMP syntax highlighting for chat code blocks (issue #51); retained during the build-chain migration.
 highlights = { module = "dev.snipme:highlights", version = "1.0.0" }

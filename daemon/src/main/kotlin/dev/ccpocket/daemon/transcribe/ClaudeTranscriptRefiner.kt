@@ -22,9 +22,10 @@ import kotlin.coroutines.cancellation.CancellationException
 /**
  * Transcript refiner over a ONE-SHOT, tool-less `claude --print` (design §4.3). The isolation recipe is
  * [dev.ccpocket.daemon.memo.ClaudeMemoSummarizer]'s: no tools, no MCP, safe mode, no slash commands, no session
- * persistence, a fixed system prompt, a fresh owner-only empty working directory, and the main backend's
- * [ClaudeRuntime] for binary, credential store and preset env. Process lifetime is the memo pipeline's
- * [MemoProcessRunner]: stdin carries the transcript, timeout and cancellation both tear the whole tree down.
+ * persistence, a fixed system prompt (no variable part at all), a fresh owner-only empty working directory, and the
+ * main backend's [ClaudeRuntime] for binary, credential store and preset env. Process lifetime is the memo pipeline's
+ * [MemoProcessRunner]: stdin carries the user message ([RefineContract.userMessage]: glossary, then the transcript),
+ * timeout and cancellation both tear the whole tree down.
  *
  * Model (design §4.3, measured 2026-10-05): sonnet at low effort answers a replacement list in ~2–2.5 s of API time;
  * haiku was 44–100 s on the owner's account and the session's own model may be opus/max. The memo summarizer passes
@@ -75,11 +76,12 @@ class ClaudeTranscriptRefiner(
                 val t0 = System.nanoTime()
                 val run = runner.run(
                     MemoProcessSpec(
-                        argv = buildArgv(exe.toString(), RefineContract.systemPrompt(locale, glossary), model),
+                        argv = buildArgv(exe.toString(), RefineContract.systemPrompt(locale), model),
                         cwd = cwd,
                         env = { env -> runtime.applyTo(env) },
-                        // the transcript is the user message, as plain text — never on argv, which `ps` shows
-                        stdin = text.toByteArray(Charsets.UTF_8),
+                        // the transcript and the glossary are the user message — never on argv, which `ps` shows,
+                        // and never in the instructions: both are text the daemon does not control
+                        stdin = RefineContract.userMessage(text, glossary).toByteArray(Charsets.UTF_8),
                         stdoutLimit = MAX_STDOUT_BYTES,
                         stderrLimit = MAX_STDERR_BYTES,
                         deadlineMs = timeoutMs,

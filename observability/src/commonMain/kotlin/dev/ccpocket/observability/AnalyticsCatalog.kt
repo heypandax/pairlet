@@ -17,15 +17,15 @@ object AnalyticsCatalog {
         "pair_failed", "connected", "disconnected", "conn_phase", "conn_failed", "session_opened",
         "session_open_timeout", "prompt_sent", "prompt_turn_stalled", "prompt_turn_queued", "prompt_resent",
         "approval_shown", "approval_decided", "help_opened", "help_support_opened", "help_task_opened",
-        "help_guide_opened", "help_direct_action",
+        "help_guide_opened", "help_direct_action", "voice_refine",
     )
 
     /** Product parameter keys (`TelKey.id`). */
     val params: Set<String> = setOf(
         "app_version", "result", "coverage", "duration_ms", "feature", "reuse", "backend", "source", "transport",
         "resume", "tool", "decision", "phase", "reason", "attempt", "link", "retried", "version", "entry_point",
-        "help_task", "demo", "target", "value", "analytics_schema", "app_platform", "app_environment",
-        "internal_traffic", "usage_mode",
+        "help_task", "demo", "target", "value", "outcome", "edits", "latency_ms", "analytics_schema", "app_platform",
+        "app_environment", "internal_traffic", "usage_mode",
     )
 
     /** Transport keys the desktop sender adds beside product params; the ingress accepts exactly these. */

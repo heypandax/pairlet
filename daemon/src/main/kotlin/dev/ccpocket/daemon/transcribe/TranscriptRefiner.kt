@@ -19,7 +19,8 @@ interface TranscriptRefiner {
      * before any of it may reach a phone. The text must travel as data (stdin, a JSON field), never on argv.
      *
      * [locale] picks the instruction language ([RefineContract.systemPrompt]); [glossary] holds words the speaker is
-     * likely to use. The call must finish within [timeoutMs] and leave no process behind — also when the calling
+     * likely to use — untrusted reference data that travels next to the text ([RefineContract.userMessage]), never
+     * in the instructions. The call must finish within [timeoutMs] and leave no process behind — also when the calling
      * coroutine is cancelled, which it may be at any time (a newer request, the phone's cancel, the hard limit).
      * No outcome carries model output or CLI stderr except as a checked [RefineOutcome.Edits].
      */
