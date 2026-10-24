@@ -28,6 +28,8 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
@@ -61,8 +63,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import dev.ccpocket.app.APP_STORE_URL
+import dev.ccpocket.app.WEBSITE_URL
 import dev.ccpocket.app.AppUpdateRoute
 import dev.ccpocket.app.RELEASES_URL
 import dev.ccpocket.app.PRIVACY_POLICY_URL
@@ -763,6 +767,8 @@ private fun SupportPage(repo: PocketRepository, onHelp: () -> Unit, onExit: () -
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
             .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
     ) {
+        ManualLinkRow(stringResource(Res.string.settings_website), WEBSITE_URL) { openWebUrl(WEBSITE_URL) }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         ManualLinkRow(
             title = stringResource(Res.string.support_open),
             sub = stringResource(Res.string.support_sub),
@@ -786,7 +792,7 @@ private fun SupportPage(repo: PocketRepository, onHelp: () -> Unit, onExit: () -
         ) { openWebUrl(PRIVACY_POLICY_URL) }
     }
 
-    VersionsGroup(repo.versionStatus.value)
+    VersionsGroup(repo)
 
     SectionLabel(stringResource(Res.string.diagnostic_sharing_title))
     DiagnosticSharingSetting()
@@ -862,19 +868,24 @@ internal fun DiagnosticSharingSetting() {
  * app gets whatever its own store/download route allows.
  */
 @Composable
-private fun VersionsGroup(status: VersionStatus) {
+private fun VersionsGroup(repo: PocketRepository) {
+    val status = repo.versionStatus.value
+    var appUpdateOpen by remember { mutableStateOf(false) }
+    var daemonUpdateOpen by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     SectionLabel(stringResource(Res.string.updates_section))
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
         VersionRow(
             stringResource(Res.string.updates_app), status.appVersion,
             if (status.appBehind) stringResource(Res.string.updates_outdated, status.newestKnown) else null,
+            onClick = if (status.appBehind) ({ appUpdateOpen = true }) else null,
         )
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         VersionRow(
             stringResource(Res.string.updates_daemon),
             status.daemonVersion ?: stringResource(Res.string.updates_unknown),
             if (status.daemonBehind) stringResource(Res.string.updates_outdated, status.newestKnown) else null,
+            onClick = if (status.daemonBehind || repo.daemonUpdateBusy) ({ daemonUpdateOpen = true }) else null,
         )
 
         if (status.daemonBehind && status.updateCommand != null) {
@@ -916,6 +927,89 @@ private fun VersionsGroup(status: VersionStatus) {
         }
     }
     Spacer(Modifier.height(8.dp))
+    if (appUpdateOpen) AppUpdateDialog(status) { appUpdateOpen = false }
+    if (daemonUpdateOpen) DaemonUpdateDialog(repo) { daemonUpdateOpen = false }
+}
+
+@Composable
+private fun AppUpdateDialog(status: VersionStatus, onDismiss: () -> Unit) {
+    val route = appUpdateRoute()
+    AlertDialog(
+        modifier = Modifier.testTag("app-update-dialog"),
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.updates_app_dialog_title)) },
+        text = { Column {
+            Text(stringResource(Res.string.updates_app_dialog_body, status.appVersion, status.newestKnown))
+            if (route == AppUpdateRoute.IOS_STORE) Text(stringResource(Res.string.updates_app_ios_note))
+            if (route == AppUpdateRoute.DESKTOP_IN_APP) Text(stringResource(Res.string.updates_app_desktop))
+        } },
+        confirmButton = { TextButton(onClick = {
+            onDismiss()
+            when (route) {
+                AppUpdateRoute.IOS_STORE -> openWebUrl(APP_STORE_URL)
+                AppUpdateRoute.ANDROID_DOWNLOAD -> openWebUrl(RELEASES_URL)
+                AppUpdateRoute.DESKTOP_IN_APP -> Unit
+            }
+        }) { Text(stringResource(when (route) {
+            AppUpdateRoute.IOS_STORE -> Res.string.updates_app_ios
+            AppUpdateRoute.ANDROID_DOWNLOAD -> Res.string.updates_app_android
+            AppUpdateRoute.DESKTOP_IN_APP -> Res.string.close
+        })) } },
+        dismissButton = { if (route != AppUpdateRoute.DESKTOP_IN_APP) TextButton(onClick = onDismiss) { Text(stringResource(Res.string.cancel)) } },
+    )
+}
+
+@Composable
+private fun DaemonUpdateDialog(repo: PocketRepository, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    val progress = repo.daemonUpdateStatus.value
+    val remote = repo.daemonUpdateMode.value == "remote"
+    val canStart = repo.canUpdateDaemon()
+    val message = when (progress?.state) {
+        "checking" -> Res.string.updates_daemon_checking
+        "downloading" -> Res.string.updates_daemon_downloading
+        "waiting" -> Res.string.updates_daemon_waiting
+        "restarting" -> Res.string.updates_daemon_restarting
+        "in_progress" -> Res.string.updates_daemon_in_progress
+        "busy" -> Res.string.updates_daemon_busy
+        "updated" -> Res.string.updates_daemon_updated
+        "up_to_date" -> Res.string.updates_current
+        "failed" -> Res.string.updates_daemon_failed
+        "unknown" -> Res.string.updates_daemon_uncertain
+        "manual" -> Res.string.updates_daemon_manual
+        else -> when {
+            progress != null -> Res.string.updates_daemon_uncertain
+            !repo.connected.value -> Res.string.updates_daemon_offline
+            remote && !canStart -> Res.string.updates_daemon_owner_only
+            remote -> Res.string.updates_daemon_confirm_body
+            repo.daemonUpdateMode.value == null -> Res.string.updates_daemon_legacy
+            else -> Res.string.updates_daemon_manual
+        }
+    }
+    val command = repo.versionStatus.value.updateCommand
+    AlertDialog(
+        modifier = Modifier.testTag("daemon-update-dialog"),
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(Res.string.updates_daemon_dialog_title)) },
+        text = { Column {
+            repo.paired.value?.let { Text(it.displayName(), fontWeight = FontWeight.Medium) }
+            Text(stringResource(message))
+            if ((!remote || progress?.state in setOf("failed", "unknown")) && command != null) {
+                Spacer(Modifier.height(10.dp))
+                Text(command, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 5, overflow = TextOverflow.Ellipsis)
+            }
+        } },
+        confirmButton = {
+            if (remote && progress?.state !in setOf("updated", "up_to_date")) {
+                TextButton(enabled = canStart && !repo.daemonUpdateBusy, onClick = { repo.startDaemonUpdate() }) {
+                    Text(stringResource(Res.string.updates_daemon_confirm))
+                }
+            } else if (!remote && command != null) {
+                TextButton(onClick = { clipboard.setText(AnnotatedString(command)) }) { Text(stringResource(Res.string.path_copy)) }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.close)) } },
+    )
 }
 
 /** The app-side half of [VersionsGroup] — one action per distribution route (never a self-updater). */
@@ -936,9 +1030,11 @@ private fun AppUpdateGuidance() {
 
 /** Label + mono version, with an accent "vX available" tail when that side is behind. */
 @Composable
-private fun VersionRow(label: String, version: String, behindNote: String?) {
+private fun VersionRow(label: String, version: String, behindNote: String?, onClick: (() -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = Tok.tx2, fontSize = 13.5.sp, style = tightCenter(13.5.sp), modifier = Modifier.weight(1f))

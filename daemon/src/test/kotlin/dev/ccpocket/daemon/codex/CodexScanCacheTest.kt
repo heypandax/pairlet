@@ -216,24 +216,23 @@ class CodexScanCacheTest {
     }
 
     @Test
-    fun findSession_answers_from_its_index_and_self_heals_when_the_file_is_gone() {
+    fun findSession_respects_the_root_and_self_heals_when_the_file_is_gone() {
         val root = Files.createDirectory(tmp.resolve("index-root"))
         val file = tree(root, "thr-idx")
 
         assertEquals(file, CodexPaths.findSession("thr-idx", root))
 
-        // The proof the second lookup never walks: hand it a root that does not contain the file at all.
-        // (Production calls this 4x per session open — that walk is what the index removes.)
+        // Lookups in a different root cannot inherit another root's session choice.
         val empty = Files.createDirectory(tmp.resolve("empty-root"))
-        assertEquals(file, CodexPaths.findSession("thr-idx", empty), "an indexed hit skips the tree entirely")
+        assertNull(CodexPaths.findSession("thr-idx", empty), "a lookup must respect the supplied root")
 
-        // …and the index is validated by existence, so a deleted rollout falls back to the walk and misses
+        // A deleted rollout must disappear from subsequent lookups too.
         Files.delete(file)
         assertNull(CodexPaths.findSession("thr-idx", root))
     }
 
     @Test
-    fun findSession_follows_the_newest_continuation_after_a_listing_refresh() {
+    fun findSession_follows_the_newest_continuation_without_a_listing_refresh() {
         // issue #312, copied from the real Codex Desktop shape:
         //   rollout-<ts>-<threadId>.jsonl
         //   rollout-<ts>-<threadId>_<runId>.jsonl
@@ -247,9 +246,7 @@ class CodexScanCacheTest {
 
         val resumed = continuation(root, "thr-branch", "run-2")
         Files.setLastModifiedTime(resumed, FileTime.fromMillis(2_000_000))
-        // The session-list refresh observes a new path and invalidates the old id→file choice. The next
-        // replay lookup must converge on the same newest file the list row represents.
-        CodexPaths.sessionFiles(root = root)
+        // Opening must detect a new writer before the next periodic session-list refresh.
 
         val found = CodexPaths.findSession("thr-branch", root)
         assertEquals(resumed, found)

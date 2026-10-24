@@ -89,6 +89,9 @@ fun QuotaBar(model: DesktopModel) {
     // The refresh driver must run even when there is nothing to draw — otherwise the very first fetch
     // would never fire and the strip could never appear. Hence: effect first, render decision after.
     ClaudeQuotaRefreshEffect(repo)
+    if (repo.usageSheetRequested.value) {
+        dev.ccpocket.app.ui.QuotaSheet(repo) { repo.usageSheetRequested.value = false }
+    }
 
     // one thin row per backend that has numbers (issue #348), Claude first. A single backend is the
     // pre-#348 strip unchanged; the second row only appears on a machine that really has two accounts.

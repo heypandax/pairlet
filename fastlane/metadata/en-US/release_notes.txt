@@ -1,4 +1,4 @@
-What's new in 2.6.0
+What's new in 2.6.1
 
 - Choose what happens after dictation: put the text in the composer, or enable correction before sending. Preview the text and highlighted changes; if correction fails or a change needs review, the text stays available for you to check.
 - Improved session recovery when switching between Wi-Fi and cellular networks. Fixed missing session content after returning to a local connection.

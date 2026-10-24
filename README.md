@@ -138,7 +138,11 @@ GitHub downloads crawl there, so the installer and release artifacts are mirrore
 `pairlet version` reports what is running, how it was installed, and the single command that updates *this* install — offline, and whether or not the daemon is up. The app shows the same under **Settings ▸ Versions**.
 
 A daemon installed by the one-liner keeps itself current: it checks daily and applies the update in the background. Turn that off with `pairlet config --auto-update off` and you get a phone notification instead. Homebrew, Scoop and Windows installs never self-apply — update them through their own package manager (`brew upgrade --cask heypandax/tap/cc-pocket`, `scoop update cc-pocket-daemon`). The desktop app states it plainly when an update check fails, rather than showing "up to date".
+
+Development builds add update actions under **Settings ▸ Help & About**: open the App Store for an app update, or request an update from a supported, managed macOS/Linux daemon. New messages and sessions pause during installation; existing tasks can still receive approval answers or be stopped. Package-manager and development installs retain their original update commands. See [the update workflow](docs/RUN.md#在手机上更新电脑守护进程).
 </details>
+
+In Claude and Codex sessions, `/usage` opens the local subscription quota panel, including from a desktop split pane. A supported Codex CLI can also report earned reset credits for selection and confirmation. If a redemption result is uncertain, use the explicit retry to confirm the original operation before choosing another card.
 
 ### Using OpenCode
 

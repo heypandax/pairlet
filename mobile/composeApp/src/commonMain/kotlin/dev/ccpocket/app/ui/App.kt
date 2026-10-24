@@ -102,6 +102,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -387,6 +388,7 @@ fun App(scope: CoroutineScope) {
                 )
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
                 // preview/recording mode hides the demo banner for a clean marketing capture
+                if (repo.daemonControlsBlocked) StatusBanner(Tok.warn, stringResource(Res.string.updates_daemon_controls_paused))
                 if (repo.demoMode.value && !dev.ccpocket.app.isPreviewMode()) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))
                 if (repo.sessionActive.value && repo.phase.value == ConnPhase.Reconnecting) StatusBanner(Tok.danger, stringResource(Res.string.reconnect_banner))
                 // entering a chat before the first link-up used to look identical to "connected" — say so (issue #41)
@@ -468,6 +470,7 @@ fun App(scope: CoroutineScope) {
             }
             // tap a document → native preview, over whatever screen it was tapped on; below the approval sheet
             DocumentOpener(repo)
+            if (repo.usageSheetRequested.value) QuotaSheet(repo) { repo.usageSheetRequested.value = false }
             // AskUserQuestion (ask.questions != null) renders as the docked QuestionCard inside
             // ChatScreen instead — questions are conversation, not a safety gate, and the user
             // should be able to scroll the chat for context while answering.
@@ -3031,6 +3034,11 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         }
                     },
                 )
+                if (repo.observing.value && repo.sessionAgent.value in setOf(AgentKind.CLAUDE, AgentKind.CODEX)) {
+                    TextButton(onClick = { repo.sendPrompt("/usage") }) {
+                        Text("/usage", style = tightCenter(12.sp))
+                    }
+                }
                 if (!repo.observing.value) {
                     Spacer(Modifier.width(6.dp))
                     // the streaming chip is gone from here: execution state (issue #52) is now the pinned
@@ -3327,7 +3335,19 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     onOwnsInput = { cardOwnsInput = it },
                 )
             }
-            if (questionAsk != null && cardOwnsInput) {
+            if (repo.daemonControlsBlocked) {
+                Row(
+                    Modifier.fillMaxWidth().background(Tok.surface)
+                        .windowInsetsPadding(WindowInsets.navigationBars).padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(Res.string.updates_daemon_controls_paused),
+                        color = Tok.tx2, style = tightCenter(13.sp), modifier = Modifier.weight(1f),
+                    )
+                    if (repo.streaming.value || repo.pendingAsk.value != null) StopButton { repo.cancelTurn() }
+                }
+            } else if (questionAsk != null && cardOwnsInput) {
                 // composer yields while the card's field has the keyboard
             } else if (repo.observing.value) {
                 val observation = repo.sessionObservation.value
@@ -3354,8 +3374,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 var recElapsed by remember { mutableStateOf(0L) }
                 if (voiceState is VoiceState.Recording) recElapsed = voiceState.elapsedMs
                 val slashQuery = slashQueryOf(input)
-                val suggestions = remember(slashQuery, repo.slashCommands.toList()) {
-                    slashSuggestions(slashQuery, repo.slashCommands)
+                val suggestions = remember(slashQuery, repo.slashCommands.toList(), repo.sessionAgent.value) {
+                    val commands = repo.slashCommands.toMutableList()
+                    // Local system commands remain available before metadata/CommandList arrives.
+                    if (repo.sessionAgent.value in setOf(AgentKind.CLAUDE, AgentKind.CODEX) && commands.none { it.name == "usage" }) {
+                        commands.add(0, SlashCommand("usage", "Show account usage and available resets"))
+                    }
+                    slashSuggestions(slashQuery, commands)
                 }
                 // "@file" completion (issue #75): tap-only and cursor-at-end (the common mobile case) — the
                 // daemon browses the session cwd, a folder tap drills in, a file tap inserts its path. Yields

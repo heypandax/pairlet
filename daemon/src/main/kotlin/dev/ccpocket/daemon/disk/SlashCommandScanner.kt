@@ -24,8 +24,9 @@ import kotlin.io.path.nameWithoutExtension
  */
 object SlashCommandScanner {
 
-    // claude `-p` ignores most interactive commands (/cost, /status, /config, /usage, /context, /agents, …) —
+    // claude `-p` ignores most interactive commands (/cost, /status, /config, /context, /agents, …) —
     // sending them as stdin text silently no-ops, so they are deliberately absent. Only list what actually works:
+    //  - handled locally by the app: /usage (subscription allowance and Codex reset credits)
     //  - intercepted by [Conversation] (relaunch under a new flag): /model, /effort, /clear
     //  - claude expands the prompt itself in headless stream-json: /compact, /review, /security-review, /init
     //  - skills embedded in the claude CLI (no SKILL.md on disk, so the scan below can't find them; the model
@@ -35,6 +36,7 @@ object SlashCommandScanner {
     // self-waking process — the daemon LRU-closes idle claude processes, so they'd silently break) and
     // reference-style skills (/dataviz, /claude-api, /update-config) that the model pulls in on its own.
     private val builtins = listOf(
+        SlashCommand("usage", "Show account usage and available resets"),
         SlashCommand("model", "Switch the model for this session", "<name>"),
         SlashCommand("effort", "Set reasoning effort (low/medium/high/xhigh/max)", "<level>"),
         SlashCommand("compact", "Compact the conversation to free up context", "[instructions]"),
@@ -60,7 +62,7 @@ object SlashCommandScanner {
             // App-server control plane / daemon equivalents plus actions that are valid Codex prompts.
             // Claude-only CLI skills (/init, /run, /deep-research, …) must not be advertised as Codex commands.
             builtins.filter { it.name in CODEX_BUILTINS }
-        } else builtins
+        } else builtins.filter { it.name != "usage" || agent == AgentKind.CLAUDE }
         supportedBuiltins.forEach { byName[skillKey(it.name)] = it }
         // Claude custom commands are not a Codex/OpenCode capability. Preserve the legacy OpenCode
         // listing until that backend has its own command discovery contract.
@@ -124,7 +126,7 @@ object SlashCommandScanner {
 
     private data class Frontmatter(val description: String?, val argumentHint: String?)
 
-    private val CODEX_BUILTINS = setOf("model", "effort", "compact", "clear", "review", "simplify")
+    private val CODEX_BUILTINS = setOf("usage", "model", "effort", "compact", "clear", "review", "simplify")
 
     /** Minimal YAML frontmatter read: top-level `description:` and `argument-hint:` scalars only. */
     private fun frontmatter(file: Path): Frontmatter {

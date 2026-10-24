@@ -5,6 +5,8 @@ import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.ConvoHistory
+import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
@@ -61,7 +63,7 @@ class ConversationOpenAnnounceOrderTest {
         override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = true
         override suspend fun onProcessEnded(sessionId: String?) {}
         override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
-        override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
+        override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = listOf(HistoryMessage(ChatRole.USER, "recent message"))
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
         override fun resumeTitle(workdir: String, sessionId: String): String? {
             gate.await()
@@ -109,6 +111,8 @@ class ConversationOpenAnnounceOrderTest {
                     "the seeded re-announce must still be behind the transcript read",
                 )
 
+                assertEquals("recent message", frames.filterIsInstance<ConvoHistory>().single().messages.single().text,
+                    "history must arrive while metadata is still blocked")
                 gate.countDown()
 
                 // the seeded re-announce backfills what the read recovered, over the same frame type the

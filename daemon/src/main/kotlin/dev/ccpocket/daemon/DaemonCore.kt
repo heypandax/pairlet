@@ -264,6 +264,7 @@ class DaemonCore(
         git = git,
         codexQuota = dev.ccpocket.daemon.codex.CodexQuotaService(codexBin),
         transcriptRefine = transcriptRefine,
+        daemonUpdater = dev.ccpocket.daemon.update.DaemonUpdateController(isBusy = { hasActiveWork() }),
     )
 
     /**

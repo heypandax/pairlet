@@ -1262,6 +1262,8 @@ data class PocketError(
     val message: String,
     val convoId: String? = null,
     val repair: AgentRepairOffer? = null,
+    /** Identifies a prompt refused before delivery, so the client retains its unsent retry. */
+    val promptId: String? = null,
 ) : ToPhone
 
 /** An offer to auto-repair a broken agent CLI install. Rides [PocketError.repair] when a turn/session
@@ -1430,6 +1432,11 @@ data class DaemonInfo(
      * fetch several of them on its own to fill a short window.
      */
     val supportsLeanHistory: Boolean = false,
+    /** Null = old daemon. "remote" = owner can request an idle, managed POSIX service update;
+     *  "manual" = this install must retain its existing package-manager/developer update workflow. */
+    val daemonUpdateMode: String? = null,
+    /** New connections pause control while installation/restart is in progress. */
+    val daemonUpdateInProgress: Boolean = false,
 ) : ToPhone
 
 @Serializable

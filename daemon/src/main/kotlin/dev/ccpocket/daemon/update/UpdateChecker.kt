@@ -128,19 +128,23 @@ object UpdateChecker {
         val canAuto = autoApply && install != null && install.serviceAnchored &&
             !System.getProperty("os.name").lowercase().contains("win")
 
-        if (canAuto) {
-            applyWhenIdle(
+        if (canAuto && UpdateState.tryBeginApply()) {
+            try { applyWhenIdle(
                 isBusy = isBusy,
                 apply = {
+                    UpdateState.blockControls()
+                    check(!isBusy()) { "a task started before installation; deferring update" }
+                    UpdateState.recordPhase("downloading", latest.version)
                     log.info("auto-updating to ${latest.version}")
                     // background path: no terminal to draw on, and a redrawn line would flood the daemon log (#381)
                     UpdateService.apply(latest, install!!, UpdateProgressListener.QUIET)
                 },
                 exit = {
+                    UpdateState.recordPhase("restarting", latest.version)
                     log.info("switched — exiting so the service supervisor relaunches v${latest.version}")
                     exitProcess(0) // KeepAlive / Restart=always brings the new binary up within seconds
                 },
-            )
+            ) } finally { UpdateState.finishApply() }
         }
 
         // notify the phone once per version (the relay only pushes when the app isn't attached;

@@ -83,6 +83,7 @@ data class ClaudeQuotaGet(
      * answers with the Claude allowance, which the client must not attribute to the requested agent.
      */
     val agent: AgentKind = AgentKind.CLAUDE,
+    val requestId: String? = null,
 ) : ToDaemon
 
 /**
@@ -108,6 +109,9 @@ data class ClaudeQuota(
     /** The account's plan as the backend reports it (Codex `planType`: "pro" / "plus" / …; null when the
      *  backend does not say). Display-only, tolerant String — the vocabulary is the vendor's. */
     val planType: String? = null,
+    /** Null means the CLI does not expose reset credits; never infer zero. */
+    val resetCredits: QuotaResetCredits? = null,
+    val requestId: String? = null,
 ) : ToPhone
 
 /**
@@ -132,3 +136,26 @@ data class ClaudeQuotaLimit(
     val isActive: Boolean = false,
     val modelDisplayName: String? = null,
 )
+
+/** Codex earned usage resets, separate from paid usage credits. Epoch milliseconds on the wire. */
+@Serializable
+data class QuotaResetCredits(val availableCount: Long = 0, val credits: List<QuotaResetCredit>? = null)
+
+@Serializable
+data class QuotaResetCredit(
+    val id: String,
+    val status: String = "unknown",
+    val resetType: String = "unknown",
+    val title: String? = null,
+    val description: String? = null,
+    val expiresAt: Long? = null,
+)
+
+/** Owner only. requestId is also the upstream idempotency key; retries MUST reuse it. */
+@Serializable
+@SerialName("pocket/quota.reset.redeem")
+data class RedeemQuotaReset(val requestId: String, val creditId: String? = null) : ToDaemon
+
+@Serializable
+@SerialName("pocket/quota.reset.result")
+data class QuotaResetResult(val requestId: String, val outcome: String = "unknown") : ToPhone

@@ -309,6 +309,25 @@
     <!-- ── settings (about + paired devices) ─────────────────────── -->
     <string name="settings_title">Settings</string>
     <!-- versions &amp; updates (issue #200) -->
+    <string name="settings_website">Official website</string>
+    <string name="updates_app_dialog_title">Update app</string>
+    <string name="updates_app_dialog_body">Current version %1$s; version %2$s is available. Visit the distribution page to check for updates.</string>
+    <string name="updates_daemon_dialog_title">Update computer daemon</string>
+    <string name="updates_daemon_confirm">Update now</string>
+    <string name="updates_daemon_confirm_body">Download and verify the latest version on this computer. The daemon will restart after installation and the app will reconnect automatically.</string>
+    <string name="updates_daemon_checking">Checking for the latest version…</string>
+    <string name="updates_daemon_downloading">Downloading, verifying and installing the update…</string>
+    <string name="updates_daemon_waiting">Update ready. Waiting for tasks on the computer to finish before restarting…</string>
+    <string name="updates_daemon_restarting">Restarting. Waiting to reconnect…</string>
+    <string name="updates_daemon_in_progress">An update is already in progress on the computer. It will reconnect when finished.</string>
+    <string name="updates_daemon_busy">The computer is running tasks. Wait for them to finish, then try again.</string>
+    <string name="updates_daemon_updated">The computer daemon has been updated.</string>
+    <string name="updates_daemon_failed">The update did not finish. Try again, or run the update command on the computer.</string>
+    <string name="updates_daemon_uncertain">The update result is not confirmed. Check the version after reconnecting, or try again.</string>
+    <string name="updates_daemon_manual">This installation must be updated on the computer. Run the command below.</string>
+    <string name="updates_daemon_legacy">This daemon version cannot be updated from the app yet. Run the command below on the computer first.</string>
+    <string name="updates_daemon_offline">Connect to this computer first.</string>
+    <string name="updates_daemon_owner_only">Only the paired owner can update the computer daemon.</string>
     <string name="updates_section">VERSIONS</string>
     <string name="updates_app">This app</string>
     <string name="updates_daemon">Computer daemon</string>
@@ -2310,4 +2329,19 @@
     <string name="memo_whole_transcript_note">The whole transcript; the target session\'s agent will sort it out</string>
     <string name="memo_degraded_next">Organize it again, or add to-dos by hand.</string>
     <string name="memo_degraded_next_manual">Add to-dos by hand.</string>
+    <string name="quota_reset_cards">Codex usage resets: %1$d available</string>
+    <string name="quota_reset_redeem">Redeem reset</string>
+    <string name="quota_reset_confirm_title">Use one usage reset?</string>
+    <string name="quota_reset_confirm_body">This consumes one earned reset and restores eligible account usage allowances. Conversation history is preserved.</string>
+    <string name="quota_reset_cancel">Cancel</string>
+    <string name="quota_reset_pending">Redeeming…</string>
+    <string name="quota_reset_done">Usage reset successfully.</string>
+    <string name="quota_reset_none">No usage resets available.</string>
+    <string name="quota_reset_unneeded">No usage window is currently eligible for a reset.</string>
+    <string name="quota_reset_unknown">Reset result could not be confirmed. Retry uses the same request to prevent consuming another reset.</string>
+    <string name="quota_loading">Loading account usage…</string>
+    <string name="quota_unavailable">Account usage is unavailable. Try refreshing.</string>
+    <string name="quota_reset_expires">Expires: %1$s</string>
+    <string name="quota_reset_retry">Check reset result again</string>
+    <string name="updates_daemon_controls_paused">The computer daemon is updating. New messages and sessions are paused. You can still read history, answer existing approvals or questions, and stop running tasks.</string>
 </resources>

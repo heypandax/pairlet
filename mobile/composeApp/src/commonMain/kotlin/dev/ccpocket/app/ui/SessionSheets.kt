@@ -630,6 +630,9 @@ fun QuickActionsSheet(
                                 ) { onMode(); onDismiss() }
                             }
                             QaGroup(stringResource(Res.string.qa_group_tools)) {
+                                if (repo.sessionAgent.value in setOf(AgentKind.CLAUDE, AgentKind.CODEX)) {
+                                    ActionRow("/usage") { repo.sendPrompt("/usage"); onDismiss() }
+                                }
                                 ActionRow(stringResource(Res.string.terminal_open)) { onTerminal(); onDismiss() }
                                 // 「文件」而不是「改动文件」：这一行现在通向双视角文件面（变更 / 全部），
                                 // 尾注只在真有改动时出现——0 处改动写出来是噪音，入口本身已经在了

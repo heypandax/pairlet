@@ -10,6 +10,11 @@ import dev.ccpocket.protocol.CLAUDE_QUOTA_NETWORK
 import dev.ccpocket.protocol.CLAUDE_QUOTA_NO_TOKEN
 import dev.ccpocket.protocol.CLAUDE_QUOTA_OK
 import dev.ccpocket.protocol.ClaudeQuota
+import dev.ccpocket.protocol.QuotaResetCredits
+import dev.ccpocket.protocol.QuotaResetResult
+import dev.ccpocket.protocol.RedeemQuotaReset
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import dev.ccpocket.protocol.ClaudeQuotaLimit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -75,6 +80,12 @@ class CodexQuotaService(
     /** Transport seam. Tests inject a canned [AppServerOutcome]; nothing in this class's tests spawns a
      *  process, and nothing in them touches the developer's real Codex login. */
     private val transport: suspend (Path) -> AppServerOutcome = { exe -> readRateLimits(exe) },
+    private val resetTransport: suspend (Path, RedeemQuotaReset) -> AppServerOutcome = { exe, request ->
+        readRateLimits(exe, method = RESET_METHOD, params = buildJsonObject {
+            put("idempotencyKey", request.requestId)
+            request.creditId?.let { put("creditId", it) }
+        }.toString())
+    },
 ) {
     private val log = logger("CodexQuota")
     private val mutex = Mutex()
@@ -145,12 +156,30 @@ class CodexQuotaService(
         }
     }
 
+    /** Serialize reads and redemption; invalidate the cache even on an uncertain transport outcome. */
+    suspend fun redeem(request: RedeemQuotaReset): QuotaResetResult = mutex.withLock {
+        if ((request.requestId.isBlank() || request.requestId.length > 128) || request.creditId?.isBlank() == true) {
+            return@withLock QuotaResetResult(request.requestId, "invalid_request")
+        }
+        val exe = binary() ?: return@withLock QuotaResetResult(request.requestId, "unsupported")
+        cached = null
+        val outcome = runCatching { resetTransport(exe, request) }.getOrNull()
+        val result = (outcome as? AppServerOutcome.Result)?.let {
+            runCatching { json.decodeFromString<ResetResponse>(it.json).outcome }.getOrNull()
+        }
+        QuotaResetResult(request.requestId, result?.takeIf { it in setOf("reset", "nothingToReset", "noCredit", "alreadyRedeemed") } ?: "unknown")
+    }
+
+    @Serializable
+    private data class ResetResponse(val outcome: String)
+
     // ── parsing ────────────────────────────────────────────────────────────────────────────────────
 
     @Serializable
     private data class Payload(
         val rateLimits: Snapshot? = null,
-        val rateLimitsByLimitId: Map<String, Snapshot> = emptyMap(),
+        val rateLimitsByLimitId: Map<String, Snapshot>? = emptyMap(),
+        val rateLimitResetCredits: QuotaResetCredits? = null,
     )
 
     @Serializable
@@ -176,6 +205,8 @@ class CodexQuotaService(
         /** JSON-RPC ids for the two requests the read needs. Fixed, because the process is single-use. */
         private const val ID_INITIALIZE = 1L
         private const val ID_RATE_LIMITS = 2L
+
+        const val RESET_METHOD = "account/rateLimitResetCredit/consume"
 
         const val RATE_LIMITS_METHOD = "account/rateLimits/read"
 
@@ -238,7 +269,7 @@ class CodexQuotaService(
                     bindingTaken = true; it.copy(isActive = true)
                 } else it
             }
-            val scopedRows = payload.rateLimitsByLimitId.entries.flatMap { (id, snap) ->
+            val scopedRows = payload.rateLimitsByLimitId.orEmpty().entries.flatMap { (id, snap) ->
                 if (id == ACCOUNT_LIMIT_ID || (top?.limitId != null && id == top.limitId)) return@flatMap emptyList()
                 // a cap without a human name is labelled by its raw id: unlike Claude's null model name,
                 // the id here IS meaningful ("base_model_inference") and hiding the row would hide a cap
@@ -246,13 +277,18 @@ class CodexQuotaService(
                 listOfNotNull(snap.primary, snap.secondary).map { w -> row(w, scopedName = name) }
             }
             val planType = top?.planType?.takeIf { it.isNotBlank() }
-                ?: payload.rateLimitsByLimitId.values.firstNotNullOfOrNull { it.planType?.takeIf(String::isNotBlank) }
+                ?: payload.rateLimitsByLimitId.orEmpty().values.firstNotNullOfOrNull { it.planType?.takeIf(String::isNotBlank) }
             return ClaudeQuota(
                 limits = accountRows + scopedRows,
                 fetchedAt = at,
                 status = CLAUDE_QUOTA_OK,
                 agent = AgentKind.CODEX,
                 planType = planType,
+                resetCredits = payload.rateLimitResetCredits?.let { summary ->
+                    summary.copy(availableCount = summary.availableCount.coerceAtLeast(0), credits = summary.credits?.map {
+                        it.copy(expiresAt = epochMs(it.expiresAt))
+                    })
+                },
             )
         }
 
@@ -313,7 +349,7 @@ class CodexQuotaService(
          * around a blocking `readLine` — a blocked stdio read does not observe coroutine cancellation,
          * and destroying the process is what actually unblocks it.
          */
-        internal suspend fun readRateLimits(exe: Path, timeoutMs: Long = REQUEST_TIMEOUT_MS): AppServerOutcome =
+        internal suspend fun readRateLimits(exe: Path, timeoutMs: Long = REQUEST_TIMEOUT_MS, method: String = RATE_LIMITS_METHOD, params: String? = null): AppServerOutcome =
             withContext(Dispatchers.IO) {
                 val proc = runCatching {
                     CodexLauncher.processBuilder(exe, File(System.getProperty("user.home")))
@@ -331,7 +367,7 @@ class CodexQuotaService(
                     runCatching { proc.destroyForcibly() }
                 }
                 try {
-                    val outcome = runCatching { handshakeAndRead(proc) }
+                    val outcome = runCatching { handshakeAndRead(proc, method, params) }
                         .getOrElse { AppServerOutcome.Failure("the Codex app-server read failed (${it::class.simpleName})") }
                     // the watchdog's kill surfaces as a closed stream; report it as what it was
                     if (timedOut.get()) AppServerOutcome.Failure("the Codex app-server did not answer in time")
@@ -343,7 +379,7 @@ class CodexQuotaService(
             }
 
         /** The blocking half of [readRateLimits]: write two frames, read until the answer's id lands. */
-        private fun handshakeAndRead(proc: Process): AppServerOutcome {
+        private fun handshakeAndRead(proc: Process, method: String, params: String?): AppServerOutcome {
             val w = proc.outputStream.bufferedWriter()
             val r = proc.inputStream.bufferedReader()
             fun send(line: String) { w.write(line); w.write("\n"); w.flush() }
@@ -367,7 +403,11 @@ class CodexQuotaService(
                     ID_INITIALIZE -> {
                         // `initialized` is a NOTIFICATION (no id); the app-server refuses real work before it
                         send("""{"method":"initialized"}""")
-                        send("""{"id":$ID_RATE_LIMITS,"method":"$RATE_LIMITS_METHOD"}""")
+                        send(buildJsonObject {
+                            put("id", ID_RATE_LIMITS)
+                            put("method", method)
+                            params?.let { put("params", json.parseToJsonElement(it)) }
+                        }.toString())
                     }
                     ID_RATE_LIMITS -> {
                         val result = obj["result"] ?: return AppServerOutcome.Failure("Codex answered without a result")

@@ -204,6 +204,8 @@ class SidePanes(
     private val productDimensions: () -> Map<TelKey, Any> = { emptyMap() },
     private val receiptExpired: (String?, String) -> Unit = { _, _ -> },
     private val responseExpired: (String?, String, Boolean) -> Unit = { _, _, _ -> },
+    private val handleLocalCommand: (AgentKind, String) -> Boolean = { _, _ -> false },
+    private val controlsBlocked: () -> Boolean = { false },
 ) {
     val panes = mutableStateListOf<SidePane>()
     private var paneSeq = 0L
@@ -277,6 +279,7 @@ class SidePanes(
      * must not crash the gesture that quoted it.
      */
     fun open(workdir: String, sessionId: String, title: String, agent: AgentKind, mode: PermissionMode, at: Int = -1): SidePane? {
+        if (controlsBlocked()) return null
         if (!canOpen() || paneFor(sessionId) != null) return null
         disowned.remove(sessionId) // asking for it again withdraws any pending disowning of this session
         val pane = SidePane(++paneSeq, sessionId, workdir, title, agent)
@@ -297,6 +300,7 @@ class SidePanes(
     /** Re-send a column's open after it timed out — the same request, so a retry cannot land under
      *  different flags than the gesture that failed. */
     fun retry(pane: SidePane) {
+        if (controlsBlocked()) return
         if (pane.convoId.value != null) return
         pane.openFailed.value = false
         pane.opening.value = true
@@ -606,6 +610,8 @@ class SidePanes(
 
     /** Send [text] into [pane]'s conversation. False = nothing to send, or the pane's open has not landed. */
     fun sendPrompt(pane: SidePane, text: String): Boolean {
+        if (handleLocalCommand(pane.agent, text)) return true
+        if (controlsBlocked()) return false
         val convo = pane.convoId.value ?: return false
         if (text.isBlank()) return false
         val promptId = newPromptId()
@@ -624,6 +630,20 @@ class SidePanes(
         pane.streaming.value = true
         scope.launch { send(SendPrompt(convo, text, promptId = promptId)) }
         armReceiptWatchdog(pane, promptId)
+        return true
+    }
+
+    /** A send can lose the race with an update after admission; retain its explicit retry in this pane. */
+    internal fun promptRefused(convoId: String, promptId: String): Boolean {
+        val pane = byConvo(convoId) ?: return false
+        if (pane.activePromptId != promptId) return false
+        cancelWatchdogs(pane)
+        pane.promptOutstanding = false
+        pane.awaitingTurn = false
+        pane.streaming.value = false
+        pane.turnQueued.value = false
+        pane.sendStalled.value = true
+        pane.turnStalled.value = true
         return true
     }
 
@@ -735,6 +755,7 @@ class SidePanes(
      * a real frame retracts first, so a resend can't land on top of a turn that actually started.
      */
     fun resendStalled(pane: SidePane) {
+        if (controlsBlocked()) return
         if (!pane.sendStalled.value && !pane.turnStalled.value) return
         val convo = pane.convoId.value ?: return
         val text = pane.promptRetryText ?: return
@@ -782,6 +803,7 @@ class SidePanes(
      * the effort/service-tier follow-up: a column tracks neither, so there is nothing stale to clear.
      */
     fun switchModel(pane: SidePane, name: String) {
+        if (controlsBlocked()) return
         val convo = pane.convoId.value ?: return
         val target = name.trim()
         if (target.isEmpty() || target == pane.model.value) return

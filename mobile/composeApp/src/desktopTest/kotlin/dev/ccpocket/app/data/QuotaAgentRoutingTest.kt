@@ -115,6 +115,76 @@ class QuotaAgentRoutingTest {
         )
     }
 
+    @Test
+    fun repeated_forced_refreshes_coalesce_and_old_request_ids_cannot_finish_the_new_read() {
+        val (repo, sent) = repo()
+        advertise(repo, "claude", "codex")
+        repo.fetchQuota(AgentKind.CODEX)
+        val first = sent.filterIsInstance<ClaudeQuotaGet>().single()
+        repeat(10) { repo.fetchQuota(AgentKind.CODEX, forceRefresh = true) }
+        assertEquals(1, sent.filterIsInstance<ClaudeQuotaGet>().size)
+        repo.receiveForTest(codexReading(50).copy(requestId = first.requestId))
+        val next = sent.filterIsInstance<ClaudeQuotaGet>().last()
+        assertEquals(2, sent.filterIsInstance<ClaudeQuotaGet>().size)
+        assertTrue(next.forceRefresh)
+        repo.receiveForTest(codexReading(99).copy(requestId = first.requestId))
+        assertEquals(50, repo.quotaByAgent[AgentKind.CODEX]!!.limits.single().percent)
+        assertTrue(repo.quotaLoading(AgentKind.CODEX))
+        repo.receiveForTest(codexReading(20).copy(requestId = next.requestId))
+        assertEquals(20, repo.quotaByAgent[AgentKind.CODEX]!!.limits.single().percent)
+        assertTrue(!repo.quotaLoading(AgentKind.CODEX))
+    }
+
+    @Test
+    fun a_successful_redemption_blocks_another_card_until_fresh_quota_arrives() {
+        val (repo, sent) = repo()
+        advertise(repo, "claude", "codex")
+        repo.connected.value = true
+        repo.quotaByAgent[AgentKind.CODEX] = codexReading().copy(resetCredits = dev.ccpocket.protocol.QuotaResetCredits(2))
+        repo.redeemQuotaReset()
+        val request = sent.filterIsInstance<dev.ccpocket.protocol.RedeemQuotaReset>().single()
+        repo.receiveForTest(dev.ccpocket.protocol.QuotaResetResult(request.requestId, "reset"))
+        repo.redeemQuotaReset()
+        assertEquals(1, sent.filterIsInstance<dev.ccpocket.protocol.RedeemQuotaReset>().size)
+        val refresh = sent.filterIsInstance<ClaudeQuotaGet>().last()
+        repo.receiveForTest(codexReading().copy(resetCredits = dev.ccpocket.protocol.QuotaResetCredits(1), requestId = refresh.requestId))
+        repo.redeemQuotaReset()
+        assertEquals(2, sent.filterIsInstance<dev.ccpocket.protocol.RedeemQuotaReset>().size)
+    }
+
+    @Test
+    fun a_pending_reset_survives_repository_recreation_and_never_crosses_computers() {
+        val identity = java.util.UUID.randomUUID().toString()
+        val binding = dev.ccpocket.app.pairing.PairedDaemon(
+            relay = "wss://test", accountId = identity, daemonPub = "pk", deviceId = "dev", credential = "cred",
+        )
+        val key = "quota-reset-attempt:${binding.relay}|${binding.accountId}|${binding.daemonPub}|${binding.deviceId}"
+        try {
+            val (first, sentFirst) = repo()
+            first.paired.value = binding
+            first.connected.value = true
+            first.quotaByAgent[AgentKind.CODEX] = codexReading().copy(resetCredits = dev.ccpocket.protocol.QuotaResetCredits(2))
+            first.redeemQuotaReset("card-a")
+            val original = sentFirst.filterIsInstance<dev.ccpocket.protocol.RedeemQuotaReset>().single()
+            val (restarted, sentRestarted) = repo()
+            restarted.paired.value = binding
+            restarted.connected.value = true
+            restarted.quotaByAgent[AgentKind.CODEX] = first.quotaByAgent[AgentKind.CODEX]!!
+            assertTrue(!restarted.redeemQuotaReset("card-b"), "a restored unknown attempt must not silently consume another selection")
+            assertTrue(sentRestarted.filterIsInstance<dev.ccpocket.protocol.RedeemQuotaReset>().isEmpty())
+            assertTrue(restarted.quotaResetPending)
+            assertTrue(restarted.retryQuotaReset(), "only an explicit retry may resume the original attempt")
+            assertEquals(original, sentRestarted.filterIsInstance<dev.ccpocket.protocol.RedeemQuotaReset>().single())
+            val (other, sentOther) = repo()
+            other.paired.value = binding.copy(accountId = "$identity-other")
+            other.connected.value = true
+            other.quotaByAgent[AgentKind.CODEX] = first.quotaByAgent[AgentKind.CODEX]!!
+            other.redeemQuotaReset("card-b")
+            assertTrue(original.requestId != sentOther.filterIsInstance<dev.ccpocket.protocol.RedeemQuotaReset>().single().requestId)
+            dev.ccpocket.app.secure.SecureStore.remove("quota-reset-attempt:${binding.relay}|$identity-other|${binding.daemonPub}|${binding.deviceId}")
+        } finally { dev.ccpocket.app.secure.SecureStore.remove(key) }
+    }
+
     // -- the inbound echo check ---------------------------------------------------------------------
 
     @Test

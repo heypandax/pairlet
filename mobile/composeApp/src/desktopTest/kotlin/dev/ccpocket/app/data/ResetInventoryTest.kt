@@ -347,12 +347,13 @@ class ResetInventoryTest {
                 .forEach { put(it, "owned helper; its internal state is outside S0 (modules join the inventory from S1)") }
             listOf("repath")
                 .forEach { put(it, "owned helper (#404); disconnect() calls its reset(), which voids every timer and pending evaluation") }
+            put("quotaReset", "owned helper; QuotaResetControllerTest covers timers/retry identity, and CommandAndQuotaRegressionTest covers disconnect/reconnect")
             put("voiceFlow", "owned helper (voice input v2): the pure send decision; its capture ends with the one tabled as voiceCapture")
             listOf("claudeQuota")
                 .forEach { put(it, "derived view over the CLAUDE slot of quotaByAgent") }
             EXPANDED.keys.forEach { put(it, "expanded: its fields are tabled under the '${EXPANDED.getValue(it)}.' prefix") }
             listOf("scope", "send", "newPromptId", "daemonOwnsPromptRecovery", "diagnosticsSupported", "productDimensions",
-                "receiptExpired", "responseExpired", "receiptTimeoutMs", "turnTimeoutMs")
+                "receiptExpired", "responseExpired", "receiptTimeoutMs", "turnTimeoutMs", "handleLocalCommand", "controlsBlocked")
                 .forEach { put("sidePanes.$it", "SidePanes wiring / timeout configuration") }
             listOf("maxEntries", "maxBytes").forEach { put("sessionCache.$it", "SessionHistoryCache bounds (constructor configuration)") }
             put("modelCatalogPolicy.now", "ModelCatalogRefreshPolicy clock (constructor configuration)")
@@ -363,6 +364,7 @@ class ResetInventoryTest {
         val NO_DIRTY: Map<String, String> = mapOf(
             "demoMode" to "true would route send() into the demo loopback and change every exit's path; leaving demo is not one of the eight exits",
             "useRelay" to "true would route send() to the (unconnected) relay transport instead of the inert no-transport sink",
+            "daemonUpdateRemoteInProgress" to "true intentionally blocks OPEN_OTHER/TAKEOVER; update gating is covered by DaemonUpdateRequestTest",
             "connectionDiagnostic" to "an OperationTrace needs an installed diagnostics reporter (Diagnostics.begin is null in tests)",
             "openDiagnostic" to "an OperationTrace needs an installed diagnostics reporter (Diagnostics.begin is null in tests)",
         )
@@ -749,6 +751,16 @@ class ResetInventoryTest {
             daemonQuotaAgents            R R K K K K K K
             quotaDeadlines               R R K K K K K K
             quotaOutstanding             R R K K K K K K
+            quotaRequestIds              R R K K K K K K
+            quotaForceRefreshPending     R R K K K K K K
+            usageSheetRequested          R R K K K K K K
+            daemonUpdateMode             R R K K K K K K
+            daemonUpdateStatus           R R K K K K K K
+            daemonUpdateRequestId        R R K K K K K K
+            daemonUpdateInitialVersion   R R K K K K K K
+            daemonUpdateDeadline         R R K K K K K K
+            daemonUpdatePoll             R R K K K K K K
+            daemonUpdateRemoteInProgress - - - - - - - -
             skillCatalog                 R R K K K K K K
             skillCatalogLoading          R R K K K K K K
             skillCatalogUnavailable      R R K K K K K K

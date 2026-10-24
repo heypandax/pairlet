@@ -2,6 +2,8 @@ package dev.ccpocket.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +22,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.ccpocket.app.resources.quota_reset_retry
+import dev.ccpocket.app.resources.quota_reset_expires
+import dev.ccpocket.app.resources.quota_reset_cards
+import dev.ccpocket.app.resources.quota_reset_redeem
+import dev.ccpocket.app.resources.quota_reset_confirm_title
+import dev.ccpocket.app.resources.quota_reset_confirm_body
+import dev.ccpocket.app.resources.quota_reset_cancel
+import dev.ccpocket.app.resources.quota_reset_pending
+import dev.ccpocket.app.resources.quota_reset_done
+import dev.ccpocket.app.resources.quota_reset_none
+import dev.ccpocket.app.resources.quota_reset_unneeded
+import dev.ccpocket.app.resources.quota_reset_unknown
+import dev.ccpocket.app.resources.quota_loading
+import dev.ccpocket.app.resources.quota_unavailable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -258,7 +279,7 @@ fun QuotaSheet(repo: PocketRepository, onDismiss: () -> Unit) {
     val fetchedAt = sections.mapNotNull { it.quota.fetchedAt.takeIf { t -> t > 0 } }.minOrNull()
         ?: repo.claudeQuota.value?.fetchedAt ?: 0
     PocketSheet(onDismiss) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 16.dp)) {
+        Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 16.dp)) {
             val title = when {
                 loneClaude -> stringResource(Res.string.quota_title)
                 sections.size == 1 -> "${stringResource(Res.string.quota_title_generic)} · ${sectionHeading(sections[0])}"
@@ -282,6 +303,12 @@ fun QuotaSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
                 }
             }
+            if (sections.isEmpty()) {
+                val agent = repo.sessionAgent.value ?: repo.defaultAgent.value
+                Text(stringResource(if (repo.quotaLoading(agent)) Res.string.quota_loading else Res.string.quota_unavailable), color = Tok.muted, fontSize = 12.sp)
+                Spacer(Modifier.height(10.dp))
+            }
+            CodexResetCards(repo, now)
             Spacer(Modifier.height(2.dp))
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
             Spacer(Modifier.height(10.dp))
@@ -348,3 +375,63 @@ fun ClaudeQuotaRefreshEffect(repo: PocketRepository, foreground: Boolean) {
 
 /** Coarse on purpose: the shortest deadline the policy has to resolve is the 60s turn debounce. */
 private const val QUOTA_TICK_MS = 10_000L
+
+@Composable
+private fun CodexResetCards(repo: PocketRepository, now: Long) {
+    val quota = repo.quotaByAgent[AgentKind.CODEX] ?: return
+    val summary = quota.resetCredits ?: return
+    if (quota.status != dev.ccpocket.protocol.CLAUDE_QUOTA_OK) return
+    var confirming by remember { mutableStateOf(false) }
+    var selectedId by remember { mutableStateOf<String?>(null) }
+    val busy = repo.quotaResetBusy.value
+    val cards = summary.credits.orEmpty().filter {
+        it.status == "available" && it.resetType == "codexRateLimits" && (it.expiresAt?.let { expiry -> expiry > now } != false)
+    }
+    Text(stringResource(Res.string.quota_reset_cards, summary.availableCount), color = Tok.tx, fontSize = 13.sp)
+    cards.forEach { card ->
+        card.title?.let { Text(it, color = Tok.tx2, fontSize = 12.sp) }
+        card.description?.let { Text(it, color = Tok.muted, fontSize = 12.sp) }
+        card.expiresAt?.let { expiry ->
+            val date = dev.ccpocket.app.localClock(expiry)
+            val stamp = "${date.year}-${date.monthOfYear.toString().padStart(2, '0')}-${date.dayOfMonth.toString().padStart(2, '0')} " +
+                "${date.hour.toString().padStart(2, '0')}:${date.minute.toString().padStart(2, '0')}"
+            Text(stringResource(Res.string.quota_reset_expires, stamp), color = Tok.muted, fontSize = 11.sp)
+        }
+        TextButton(onClick = { selectedId = card.id; confirming = true }, enabled = repo.canRedeemQuotaReset) {
+            Text(stringResource(Res.string.quota_reset_redeem), style = tightCenter(12.sp))
+        }
+    }
+    // Null details means only the count is known. Let the backend select the next available card.
+    if (summary.availableCount > 0 && summary.credits.isNullOrEmpty()) {
+        TextButton(onClick = { selectedId = null; confirming = true }, enabled = repo.canRedeemQuotaReset) {
+            Text(stringResource(Res.string.quota_reset_redeem), style = tightCenter(12.sp))
+        }
+    }
+    val outcome = repo.quotaResetOutcome.value
+    val message = when {
+        busy -> Res.string.quota_reset_pending
+        outcome == "reset" || outcome == "alreadyRedeemed" -> Res.string.quota_reset_done
+        outcome == "noCredit" -> Res.string.quota_reset_none
+        outcome == "nothingToReset" -> Res.string.quota_reset_unneeded
+        outcome != null -> Res.string.quota_reset_unknown
+        summary.availableCount == 0L -> Res.string.quota_reset_none
+        else -> null
+    }
+    message?.let { Text(stringResource(it), color = Tok.muted, fontSize = 12.sp) }
+    if (repo.quotaResetPending && !busy) TextButton(
+        onClick = { repo.retryQuotaReset() }, enabled = repo.canRetryQuotaReset,
+    ) {
+        Text(stringResource(Res.string.quota_reset_retry), style = tightCenter(12.sp))
+    }
+    Spacer(Modifier.height(10.dp))
+    if (confirming) AlertDialog(
+        onDismissRequest = { confirming = false },
+        title = { Text(stringResource(Res.string.quota_reset_confirm_title)) },
+        text = { Text(stringResource(Res.string.quota_reset_confirm_body)) },
+        confirmButton = { TextButton(onClick = {
+            confirming = false
+            repo.redeemQuotaReset(selectedId)
+        }, enabled = repo.canRedeemQuotaReset) { Text(stringResource(Res.string.quota_reset_redeem)) } },
+        dismissButton = { TextButton(onClick = { confirming = false }) { Text(stringResource(Res.string.quota_reset_cancel)) } },
+    )
+}

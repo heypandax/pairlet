@@ -138,7 +138,11 @@ GitHub 在国内下载很慢，所以安装脚本和 Release 产物都在中继�
 `pairlet version` 会告诉你：现在跑的是哪个版本、当初怎么装的、以及升级**这一份**安装该用哪条命令——离线可用，daemon 没起来也能问。App 里在**设置 ▸ 版本**看到的是同一份信息。
 
 用一键脚本装的 daemon 会自己保持最新：每天检查，后台装好。不想要就 `pairlet config --auto-update off`，改成只给手机推一条通知。Homebrew、Scoop 和 Windows 装的永远不会自升级，走各自的包管理器：`brew upgrade --cask heypandax/tap/cc-pocket`、`scoop update cc-pocket-daemon`。桌面 App 检查更新失败时会明说失败，不会装作「已是最新」。
+
+开发版本在**设置 ▸ 帮助与关于**提供更新操作：App 更新可跳转 App Store；受支持的托管 macOS/Linux daemon 可由手机请求更新。安装期间暂停新消息和新会话，已有任务仍可审批、回答问题或停止。包管理器和开发安装保留原来的更新命令，详见[更新流程](docs/RUN.md#在手机上更新电脑守护进程)。
 </details>
+
+在 Claude 和 Codex 会话中输入 `/usage`，会打开本地订阅额度面板，桌面分栏也支持。受支持的 Codex CLI 还会展示已获得的重置卡，供选择并确认兑换。兑换结果未确定时，使用明确的重试入口确认原操作，再选择另一张卡。
 
 ### 使用 OpenCode
 
