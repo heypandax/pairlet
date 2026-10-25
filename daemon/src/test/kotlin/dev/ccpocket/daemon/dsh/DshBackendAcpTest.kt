@@ -107,9 +107,9 @@ class DshBackendAcpTest {
         assertTrue(w.any { """"method":"session/new"""" in it }, "a fresh conversation creates a session")
         val init = assertIs<AgentEvent.SessionInit>(events.first())
         assertEquals(SESSION, init.sessionId)
-        assertEquals("deepseek-v4-flash", init.model, "the bare id, never dsh's opaque selection value")
+        assertEquals("deepseek-official/deepseek-v4-flash", init.model, "provider/model, never dsh's opaque selection value")
         val meta = assertIs<AgentEvent.RuntimeMeta>(events[1])
-        assertEquals("deepseek-v4-flash", meta.model)
+        assertEquals("deepseek-official/deepseek-v4-flash", meta.model)
         assertEquals("high", meta.effort)
     }
 

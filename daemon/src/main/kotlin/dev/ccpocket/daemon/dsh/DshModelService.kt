@@ -20,10 +20,12 @@ import kotlinx.coroutines.withContext
  *
  *  1. **A live session's read-back.** If the daemon is already driving a dsh conversation, its own
  *     `configOptions` are free, current, and describe the very session the user is about to change
- *     ([DshCatalog]).
+ *     ([DshCatalog], preferring the picker's workdir and the most recent report). It is read on EVERY fetch
+ *     and never cached: a cached copy of session A's answer is exactly how a picker ends up describing a
+ *     session that is not the one in front of the user.
  *  2. **A throwaway ACP client.** Otherwise boot `dsh --profile acp`, handshake, open ONE session in a
  *     scratch directory, read its options and kill the process. This costs a Node start-up, which is why
- *     the answer is cached for [CACHE_TTL_MS].
+ *     THIS answer is cached for [CACHE_TTL_MS] — and why a manual refresh bypasses that cache.
  *
  * The scratch directory is deliberate: `session/new` needs a cwd and dsh persists every session it
  * creates, so pointing this at a real project would litter that project's session list with empty rows.
@@ -47,9 +49,10 @@ import kotlinx.coroutines.withContext
  *
  * ## Model ids on the wire
  *
- * The wire id is the bare dsh model name (`deepseek-v4-pro`), never `provider/model` and never dsh's
- * opaque `["provider","model"]` selection value — [DshConfigOptions] owns that join, on both sides, so
- * a daemon-internal encoding can never leak into the model chip or the session header.
+ * The wire id is `<provider>/<model>` (`deepseek-official/deepseek-v4-pro`), never dsh's opaque
+ * `["provider","model"]` selection value and never the bare model name — two providers (a dsh plugin's and the
+ * official one) may offer the same name and bill different accounts. [DshConfigOptions] owns that join, on both
+ * sides, so a daemon-internal encoding can never leak into the model chip or the session header.
  *
  * ## Agent presets are gone
  *
@@ -59,8 +62,9 @@ import kotlinx.coroutines.withContext
  */
 class DshModelService(
     private val dshBin: String? = null,
-    /** A session we are already driving; null = none open, boot a throwaway client. */
-    private val liveOptions: () -> DshConfigOptions? = { DshCatalog.current() },
+    /** A session we are already driving, for the picker's workdir when there is one; null = none open, boot a
+     *  throwaway client. */
+    private val liveOptions: (workdir: String?) -> DshConfigOptions? = { DshCatalog.current(it) },
     /** Seam for tests: reads a catalogue from a throwaway dsh, or null when one cannot be started. */
     private val transientRead: suspend () -> DshConfigOptions? = { bootTransient(dshBin) },
     private val nowMs: () -> Long = System::currentTimeMillis,
@@ -80,20 +84,26 @@ class DshModelService(
      */
     private val gate = Mutex()
 
-    suspend fun fetch(): ModelsList {
-        cache?.takeIf(::fresh)?.let { return it.list }
+    /**
+     * The catalogue for a picker opened on [workdir]. [forceRefresh] (the user pressed refresh) skips the cached
+     * throwaway read; a live session's answer is current by construction and is never served from cache.
+     */
+    suspend fun fetch(workdir: String? = null, forceRefresh: Boolean = false): ModelsList {
+        // A live session's own answer wins: it is the user's real dsh, and booting a second one to
+        // contradict it would report a catalogue the open session is not actually using.
+        runCatching { liveOptions(workdir) }.getOrNull()?.let { return toList(it) }
+        if (!forceRefresh) cache?.takeIf(::fresh)?.let { return it.list }
         return gate.withLock {
-            cache?.takeIf(::fresh)?.let { return@withLock it.list }
-            readCatalogue()
+            // The loser of a race re-reads what the winner just filled — unless it was asked to refresh, in which
+            // case a read that STARTED before its request is not the answer it asked for.
+            if (!forceRefresh) cache?.takeIf(::fresh)?.let { return@withLock it.list }
+            readTransient()
         }
     }
 
     private fun fresh(c: Cached): Boolean = nowMs() - c.at < CACHE_TTL_MS
 
-    private suspend fun readCatalogue(): ModelsList {
-        // A live session's own answer wins: it is the user's real dsh, and booting a second one to
-        // contradict it would report a catalogue the open session is not actually using.
-        runCatching { liveOptions() }.getOrNull()?.let { return remember(toList(it)) }
+    private suspend fun readTransient(): ModelsList {
         val options = runCatching { transientRead() }.getOrElse {
             return failure("could not start DeepSeek Harness to read its models: ${it.message}")
         } ?: return failure(
@@ -119,6 +129,7 @@ class DshModelService(
             return failure("DeepSeek Harness listed no models — check its provider configuration.")
         }
         val efforts = options.efforts.map { it.id }
+        val current = options.currentModel?.let { id -> options.models.firstOrNull { it.id == id } }
         return ModelsList(
             agent = AgentKind.DSH,
             models = options.models.map { it.id },
@@ -134,6 +145,7 @@ class DshModelService(
                             model = it,
                             reasoningEfforts = efforts,
                             defaultReasoningEffort = options.currentEffort,
+                            displayName = current?.displayName,
                         ),
                     )
                 }

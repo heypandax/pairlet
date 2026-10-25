@@ -447,7 +447,7 @@ class DshProbeSessionTest {
         val result = probe({ FakeDsh(acpScript("probe-id")) }, scratch, store).run()
 
         val options = assertNotNull(result.options)
-        assertEquals(listOf("deepseek-v4-flash"), options.models.map { it.id })
+        assertEquals(listOf("deepseek-official/deepseek-v4-flash"), options.models.map { it.id })
         assertEquals(DshProbeSessionCleanup.Outcome.Removed, result.session)
         assertTrue(result.processExited)
         assertTrue(result.scratchRemoved)
@@ -545,6 +545,6 @@ class DshProbeSessionTest {
     @Test
     fun the_fixture_payload_is_a_catalogue_the_parser_accepts() {
         val parsed = DshConfigOptions.parse(Json.parseToJsonElement(configOptions) as JsonArray)
-        assertEquals(listOf("deepseek-v4-flash"), parsed.models.map { it.id })
+        assertEquals(listOf("deepseek-official/deepseek-v4-flash"), parsed.models.map { it.id })
     }
 }

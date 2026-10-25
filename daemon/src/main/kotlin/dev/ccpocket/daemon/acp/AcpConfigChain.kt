@@ -28,7 +28,8 @@ import java.util.concurrent.ConcurrentLinkedDeque
  * Why the gate waits: a prompt that slipped through between the session opening and the write settling would
  * run the opening turn on settings the user did NOT pick. Each write is a request, so the gate opens on the
  * LAST write's RESPONSE — never on hope. A REFUSED write still advances the chain: queued prompts must never
- * be held hostage by a preference the agent refused. A write that never answers is bounded like the handshake,
+ * be held hostage by a preference the agent refused — unless the launch write is [Write.required], whose refusal
+ * fails the open like a timeout (dsh's model: its default would bill a provider the user did not pick). A write that never answers is bounded like the handshake,
  * its verdict delivered through the pump so it is ordered with the real answer (whichever reaches the pump
  * first claims the write).
  *
@@ -57,6 +58,9 @@ class AcpConfigChain(
         val value: String,
         val announce: Boolean,
         val flushAfter: Boolean = false,
+        /** A LAUNCH write whose refusal must fail the open instead of advancing the chain (dsh's model: running
+         *  on the agent's default would bill a provider the user did not pick). Ignored for a user switch. */
+        val required: Boolean = false,
     )
 
     /** The backend-specific half. Everything runs on the parse pump. */
@@ -172,6 +176,11 @@ class AcpConfigChain(
 
     private suspend fun failed(write: Write, why: String): List<AgentEvent> {
         log.warn("$tag set_config_option(${write.configId}=${write.value}) failed: $why")
+        if (write.required && !write.announce) {
+            pending.clear()
+            return client.failHostStartup(stageConfig, "${host.describe(write.configId)} was refused: $why") +
+                host.onChainSettled(timedOut = true)
+        }
         // Only a user-driven switch says so out loud (see [Write.announce]).
         if (write.announce) client.injectNotice("⚠️ could not switch ${host.describe(write.configId)}: $why")
         return continueChain(write)

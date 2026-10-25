@@ -1078,7 +1078,8 @@ class RequestRouter(
                     // answer without a session, so the picker gets real rows (and the agent-preset row)
                     // instead of the "not supported yet" placeholder. Failures still come back as an
                     // explicit ModelsList.error — never silence, which would hang the picker.
-                    AgentKind.DSH -> dshModels.fetch()
+                    // the picker's workdir picks the live session it describes; a manual refresh re-reads
+                    AgentKind.DSH -> dshModels.fetch(frame.workdir, frame.forceRefresh)
                 })
             }
 

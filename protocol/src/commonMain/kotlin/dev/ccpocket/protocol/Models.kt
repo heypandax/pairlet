@@ -115,9 +115,9 @@ fun isModelCompatibleWithAgent(agent: AgentKind, model: String?): Boolean {
         // ZCode's app-server takes a strict {providerId, modelId} reference. The daemon exposes that
         // as "provider/model", so a bare/stale id must fall back to ZCode's configured main model.
         AgentKind.ZCODE -> m.indexOf('/').let { it > 0 && it < m.lastIndex }
-        // DSH (issue #255): model SWITCHING is out of scope for v1 — dsh picks its own model from the
-        // user's environment and the daemon never passes one. Keep the same minimal blocklist as KIMI so a
-        // stale persisted Claude alias can never leak into a dsh open if a later version does send --model.
+        // DSH: the daemon advertises "provider/model" ids, but a bare name saved by an older app must still
+        // reach it — the daemon migrates it only when exactly one provider offers that name, and refuses to
+        // send otherwise. So only the Claude alias family is blocked here, like KIMI.
         AgentKind.DSH -> m.lowercase() !in CLAUDE_MODEL_ALIAS_IDS
         AgentKind.CLAUDE -> true // gateway users run arbitrary ids, slashed OpenRouter-style included
     }
