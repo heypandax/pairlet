@@ -88,7 +88,7 @@ class DshLaunchAnnounceTest {
         val events = opened + settled
         assertEquals(null, events.filterIsInstance<AgentEvent.SessionInit>().single().model, "nothing is known to run")
         val text = events.filterIsInstance<AgentEvent.AssistantText>().single().text
-        assertTrue("could not apply the chosen model settings" in text && "refused" in text, text)
+        assertTrue("could not apply the chosen model settings" in text && "not applied: unknown model option" in text, text)
         assertTrue(events.filterIsInstance<AgentEvent.TurnResult>().single().isError)
         b.sendPrompt("hello", emptyList())
         assertTrue(prompts().isEmpty(), "nothing may run on a model the user did not pick")

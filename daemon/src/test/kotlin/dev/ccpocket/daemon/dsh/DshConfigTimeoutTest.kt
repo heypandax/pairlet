@@ -19,8 +19,9 @@ import kotlin.test.assertTrue
  * and the gate opened only on the last write's answer. A write that never answered therefore held the
  * opening prompt forever — no error, no terminal state. The chain is now bounded like the handshake: a
  * launch-time write that times out fails the session open with a stage error (never "carry on on the default
- * model", which would let the user believe their pick took effect); a user-driven switch that times out is
- * reported and the session keeps working.
+ * model", which would let the user believe their pick took effect); a user-driven MODEL switch that times out
+ * leaves nothing running on the model being left — the prompts behind it are refused until the next pick, which
+ * relaunches.
  */
 class DshConfigTimeoutTest {
 
@@ -36,6 +37,10 @@ class DshConfigTimeoutTest {
          {"id":"reasoning_effort","name":"Reasoning effort","type":"select","currentValue":"high",
           "options":[{"value":"off","name":"Off"},{"value":"high","name":"High"},{"value":"max","name":"Max"}]}]
     """.trimIndent().replace("\n", "")
+
+    /** [configOptions] as dsh answers once it is on [model]: a write's read-back names what it set. */
+    private fun configOptionsOn(model: String) = configOptions
+        .replace(""""currentValue":"[\"deepseek-official\",\"deepseek-v4-flash\"]"""", """"currentValue":"[\"deepseek-official\",\"$model\"]"""")
 
     private val w = CopyOnWriteArrayList<String>()
     private val injected = CopyOnWriteArrayList<String>()
@@ -90,25 +95,36 @@ class DshConfigTimeoutTest {
     fun `answers in time keep the config watchdog quiet`() = runBlocking {
         val b = open(model = "deepseek-v4-pro")
         b.sendPrompt("hello", emptyList())
-        b.parse("""{"jsonrpc":"2.0","id":3,"result":{"configOptions":$configOptions}}""")
+        b.parse("""{"jsonrpc":"2.0","id":3,"result":{"configOptions":${configOptionsOn("deepseek-v4-pro")}}}""")
         assertTrue(prompts().any { "hello" in it }, "the gate opened on the answer")
         delay(TIMEOUT_MS * 4)
         assertTrue(injected.isEmpty(), "no timeout after an answered write: $injected")
         b.onProcessEnded(SESSION)
     }
 
+    /**
+     * Before: a user switch that never answered was reported and the session carried on — on the model being left,
+     * i.e. possibly another provider's account. Now the prompt sent right after the switch waits for its answer, is
+     * refused with the reason when none comes, and so is every later one until the next pick, which relaunches.
+     */
     @Test
-    fun `a user model switch that never answers is reported and the session keeps working`() = runBlocking {
+    fun `a user model switch that never answers refuses the prompts behind it instead of sending them on the old model`() = runBlocking {
         val b = open()
-        b.applySettings(mode = null, model = "deepseek-v4-pro", effort = null)
-        awaitInjected(1)
-        assertTrue(b.parse(injected[0]).none { it is AgentEvent.TurnResult }, "a switch timeout ends no turn")
-        awaitInjected(2)
-        val notice = assertIs<AgentEvent.AssistantText>(b.parse(injected[1]).single()).text
-        assertTrue("could not switch the model" in notice && "did not answer" in notice, notice)
-
+        assertEquals(false, b.applySettings(mode = null, model = "deepseek-official/deepseek-v4-pro", effort = null))
         b.sendPrompt("still here?", emptyList())
-        assertTrue(prompts().any { "still here?" in it }, "the session is not failed by a user switch")
+        awaitInjected(1) // the timeout verdict, through the pump
+        val events = b.parse(injected[0])
+        assertEquals("still here?", assertIs<AgentEvent.UserReplay>(events[0]).text, "the held prompt settles")
+        val text = assertIs<AgentEvent.AssistantText>(events[1]).text
+        assertTrue("did not switch the DeepSeek Harness session to the chosen model" in text && "did not answer" in text, text)
+        assertTrue(assertIs<AgentEvent.TurnResult>(events[2]).isError)
+        assertTrue(prompts().isEmpty(), "nothing ran on the model being left")
+
+        b.sendPrompt("and now?", emptyList())
+        awaitInjected(2)
+        assertEquals("and now?", assertIs<AgentEvent.UserReplay>(b.parse(injected[1])[0]).text, "later prompts are refused too")
+        assertTrue(prompts().isEmpty())
+        assertTrue(b.applySettings(mode = null, model = "deepseek-official/deepseek-v4-flash", effort = null), "the next pick relaunches")
         b.onProcessEnded(SESSION)
     }
 

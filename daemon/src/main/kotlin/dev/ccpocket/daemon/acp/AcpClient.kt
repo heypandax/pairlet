@@ -100,6 +100,13 @@ class AcpClient(
 
         /** A synthetic frame of the host's own (one it injected); null when [type] is not the host's. */
         suspend fun onSyntheticFrame(type: String?, root: JsonObject): List<AgentEvent>? = null
+
+        /**
+         * True while the host's own pending work must keep the prompt gate shut (dsh: a model switch that has not
+         * been answered yet). Asked under the FIFO's lock every time the gate is about to open, from any thread,
+         * so it must be cheap and must not block.
+         */
+        fun holdsPromptGate(): Boolean = false
     }
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -125,13 +132,14 @@ class AcpClient(
         private set
 
     /**
-     * Why this session will never open, once a startup stage failed (issue #388; audit 2026-10-04 H1).
+     * Why this process refuses every prompt: a startup stage failed (issue #388; audit 2026-10-04 H1), or the
+     * settings a user switched to could not be applied to the running session ([failSettings], [refuseFromNow]).
      *
-     * Set by [failStartup], cleared by [attach]. It stops the watchdog from volunteering a second, WRONG
-     * diagnosis over a stage that already reported a real one; it settles prompts that arrive AFTER the
-     * failure, which would otherwise queue behind a gate that can never open; and it records that this
-     * process is done trying — nothing here retries a stage or opens a replacement session, because a resume
-     * that failed must stay the session the user asked for.
+     * Set by [failStartup] and those two, cleared by [attach]. It stops the watchdog from volunteering a second,
+     * WRONG diagnosis over a stage that already reported a real one; it settles prompts that arrive AFTER the
+     * failure — in turn order, never while another prompt is in flight — which would otherwise queue behind a gate
+     * that can never open; and it records that this process is done trying — nothing here retries a stage or opens
+     * a replacement session, because a resume that failed must stay the session the user asked for.
      */
     @Volatile private var openFailure: String? = null
 
@@ -386,6 +394,44 @@ class AcpClient(
      */
     suspend fun failHostStartup(stage: String, why: String): List<AgentEvent> = failStartup(stage, why)
 
+    /**
+     * A settings change the user made could not be applied to the RUNNING session (dsh: a model switch was refused,
+     * never answered, or the agent still reports the old model). From here every prompt is refused with the reason
+     * until a relaunch: the next one would otherwise run on settings the user just left. Unlike [failHostStartup],
+     * a turn already in flight is left alone — it was sent before the switch — and the prompts queued behind it are
+     * refused only once it settles, so no error result lands in the middle of another turn. On the pump.
+     */
+    suspend fun failSettings(stage: String, why: String): List<AgentEvent> {
+        val message = "$stage: $why"
+        openFailure = message
+        prompts.shut()
+        log.warn("${config.tag} settings not applied — $message")
+        if (prompts.busy()) return listOf(AgentEvent.AssistantText("⚠️ $message"))
+        val stranded = prompts.drain()
+        return if (stranded.isEmpty()) {
+            listOf(AgentEvent.AssistantText("⚠️ $message"))
+        } else {
+            stranded.flatMap { acpErrorTurn(it.text, message) }
+        }
+    }
+
+    /**
+     * [failSettings] decided off the pump, synchronously (dsh: a switch to a model the session does not offer, on
+     * Conversation's command path): from now on every prompt is refused with [message] until a relaunch. Nothing is
+     * settled here — a prompt that arrives settles through [sendPrompt], one already queued when the turn ahead of
+     * it settles or the gate next opens.
+     */
+    fun refuseFromNow(message: String) {
+        openFailure = message
+        prompts.shut()
+        log.warn("${config.tag} refusing prompts — $message")
+    }
+
+    /** Close the prompt gate again, synchronously, until the next [openPromptGate] — see [AcpPromptFifo.shut]. */
+    fun shutPromptGate() {
+        prompts.shut()
+    }
+
     /** [failStartup] for the watchdog, which is not on the parse pump: the same settlement, delivered through
      *  [AgentIo.inject] (only the pump may return events). */
     private suspend fun injectStartupFailure(stage: String, why: String) {
@@ -409,10 +455,12 @@ class AcpClient(
 
     suspend fun sendPrompt(text: String, images: List<ImageData>) {
         val prompt = AcpPrompt(text, images)
-        // The session already failed to open: queueing would park this behind a gate that can never open — no
-        // terminal state, and a re-run on the next relaunch. Settle it with the stage error, like a refusal.
+        // This process refuses prompts (a failed open, or settings it could not apply): queueing would park this
+        // behind a gate that may never open — no terminal state, and a re-run on the next relaunch. Settle it with
+        // the reason, like a refusal — in turn order: behind a prompt still in flight it waits, and settles when
+        // that one has ([flushQueuedPrompt]).
         openFailure?.let { why ->
-            val id = prompts.reserve(text)
+            val id = prompts.reserveIfIdle(prompt) ?: return
             io?.inject?.invoke(synthetic.refusal(id, why))
             return
         }
@@ -442,11 +490,14 @@ class AcpClient(
      * turns of the prompts refused on the way.
      */
     suspend fun openPromptGate(bind: String? = null): List<AgentEvent> {
+        // Nothing may go out of a process that refuses prompts; what waited settles now, unless a turn still runs.
+        openFailure?.let { why -> return refuseQueued(why) }
         val refused = ArrayList<AcpPrompt>()
         val first = prompts.open(
             prepare = {
                 if (bind != null) sessionId = bind
-                sessionId != null
+                // the host's own pending work (a dsh model switch awaiting its answer) keeps the gate shut
+                sessionId != null && !host.holdsPromptGate()
             },
             ::acceptable,
             refused,
@@ -459,10 +510,17 @@ class AcpClient(
      *  error turns of the prompts refused on the way: this runs on the pump, so injecting them would wait for
      *  room on the very channel the pump drains. */
     private suspend fun flushQueuedPrompt(): List<AgentEvent> {
+        // The prompt that held the queue settled; in a process that refuses prompts the rest settle now, in order.
+        openFailure?.let { why -> return refuseQueued(why) }
         val refused = ArrayList<AcpPrompt>()
         prompts.next(::acceptable, refused)?.let { (id, prompt) -> writePrompt(id, prompt) }
         return refusals(refused)
     }
+
+    /** Everything queued, refused with [why] — only once nothing is in flight: an error result in the middle of
+     *  another turn (or ahead of a refusal still settling) would end it early, or settle out of order. */
+    private suspend fun refuseQueued(why: String): List<AgentEvent> =
+        if (prompts.busy()) emptyList() else prompts.drain().flatMap { acpErrorTurn(it.text, why) }
 
     /** A failed prompt was still CONSUMED — its failure surfaces right here as an error turn. Left unsettled,
      *  Conversation would re-inject it on every relaunch and loop the failure (#122); and it must not stall the

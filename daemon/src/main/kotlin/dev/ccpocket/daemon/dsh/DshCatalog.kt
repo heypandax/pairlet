@@ -14,11 +14,13 @@ import java.util.concurrent.ConcurrentHashMap
  * told anything, and every created session is a row in dsh's own store.
  *
  * Entries are keyed by the owning backend and dropped when its process ends — a stale catalogue would
- * offer models against a session that no longer exists. [current] answers for the picker's WORKDIR first (the
- * session the user is most likely looking at), then for any live session, and in both cases takes the one that
- * reported MOST RECENTLY: every `session/new`, `session/resume` and config read-back re-publishes, so the newest
- * entry is the latest word on the user's dsh install — a plugin installed an hour ago is visible in a session
- * opened since, not in the oldest one still running.
+ * offer models against a session that no longer exists. [current] is an APPROXIMATION of "the session the picker
+ * belongs to", because the picker's request names a workdir, not a session: the picker's WORKDIR first, then any
+ * live session, and in both cases the one that reported MOST RECENTLY — every `session/new`, `session/resume` and
+ * config read-back re-publishes, so the newest entry is the latest word on the user's dsh install (a plugin
+ * installed an hour ago is visible in a session opened since, not in the oldest one still running). Two sessions
+ * in one workdir can still show each other's list; no session RUNS on this list — each resolves against its own
+ * catalogue ([DshBackend]).
  */
 object DshCatalog {
     private data class Entry(val workdir: String?, val options: DshConfigOptions, val stamp: Long)

@@ -18,11 +18,16 @@ import kotlinx.coroutines.withContext
  * "what do you have" method to ask instead (the `llm.models` RPC this class used to call lived on the web
  * profile's local API, which dsh 0.1.2-rc.1 removed — see [DshBackend]). So:
  *
- *  1. **A live session's read-back.** If the daemon is already driving a dsh conversation, its own
- *     `configOptions` are free, current, and describe the very session the user is about to change
- *     ([DshCatalog], preferring the picker's workdir and the most recent report). It is read on EVERY fetch
- *     and never cached: a cached copy of session A's answer is exactly how a picker ends up describing a
- *     session that is not the one in front of the user.
+ *  1. **A live session's read-back.** If the daemon is already driving a dsh conversation, its
+ *     `configOptions` are free and current. Which session the picker belongs to is NOT on the wire —
+ *     [dev.ccpocket.protocol.FetchModels] carries a workdir, not a session — so the pick is an APPROXIMATION
+ *     ([DshCatalog.current]): the live session in the picker's workdir that reported most recently, else the most
+ *     recent one anywhere. Two sessions in one workdir can therefore show each other's list. It is read on every
+ *     fetch, never cached, so it is at least the latest word of a session that is still open.
+ *
+ *     That is a DISPLAY approximation only. What a session runs is never decided by this list: every launch and
+ *     every switch resolves the requested id against that session's OWN catalogue, and an id it cannot name is
+ *     refused rather than sent on another model ([DshBackend.applySettings]).
  *  2. **A throwaway ACP client.** Otherwise boot `dsh --profile acp`, handshake, open ONE session in a
  *     scratch directory, read its options and kill the process. This costs a Node start-up, which is why
  *     THIS answer is cached for [CACHE_TTL_MS] — and why a manual refresh bypasses that cache.
@@ -85,8 +90,9 @@ class DshModelService(
     private val gate = Mutex()
 
     /**
-     * The catalogue for a picker opened on [workdir]. [forceRefresh] (the user pressed refresh) skips the cached
-     * throwaway read; a live session's answer is current by construction and is never served from cache.
+     * The catalogue for a picker opened on [workdir] — see the class comment for how a live session is chosen.
+     * [forceRefresh] (the user pressed refresh) skips the cached throwaway read; a live session's answer is never
+     * served from cache.
      */
     suspend fun fetch(workdir: String? = null, forceRefresh: Boolean = false): ModelsList {
         // A live session's own answer wins: it is the user's real dsh, and booting a second one to

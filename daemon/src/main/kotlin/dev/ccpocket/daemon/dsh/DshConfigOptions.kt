@@ -39,7 +39,8 @@ import kotlinx.serialization.json.contentOrNull
  * back into its halves (a model name may itself contain `/`); it is only ever looked up in [models].
  *
  * A pre-provider id (a bare `deepseek-v4-pro` a phone saved before this change) is accepted by [resolve]
- * only when exactly ONE advertised model carries that name — see [Resolution].
+ * only when exactly ONE advertised model carries that name, and only when it cannot be a provider-qualified id
+ * itself (it contains no `/`) — see [resolve].
  */
 data class DshConfigOptions(
     /** The selected model's id, e.g. `deepseek-official/deepseek-v4-pro`. Null when dsh advertised none. */
@@ -77,9 +78,16 @@ data class DshConfigOptions(
     /**
      * Look [requested] up: an exact id first, then — for an id saved before ids named their provider — the
      * bare model name, accepted only when it is unique. Never falls back to anything else.
+     *
+     * ONLY A SLASH-FREE REQUEST IS READ AS A PRE-PROVIDER NAME. Every id this catalogue hands out for a provider
+     * contains `/`, so a `<provider>/<model>` that is no longer offered must resolve [Resolution.Missing] — never be
+     * re-matched by NAME: a provider whose model is literally named `a/model` (OpenRouter-style names are common)
+     * would otherwise inherit a request for provider `a`, and bill its own account. The cost is a bare name that
+     * itself contains `/`, saved by an older app: it is not migrated, and the user picks again.
      */
     fun resolve(requested: String): Resolution {
         models.firstOrNull { it.id == requested }?.let { return Resolution.Found(it) }
+        if ('/' in requested) return Resolution.Missing
         val byName = models.filter { it.name == requested }
         return when (byName.size) {
             0 -> Resolution.Missing

@@ -130,6 +130,23 @@ class DshConfigOptionsTest {
         assertEquals(DshConfigOptions.Resolution.Missing, options.resolve("workbuddy/deepseek-v4-pro"))
     }
 
+    /**
+     * Only a slash-free request is read as a pre-provider name. A `<provider>/<model>` that is gone resolves Missing —
+     * here provider `a` is gone and provider `b` happens to offer a model literally named `a/model` (OpenRouter-style
+     * names are common): matching it by NAME would move the request to another provider's account.
+     */
+    @Test
+    fun `a missing provider id is never re-matched by name`() {
+        val options = parse(
+            """[{"id":"model","currentValue":"[\"b\",\"x\"]","options":[{"group":"b","options":[
+                 {"value":"[\"b\",\"x\"]","name":"X"},{"value":"[\"b\",\"a/model\"]","name":"A Model"}]}]}]""",
+        )
+        assertEquals(listOf("b/x", "b/a/model"), options.models.map { it.id })
+        assertEquals(DshConfigOptions.Resolution.Missing, options.resolve("a/model"))
+        assertIs<DshConfigOptions.Resolution.Found>(options.resolve("b/a/model"), "the exact id still resolves")
+        assertIs<DshConfigOptions.Resolution.Found>(options.resolve("x"), "a slash-free legacy name still migrates")
+    }
+
     /** A provider named only by its group (a flat value) is still joined into the id, on both sides. */
     @Test
     fun `a group-only provider names the current selection the same way as the catalogue`() {
