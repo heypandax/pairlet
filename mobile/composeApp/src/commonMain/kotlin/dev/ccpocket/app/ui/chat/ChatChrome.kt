@@ -455,6 +455,7 @@ fun UserTurnContainer(
 /** Test handles for the Chat Rhythm v1 source row and its whole-turn copy target. */
 const val TURN_SOURCE_ROW_TAG = "turn-source-row"
 const val TURN_COPY_TAG = "turn-copy"
+const val TURN_COPY_FOOTER_TAG = "turn-copy-footer"
 
 /** The source row's visual height (Chat Rhythm v1). The body starts [TURN_SOURCE_BODY_GAP] below it. */
 val TURN_SOURCE_ROW_HEIGHT = 28.dp
@@ -465,8 +466,9 @@ private val TurnCopySlot = 28.dp
 private val TurnCopyTarget = 44.dp
 
 /**
- * Chat Rhythm v1 source row: the turn's source label and — at its trailing end — the one-tap copy of the WHOLE
- * turn. It replaces the old 复制 line under the body, which cost every message a row of its own.
+ * Chat Rhythm v1 source row: the turn's source label and — at its trailing end, for a USER turn — the one-tap copy
+ * of the whole turn. An agent turn passes no [copyText]: its copy sits at the END of the reply ([TurnCopyFooter]),
+ * where a reader who has just finished it decides what to do next.
  *
  * [copyText] is the turn's raw text (Markdown included) exactly as received so far; null when there is nothing to
  * copy. [user] switches to the user-turn grammar (mono, trailing-aligned label on the neutral container). Both
@@ -504,20 +506,42 @@ fun TurnSourceRow(
 }
 
 /**
+ * The agent reply's whole-turn copy, at the END of the reply: a 28dp row under the body whose trailing end holds
+ * [TurnCopyButton]. Its 44dp square grows DOWN from the row's top edge — never up — so it stays [TURN_SOURCE_BODY_GAP]
+ * clear of the reply's last line, where a long press has to start a text selection; the list leaves at least 16dp
+ * under an agent reply for the part that reaches past the row (see the phone list's spacing and its bottom padding).
+ *
+ * Shown while the reply streams too: a tap copies everything received so far, so a step the agent took mid-turn
+ * can be copied the moment it is on screen (the button reads [text] at tap time).
+ */
+@Composable
+fun TurnCopyFooter(text: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier.fillMaxWidth().padding(top = TURN_SOURCE_BODY_GAP).heightIn(min = TURN_SOURCE_ROW_HEIGHT)
+            .testTag(TURN_COPY_FOOTER_TAG),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.Top,
+    ) {
+        TurnCopyButton(text, growDown = true)
+    }
+}
+
+/**
  * The whole-turn copy: a 16dp glyph on a 28dp disc (shown only while pressed/hovered), resting in tx2.
  *
- * The TOUCH square is 44 × 44 but the row only budgets the 28dp disc: the square shares the disc's bottom-trailing
- * corner and grows UP and toward the label, never down or outward — so it ends on the source row's bottom edge and
- * cannot reach the body's first line 2dp below, where a long press has to start a text selection, and it never leaves
- * the text column (the list clips at its sides). Toward the label it only covers the label's inert tail. The rows
- * above a source row leave at least 16dp of gap for the part that rises out of it (see the phone list's spacing and
- * its top content padding), so it covers no other control either.
+ * The TOUCH square is 44 × 44 but the row only budgets the 28dp disc. In a user turn's source row the square shares
+ * the disc's bottom-trailing corner and grows UP and toward the label, never down or outward — so it ends on the
+ * source row's bottom edge and cannot reach the body's first line 2dp below, where a long press has to start a text
+ * selection, and it never leaves the text column (the list clips at its sides). Toward the label it only covers the
+ * label's inert tail. The rows above a source row leave at least 16dp of gap for the part that rises out of it (see
+ * the phone list's spacing and its top content padding), so it covers no other control either. Under an agent reply
+ * ([growDown], [TurnCopyFooter]) the same square mirrors: top-trailing corner, growing DOWN, away from the reply.
  *
  * Feedback swaps the glyph in place (✓ in ok / ✕ in danger) — nothing appears beside it, so nothing moves. The ✓
  * is shown only when the clipboard write returned; a write that throws says it failed instead.
  */
 @Composable
-fun TurnCopyButton(text: String, modifier: Modifier = Modifier) {
+fun TurnCopyButton(text: String, modifier: Modifier = Modifier, growDown: Boolean = false) {
     // the click reads the text at TAP time: a streaming turn copies everything received so far
     val latest by rememberUpdatedState(text)
     val (outcome, copy) = rememberCopyOutcome()
@@ -532,14 +556,14 @@ fun TurnCopyButton(text: String, modifier: Modifier = Modifier) {
         },
     )
     Box(
-        modifier.turnCopyTarget()
+        modifier.turnCopyTarget(growDown)
             .testTag(TURN_COPY_TAG)
             .clickable(interactionSource = interaction, indication = null, role = Role.Button) { copy(latest) }
             .semantics {
                 contentDescription = description
                 if (outcome != CopyOutcome.IDLE) liveRegion = LiveRegionMode.Polite
             },
-        contentAlignment = Alignment.BottomEnd,
+        contentAlignment = if (growDown) Alignment.TopEnd else Alignment.BottomEnd,
     ) {
         Box(
             Modifier.size(TurnCopySlot).clip(CircleShape).background(if (pressed || hovered) Tok.raised else Color.Transparent),
@@ -563,12 +587,13 @@ fun TurnCopyButton(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Reports the 28dp slot to the row but lays out (and hit-tests) a 44dp square sharing the slot's bottom-end corner. */
-private fun Modifier.turnCopyTarget() = layout { measurable, _ ->
+/** Reports the 28dp slot to the row but lays out (and hit-tests) a 44dp square sharing the slot's bottom-end corner
+ *  — or, [growDown], its top-end corner. */
+private fun Modifier.turnCopyTarget(growDown: Boolean) = layout { measurable, _ ->
     val slot = TurnCopySlot.roundToPx()
     val hit = TurnCopyTarget.roundToPx()
     val placeable = measurable.measure(Constraints.fixed(hit, hit))
-    layout(slot, slot) { placeable.placeRelative(slot - hit, slot - hit) }
+    layout(slot, slot) { placeable.placeRelative(slot - hit, if (growDown) 0 else slot - hit) }
 }
 
 /**

@@ -85,11 +85,12 @@ class HistoryAutoPageTest {
                     onSendForTest = { f -> if (f is FetchHistoryPage) pageRequests.add(f) }
                     receiveForTest(dev.ccpocket.protocol.DaemonInfo(supportsLeanHistory = true))
                     receiveForTest(live("c1"))
-                    // the lean first window: two short rows, far less than the chat area of a 600 dp screen, with history above
+                    // the lean first window: two short rows, far less than the chat area of an 800 dp screen, with history
+                    // above (tall enough that three one-line rows — an agent reply carries its copy row under it — stay short)
                     receiveForTest(ConvoHistory("c1", rows(last = 100, n = 2), lastSeq = 100, firstSeq = 99, hasMore = true))
                 }
             }
-            PocketTheme { Box(Modifier.requiredSize(390.dp, 600.dp)) { ChatScreen(repo, listStateForTest = listState) } }
+            PocketTheme { Box(Modifier.requiredSize(390.dp, 800.dp)) { ChatScreen(repo, listStateForTest = listState) } }
         }
         waitForIdle()
         assertEquals(listOf(99L), pageRequests.map { it.beforeSeq }, "a window that cannot scroll asks for the page above it")
