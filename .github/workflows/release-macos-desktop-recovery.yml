@@ -1,0 +1,168 @@
+name: release-macos-desktop-recovery
+
+# Recover one missing desktop image when a hosted runner could not start.
+# Product source stays pinned to the existing release tag AND its expected commit.
+# Never replaces an existing asset; final SHA256SUMS/channel synchronization follows separately.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing release version without v"
+        required: true
+        type: string
+      expected_commit:
+        description: "Exact 40-character commit of the immutable release tag"
+        required: true
+        type: string
+      arch:
+        description: "Missing package architecture"
+        type: choice
+        options: [arm64, x86_64]
+        default: arm64
+      variant:
+        description: "Missing package name"
+        type: choice
+        options: [pairlet, legacy]
+        default: pairlet
+permissions:
+  contents: write
+concurrency:
+  group: desktop-recovery-${{ inputs.version }}-${{ inputs.arch }}-${{ inputs.variant }}
+  cancel-in-progress: false
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    strategy:
+      matrix:
+        include:
+          - arch: ${{ inputs.arch }}
+            jdk_arch: ${{ inputs.arch == 'arm64' && 'aarch64' || 'x64' }}
+            variant: ${{ inputs.variant }}
+            asset_prefix: ${{ inputs.variant == 'pairlet' && 'pairlet-desktop' || 'cc-pocket-desktop' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ inputs.version }}
+          persist-credentials: false
+
+      - name: Verify immutable source and missing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [ "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT" ]
+          bash scripts/check-release-version.sh "$RELEASE_VERSION"
+          gh release view "v$RELEASE_VERSION" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/existing-assets"
+          PREFIX="${{ matrix.asset_prefix }}"
+          ARCH="${{ matrix.arch }}"
+          for NAME in "$PREFIX-$RELEASE_VERSION-macos-$ARCH.dmg" "$PREFIX-macos-$ARCH.dmg"; do
+            if grep -Fxq "$NAME" "$RUNNER_TEMP/existing-assets"; then
+              echo "::error::Asset already exists: $NAME; refusing to replace a released package"
+              exit 1
+            fi
+          done
+
+      - name: Stage production Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: desktop
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
+
+      - name: Install Rosetta (for the x86_64 JDK)
+        if: matrix.arch == 'x86_64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          architecture: ${{ matrix.jdk_arch }}
+
+      - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
+        uses: android-actions/setup-android@v4
+        with:
+          # the SDK repository no longer serves the legacy `tools` package (setup-android default) — 2026-09 CI break
+          packages: platform-tools
+
+      - name: Use placeholder google-services.json (gitignored; desktop target never uses Firebase)
+        run: cp mobile/androidApp/google-services.json.template mobile/androidApp/google-services.json
+
+      - name: Import Developer ID signing certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/ccp-signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build + sign + notarize the DMG
+        env:
+          CCP_ARCH: ${{ matrix.arch }}   # names the dmg for the JDK's arch (uname -m still says arm64 under Rosetta)
+          DESKTOP_VARIANT: ${{ matrix.variant }}
+          DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          chmod +x scripts/release-desktop-macos.sh gradlew
+          scripts/release-desktop-macos.sh "$RELEASE_VERSION"
+
+      - name: Verify packaged Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: desktop
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DESKTOP }}
+          analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
+          artifact: mobile/composeApp/build/compose/binaries/main/app
+
+      - name: Upload DMG to release v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_COMMIT=$(gh api "repos/$GITHUB_REPOSITORY/commits/v$RELEASE_VERSION" --jq .sha)
+          [ "$TAG_COMMIT" = "$(git rev-parse HEAD)" ] || {
+            echo "::error::Release tag moved; refusing to upload"
+            exit 1
+          }
+          VER="$RELEASE_VERSION"
+          ARCH="${{ matrix.arch }}"
+          PREFIX="${{ matrix.asset_prefix }}"
+          VERSIONED="${PREFIX}-${VER}-macos-${ARCH}.dmg"
+          # per-arch version-less permalink: releases/latest/download/<prefix>-macos-{arm64,x86_64}.dmg
+          cp "$VERSIONED" "${PREFIX}-macos-${ARCH}.dmg"
+          gh release upload "v${VER}" "$VERSIONED" "${PREFIX}-macos-${ARCH}.dmg"
+
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        env:
+          VER: ${{ inputs.version }}
+          ARCH: ${{ matrix.arch }}
+          PREFIX: ${{ matrix.asset_prefix }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          mkdir -p release-hashes
+          shasum -a 256 "${PREFIX}-${VER}-macos-${ARCH}.dmg" "${PREFIX}-macos-${ARCH}.dmg" \
+            > "release-hashes/macos-desktop-${VARIANT}-${ARCH}.sha256"
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hashes-macos-desktop-${{ matrix.variant }}-${{ matrix.arch }}
+          path: release-hashes/
+          retention-days: 7
