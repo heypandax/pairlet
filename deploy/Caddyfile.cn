@@ -5,14 +5,13 @@
     }
 }
 
-# Activate only after ICP approval, DNS and public HTTPS verification.
-# Keep the old HK entry points and the single existing relay process/database.
+# Mainland primary since 2026-10-27; HK legacy entries tunnel to this same relay.
 relay.pairlet.cn {
     @analytics path /v1/analytics/*
     request_body @analytics {
         max_size 8KB
     }
-    reverse_proxy 127.0.0.1:19000 {
+    reverse_proxy 127.0.0.1:9000 {
         header_up X-Forwarded-For {remote_host}
         header_up X-Real-IP {remote_host}
     }

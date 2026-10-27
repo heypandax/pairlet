@@ -1,37 +1,44 @@
 #!/usr/bin/env bash
-# Redeploy the cc-pocket relay (Kotlin dist + Caddyfile) to the production origin.
-# Backward-compatible change set: adds the Ping/Pong heartbeat echo (additive) and disables
-# HTTP/3 in Caddy (forces TCP h1/h2). Old daemons/devices keep working.
-#
-# Secrets are read from the environment (never committed):
-#   RELAY_HOST_HK=<origin IP>  SSHPASS_HK='<root password>'  bash scripts/redeploy-relay.sh
-#
-# Prereqs: `sshpass` installed; relay dist built (./gradlew :relay:installDist).
+# Redeploy the relay to the mainland primary. HK remains a legacy ingress only.
+# Set RELAY_HOST_CN; key authentication is default. Optional: RELAY_SSH_JUMP.
+# Password fallback explicitly requires RELAY_SSH_KEY=0 and SSHPASS_CN.
+# Prerequisite: an intentionally built relay dist; this script does not build it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Stop before uploading or stopping services if a stale branch would remove website hosts.
+# Check both the retained HK hosts and the mainland config actually uploaded below.
 python3 scripts/check-production-caddy.py
+python3 - <<'PY'
+from pathlib import Path
+import re
+config = Path('deploy/Caddyfile.cn').read_text()
+hosts = set(re.findall(r'(?m)^([a-z0-9.-]+\.[a-z0-9.-]+)\s*\{\s*$', config))
+upstreams = re.findall(r'(?m)^\s*reverse_proxy\s+(\S+)', config)
+if hosts != {'relay.pairlet.cn'} or upstreams != ['127.0.0.1:9000']:
+    raise SystemExit('Refusing mainland config: expected relay.pairlet.cn -> 127.0.0.1:9000')
+print('Mainland Caddy topology OK')
+PY
 
-# auto-load secrets from .env if present (RELAY_HOST_HK / SSHPASS_HK). .env is gitignored.
-# Production relay moved to the HK box on 07-08 — the legacy RELAY_HOST/SSHPASS pair points at
-# the decommissioned US-East machine, so this script deliberately reads only the *_HK variables.
+# Load the explicit mainland target; never fall back to historical HK/US variables.
 [ -f .env ] && { set -a; . ./.env; set +a; }
 
-: "${RELAY_HOST_HK:?set RELAY_HOST_HK in .env (HK origin IP)}"
-# RELAY_SSH_KEY=1：服务器只接受密钥登录时（密码登录被拒）改用本机已登记的 SSH key，不读 SSHPASS_HK。
-if [ "${RELAY_SSH_KEY:-0}" != "1" ]; then
-  : "${SSHPASS_HK:?set SSHPASS_HK in .env (HK server root password), or run with RELAY_SSH_KEY=1}"
-  export SSHPASS="$SSHPASS_HK"   # sshpass -e reads SSHPASS
+: "${RELAY_HOST_CN:?set RELAY_HOST_CN to the mainland primary; HK is legacy ingress only since 2026-10-27}"
+# 默认使用已有 SSH 密钥。
+RELAY_SSH_KEY="${RELAY_SSH_KEY:-1}"
+case "$RELAY_SSH_KEY" in
+  0|1) ;;
+  *) echo 'RELAY_SSH_KEY must be 0 or 1' >&2; exit 1 ;;
+esac
+if [ "$RELAY_SSH_KEY" != "1" ]; then
+  : "${SSHPASS_CN:?set SSHPASS_CN, or use the default key authentication}"
+  export SSHPASS="$SSHPASS_CN"
 fi
-RELAY_HOST="$RELAY_HOST_HK"
+RELAY_HOST="$RELAY_HOST_CN"
 DIST=relay/build/install/cc-pocket-relay
 [ -d "$DIST/lib" ] || { echo "build first: JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :relay:installDist"; exit 1; }
 
-# HK box runs SSH anti-bruteforce: an offered-then-rejected pubkey counts as a failed auth and,
-# after a couple in quick succession, locks out even the correct password for ~30s. Force
-# password-only auth so the multi-step deploy (ssh + scp × several) never trips it.
-# RELAY_SSH_JUMP（可选，.env）：ProxyJump 跳板（如 ark-114）。本机 IP 被防暴破封禁时换源 IP 用。
+# Password fallback uses password-only auth; normal deployments use the registered SSH key.
+# RELAY_SSH_JUMP（可选，.env）：使用已配置并验证过的 SSH 跳板。
 # Bash 3.2 treats expanding an empty array under `set -u` as an unset-variable error. Build the
 # command arrays incrementally so a missing optional jump host remains valid on the macOS shell.
 SSH=(sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new)
@@ -46,6 +53,9 @@ if [ -n "${RELAY_SSH_JUMP:-}" ]; then
 fi
 SSH+=("root@$RELAY_HOST")
 
+# Reject a stale/misconfigured target before uploading or starting another writer.
+"${SSH[@]}" 'test ! -e /etc/cc-pocket-relay/retired-primary && systemctl is-active --quiet cc-pocket-relay'
+
 # Keep upload/validation before stop. The swap + health + rollback live in ONE server-owned job:
 # a dropped SSH connection must never strand a stopped relay (observability A deployment incident).
 LOCAL_STAGE=$(mktemp -d /tmp/relay-deploy.XXXXXX)
@@ -54,7 +64,8 @@ REMOTE_STAGE="/tmp/cc-pocket-relay-deploy-$DEPLOY_ID"
 UNIT="cc-pocket-relay-deploy-$DEPLOY_ID"
 trap 'rm -rf "$LOCAL_STAGE"' EXIT
 cp -R "$DIST/bin" "$DIST/lib" "$LOCAL_STAGE/"
-cp deploy/Caddyfile scripts/relay-apply.sh "$LOCAL_STAGE/"
+cp deploy/Caddyfile.cn "$LOCAL_STAGE/Caddyfile"
+cp scripts/relay-apply.sh "$LOCAL_STAGE/"
 python3 - "$LOCAL_STAGE" <<'PY'
 from pathlib import Path
 import hashlib, sys
@@ -79,5 +90,5 @@ fi
 echo "── 3/4 service identity and health ──"
 "${SSH[@]}" "test \"\$(cat '$REMOTE_STAGE/result')\" = ok; systemctl show cc-pocket-relay --property=MainPID --property=ActiveState --property=ActiveEnterTimestamp; curl -fsS --max-time 10 http://127.0.0.1:9000/healthz"
 echo "── 4/4 public health ──"
-curl -fsS --max-time 15 https://pocket.ark-nexus.cc/healthz && echo " public OK"
+curl -fsS --max-time 15 https://relay.pairlet.cn/healthz && echo " public OK"
 echo "✅ relay redeploy done"

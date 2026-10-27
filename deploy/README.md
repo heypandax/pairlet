@@ -1,3 +1,5 @@
+> 2026-10-27 拓扑已变更：relay 核心在国内 ECS，使用 `RELAY_HOST_CN` 与 `deploy/Caddyfile.cn`；香港仅保留旧域入口、官网和出站代理。下文旧的香港核心部署步骤仅作历史参考，当前运维以 [国内迁移记录](../docs/PAIRLET-CN-INGRESS.md) 为准。禁止恢复香港旧数据库并独立启动第二个核心。
+
 # cc-pocket relay — deploy runbook
 
 Infra deployment for the **cc-pocket relay** (Kotlin/JVM Ktor app). The relay forwards an
