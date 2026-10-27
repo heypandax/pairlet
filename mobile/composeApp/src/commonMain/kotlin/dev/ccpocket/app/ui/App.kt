@@ -4049,11 +4049,12 @@ private fun MessageItem(
             }
         }
         // the agent flows in the base surface: no container at all, so long prose reads as prose
-        // Chat Rhythm v1: the source row carries the one-tap copy of the whole turn — the raw text as received so
-        // far, Markdown included (a quote's own glyph copies plain text, a code block's its code). The body follows
-        // 2dp under it, 14/22 with a 10dp paragraph step.
+        // Chat Rhythm v1: the source row names the agent; the body follows 2dp under it, 14/22 with a 10dp paragraph
+        // step. The one-tap copy of the whole reply — the raw text as received so far, Markdown included (a quote's
+        // own glyph copies plain text, a code block's its code) — sits at the reply's END, where reading it ends and
+        // the next step is decided. Every reply segment has its own, so a step between tool calls copies alone.
         is ChatItem.Assistant -> Column {
-            TurnSourceRow(agentName(agent ?: AgentKind.CLAUDE), copyText = m.text.takeIf { it.isNotBlank() })
+            TurnSourceRow(agentName(agent ?: AgentKind.CLAUDE), copyText = null)
             Spacer(Modifier.height(TURN_SOURCE_BODY_GAP))
             val scale = LocalFontScale.current
             CompositionLocalProvider(
@@ -4062,6 +4063,7 @@ private fun MessageItem(
             ) {
                 SelectionContainer { MarkdownText(m.text, Tok.tx) } // drag-select any span to copy
             }
+            if (m.text.isNotBlank()) dev.ccpocket.app.ui.chat.TurnCopyFooter(m.text)
         }
         is ChatItem.Thinking -> ThinkingRow(m)
         // a Workflow tool call with a bound run renders the orchestration card (issue #106);
@@ -4136,8 +4138,10 @@ private fun MessageItem(
 /**
  * Chat Rhythm v1 list rhythm: the space display row [ri] adds above itself, on top of the list's 12dp in-turn step.
  * Where the speaker changes (user ↔ agent side) it makes 24dp. Above a turn with a source row it makes at least
- * 16dp: that row's copy target is a 44dp square rising 16dp out of the 28dp row (TurnCopyButton), and the gap is
- * what keeps it off the row above — the one deliberate step past the 12dp in-turn spec.
+ * 16dp: a user turn's copy target is a 44dp square rising 16dp out of the 28dp row (TurnCopyButton), and the gap is
+ * what keeps it off the row above — the one deliberate step past the 12dp in-turn spec. BELOW an agent reply it makes
+ * the same 16dp, for the mirror reason: the reply's copy sits at its end (TurnCopyFooter) and its square reaches 16dp
+ * down out of the footer row.
  */
 private fun dev.ccpocket.app.data.ChatPresentation.rhythmExtraAbove(ri: Int): Dp {
     if (ri <= 0) return 0.dp
@@ -4146,7 +4150,7 @@ private fun dev.ccpocket.app.data.ChatPresentation.rhythmExtraAbove(ri: Int): Dp
     val prev = itemOf(rows.getOrNull(ri - 1))
     return when {
         (cur is ChatItem.User) != (prev is ChatItem.User) -> 12.dp
-        (cur is ChatItem.User && !cur.compactSummary) || cur is ChatItem.Assistant -> 4.dp
+        (cur is ChatItem.User && !cur.compactSummary) || cur is ChatItem.Assistant || prev is ChatItem.Assistant -> 4.dp
         else -> 0.dp
     }
 }

@@ -39,9 +39,10 @@ data class AcpPrompt(val text: String, val images: List<ImageData>) {
  * flushed when the in-flight one settles (any stopReason, error included).
  *
  * THE GATE: prompts that arrive before the session can take them wait in the SAME queue, behind a gate the
- * client opens once the session is ready (for dsh: once its launch-time model/effort landed too). Entries
- * still queued when the process dies stay unsettled in Conversation's ledger, which re-injects them into
- * the fresh process — so [reset] loses nothing.
+ * client opens once the session is ready (for dsh: once its launch-time model/effort landed too), and that a
+ * host may [shut] again mid-session (dsh: while a model switch awaits its answer). Entries still queued when
+ * the process dies stay unsettled in Conversation's ledger, which re-injects them into the fresh process — so
+ * [reset] loses nothing.
  *
  * Every decision and its in-flight mark happen under ONE lock: registering after the write left a window
  * where a racing send saw "idle" and double-sent — the very rejection the FIFO exists to prevent.
@@ -49,7 +50,8 @@ data class AcpPrompt(val text: String, val images: List<ImageData>) {
 class AcpPromptFifo(private val nextId: () -> Long) {
     private val lock = Mutex()
     private val queue = ArrayDeque<AcpPrompt>() // guarded by [lock]
-    @Volatile private var gateOpen = false // guarded by [lock] for writes
+    /** Opened only under [lock]; [shut] closes it without the lock (see there). */
+    @Volatile private var gateOpen = false
 
     /** In-flight `session/prompt` request id → its text, replayed as the consumption receipt on settle (no
      *  ACP agent we drive sends a live `user_message_chunk`, so the settle IS the receipt). */
@@ -75,6 +77,30 @@ class AcpPromptFifo(private val nextId: () -> Long) {
     /** Reserve an id for a prompt that will settle WITHOUT being written (a refusal) — it still holds the
      *  FIFO until that settle, like an in-flight prompt. */
     suspend fun reserve(text: String): Long = lock.withLock { reserveLocked(text) }
+
+    /** [reserve] for a prompt that is to be REFUSED, in turn order: only when nothing is in flight or queued ahead
+     *  of it; otherwise it queues, and settles when what is ahead of it has. Returns the reserved id, or null when
+     *  queued. A refusal settled while another prompt runs would end that turn early. */
+    suspend fun reserveIfIdle(prompt: AcpPrompt): Long? = lock.withLock {
+        if (inFlight.isEmpty() && queue.isEmpty()) {
+            reserveLocked(prompt.text)
+        } else {
+            queue.addLast(prompt)
+            null
+        }
+    }
+
+    /**
+     * Close the gate again, synchronously — callable off a coroutine (dsh does it on Conversation's command path,
+     * before the next prompt can be sent). Deliberately WITHOUT the lock: it only ever closes, and an [admit] or
+     * [open] already deciding under the lock was ahead of it, so the prompt it lets out preceded the shut.
+     */
+    fun shut() {
+        gateOpen = false
+    }
+
+    /** True while a prompt (or a reserved refusal) awaits its settle. */
+    fun busy(): Boolean = inFlight.isNotEmpty()
 
     /**
      * Open the gate and reserve the head, all under the lock. [prepare] runs first, inside the lock, and may

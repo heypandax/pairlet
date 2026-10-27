@@ -71,6 +71,7 @@ import dev.ccpocket.app.ui.chat.CHAT_CONTEXT_PANEL_TAG
 import dev.ccpocket.app.ui.chat.CHAT_STREAM_TAG
 import dev.ccpocket.app.ui.chat.TOOL_PROCESS_GROUP_TAG
 import dev.ccpocket.app.ui.chat.TOOL_PROCESS_LIVE_TAG
+import dev.ccpocket.app.ui.chat.TURN_COPY_FOOTER_TAG
 import dev.ccpocket.app.ui.chat.TURN_COPY_TAG
 import dev.ccpocket.app.ui.chat.TURN_SOURCE_ROW_TAG
 import dev.ccpocket.app.ui.chat.USER_TURN_CONTAINER_TAG
@@ -287,43 +288,46 @@ class ChatRhythmUiTest {
     // ══ touch geometry ═════════════════════════════════════════════════════════════════════════════════════
 
     /**
-     * The copy square is a real 44 × 44 target, it rises out of the 28dp row instead of reaching down — so it
-     * ends above the body's first line — and the gap above the row is wide enough that it does not reach the
-     * tool fold above it either. Proven with real touches, not just bounds: a tap in the square's risen part
-     * copies, a tap on the body's first line does not.
+     * An agent reply's copy sits at its END (where reading ends and the next step is decided): no copy in the agent's
+     * source row, one under the body. Its square is a real 44 × 44 target that grows DOWN out of the 28dp footer row —
+     * so it starts 2dp clear of the reply's last line — and the 16dp the list leaves under a reply keeps it off the
+     * row below (here a tool fold, i.e. a reply segment mid-turn). Proven with real touches: a tap in the part below
+     * the footer row copies, a tap on the reply's last line, right above the glyph, does not.
      */
     @Test
-    fun theCopyTargetIsFullSizeAndStaysOffTheBodyAndTheRowAbove() {
+    fun theReplysCopyIsAtItsEndFullSizeAndOffTheBodyAndTheRowBelow() {
         listOf(1f, 1.6f).forEach { scale ->
             val clipboard = Clipboard()
             scene(fontScale = scale, clipboard = clipboard, seed = {
                 receiveForTest(live())
-                receiveForTest(ConvoHistory(convo, listOf(u("看看测试"), tool("./gradlew test"), tool("git status"), a(BODY))))
+                receiveForTest(ConvoHistory(convo, listOf(u("看看测试"), a(BODY), tool("./gradlew test"), tool("git status"), a("测试通过。"))))
             }) {
+                val agentRow = onAllNodes(hasTestTag(TURN_SOURCE_ROW_TAG))[1].getUnclippedBoundsInRoot()
+                val footer = onAllNodes(hasTestTag(TURN_COPY_FOOTER_TAG)).onFirst().getUnclippedBoundsInRoot()
                 val fold = onNodeWithTag(TOOL_PROCESS_GROUP_TAG).getUnclippedBoundsInRoot()
-                val row = onAllNodes(hasTestTag(TURN_SOURCE_ROW_TAG)).onLast().getUnclippedBoundsInRoot()
-                val target = copyTargets().last()
-                val body = bounds(BODY.take(12))
+                val body = bounds(BODY.takeLast(8))
+                val target = copyTargets()[1] // [0] is the prompt's, in its source row
+                assertTrue(target.top >= agentRow.bottom, "${scale}×: the agent's source row holds no copy: $target / $agentRow")
                 assertTrue(target.width.value >= 43.5f && target.height.value >= 43.5f, "${scale}×: the target is 44 × 44: $target")
-                assertTrue(target.bottom <= row.bottom + (0.5f).toDp(), "${scale}×: the square ends on the source row: $target / $row")
-                assertTrue((body.top - target.bottom).value >= 1.5f, "${scale}×: …2dp clear of the body's first line: $target / $body")
-                assertTrue(target.top >= fold.bottom, "${scale}×: …and clear of the fold above: $target / $fold")
+                assertEquals(footer.top.value, target.top.value, 0.5f, "${scale}×: the square starts on the footer row: $target / $footer")
+                assertTrue((target.top - body.bottom).value >= 1.5f, "${scale}×: …2dp clear of the reply's last line: $target / $body")
+                assertTrue(target.bottom <= fold.top, "${scale}×: …and clear of the row below: $target / $fold")
                 assertTrue(target.right.value <= W + 0.5f, "${scale}×: …inside the viewport: $target")
 
-                // a touch in the square's upper half — ABOVE the 28dp row — still reaches the copy
-                onAllNodes(hasTestTag(TURN_COPY_TAG)).onLast().performTouchInput { click(Offset(centerX, 3f)) }
+                // a touch in the square's lower part — BELOW the 28dp footer row — still reaches the copy
+                onAllNodes(hasTestTag(TURN_COPY_TAG))[1].performTouchInput { click(Offset(centerX, height - 3f)) }
                 advanceFrameAndWait()
-                assertEquals(BODY, clipboard.copied?.text, "${scale}×: the risen part of the square is live")
+                assertEquals(BODY, clipboard.copied?.text, "${scale}×: the lower part of the square is live")
 
-                // …while a touch on the body's first line, right under the glyph, is the text's, not the copy's
+                // …while a touch on the reply's last line, right above the glyph, is the text's, not the copy's
                 clipboard.copied = null
                 mainClock.advanceTimeBy(2_000)
                 advanceFrameAndWait()
-                onAllNodes(hasText(BODY.take(12), substring = true)).onFirst().performTouchInput {
-                    click(Offset(width - 12f, 3f))
+                onAllNodes(hasText(BODY.takeLast(8), substring = true)).onFirst().performTouchInput {
+                    click(Offset(width - 12f, height - 3f))
                 }
                 advanceFrameAndWait()
-                assertEquals(null, clipboard.copied, "${scale}×: the body's first line never triggers the copy")
+                assertEquals(null, clipboard.copied, "${scale}×: the reply's last line never triggers the copy")
             }
         }
     }
@@ -435,34 +439,47 @@ class ChatRhythmUiTest {
      * That gutter is scrollable content padding, so the whole 44dp square is inside the list's clip and live to a
      * touch at its very top edge — for a lone agent reply and for a lone prompt.
      */
+    /** The top of the list: a prompt's copy still rises out of its source row, so the FIRST row's square must be
+     *  wholly touchable there; an agent reply opening the list has no copy up there at all — its copy is at its end. */
     @Test
     fun theFirstTurnsCopyTargetIsWhollyTouchableAtTheTopOfTheList() {
-        listOf(listOf(a(BODY)) to BODY, listOf(u(BODY)) to BODY).forEachIndexed { i, (history, text) ->
-            val clipboard = Clipboard()
-            scene(clipboard = clipboard, seed = {
-                receiveForTest(live())
-                receiveForTest(ConvoHistory(convo, history))
-            }) {
-                val who = if (i == 0) "agent" else "user"
-                val node = onAllNodes(hasTestTag(TURN_COPY_TAG)).onFirst()
-                val whole = node.getUnclippedBoundsInRoot()
-                assertTrue(whole.width.value >= 43.5f && whole.height.value >= 43.5f, "$who: a 44dp square: $whole")
-                assertEquals(whole, node.getBoundsInRoot(), "$who: no part of the first row's square is clipped by the list")
-                val stream = onNodeWithTag(CHAT_STREAM_TAG).getBoundsInRoot()
-                assertTrue(whole.top >= stream.top, "$who: inside the list's scroll viewport: $whole / $stream")
-                val body = bounds(text.take(12))
-                assertTrue((body.top - whole.bottom).value >= 1.5f, "$who: still clear of the body's first line: $whole / $body")
-                node.performTouchInput { click(Offset(centerX, 1f)) }
-                advanceFrameAndWait()
-                assertEquals(text, clipboard.copied?.text, "$who: a touch at the square's top edge copies")
-                // …and at its top-trailing corner, the part that reaches past the text column
-                clipboard.copied = null
-                mainClock.advanceTimeBy(2_000)
-                advanceFrameAndWait()
-                node.performTouchInput { click(Offset(width - 1f, 1f)) }
-                advanceFrameAndWait()
-                assertEquals(text, clipboard.copied?.text, "$who: a touch at the square's top-trailing corner copies")
-            }
+        val clipboard = Clipboard()
+        scene(clipboard = clipboard, seed = {
+            receiveForTest(live())
+            receiveForTest(ConvoHistory(convo, listOf(u(BODY))))
+        }) {
+            val node = onAllNodes(hasTestTag(TURN_COPY_TAG)).onFirst()
+            val whole = node.getUnclippedBoundsInRoot()
+            assertTrue(whole.width.value >= 43.5f && whole.height.value >= 43.5f, "a 44dp square: $whole")
+            assertEquals(whole, node.getBoundsInRoot(), "no part of the first row's square is clipped by the list")
+            val stream = onNodeWithTag(CHAT_STREAM_TAG).getBoundsInRoot()
+            assertTrue(whole.top >= stream.top, "inside the list's scroll viewport: $whole / $stream")
+            val body = bounds(BODY.take(12))
+            assertTrue((body.top - whole.bottom).value >= 1.5f, "still clear of the body's first line: $whole / $body")
+            node.performTouchInput { click(Offset(centerX, 1f)) }
+            advanceFrameAndWait()
+            assertEquals(BODY, clipboard.copied?.text, "a touch at the square's top edge copies")
+            // …and at its top-trailing corner, the part that reaches past the text column
+            clipboard.copied = null
+            mainClock.advanceTimeBy(2_000)
+            advanceFrameAndWait()
+            node.performTouchInput { click(Offset(width - 1f, 1f)) }
+            advanceFrameAndWait()
+            assertEquals(BODY, clipboard.copied?.text, "a touch at the square's top-trailing corner copies")
+        }
+        val agentClipboard = Clipboard()
+        scene(clipboard = agentClipboard, seed = {
+            receiveForTest(live())
+            receiveForTest(ConvoHistory(convo, listOf(a(BODY))))
+        }) {
+            val row = onAllNodes(hasTestTag(TURN_SOURCE_ROW_TAG)).onFirst().getUnclippedBoundsInRoot()
+            val node = onAllNodes(hasTestTag(TURN_COPY_TAG)).onFirst()
+            val whole = node.getUnclippedBoundsInRoot()
+            assertTrue(whole.top >= bounds(BODY.takeLast(8)).bottom, "the reply's copy is under it, not at the top: $whole / $row")
+            assertEquals(whole, node.getBoundsInRoot(), "…and wholly touchable at the list's end")
+            node.performTouchInput { click(Offset(centerX, height - 1f)) }
+            advanceFrameAndWait()
+            assertEquals(BODY, agentClipboard.copied?.text, "a touch at the square's bottom edge copies")
         }
     }
 

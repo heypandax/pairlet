@@ -14,31 +14,42 @@ import java.util.concurrent.ConcurrentHashMap
  * told anything, and every created session is a row in dsh's own store.
  *
  * Entries are keyed by the owning backend and dropped when its process ends — a stale catalogue would
- * offer models against a session that no longer exists. Ordering is registration order and [current]
- * takes the oldest live one; any of them answers equivalently, since the catalogue describes the user's
- * dsh install rather than one conversation.
+ * offer models against a session that no longer exists. [current] is an APPROXIMATION of "the session the picker
+ * belongs to", because the picker's request names a workdir, not a session: the picker's WORKDIR first, then any
+ * live session, and in both cases the one that reported MOST RECENTLY — every `session/new`, `session/resume` and
+ * config read-back re-publishes, so the newest entry is the latest word on the user's dsh install (a plugin
+ * installed an hour ago is visible in a session opened since, not in the oldest one still running). Two sessions
+ * in one workdir can still show each other's list; no session RUNS on this list — each resolves against its own
+ * catalogue ([DshBackend]).
  */
 object DshCatalog {
-    private val live = ConcurrentHashMap<Any, DshConfigOptions>()
-    private val order = java.util.concurrent.CopyOnWriteArrayList<Any>()
+    private data class Entry(val workdir: String?, val options: DshConfigOptions, val stamp: Long)
 
-    fun publish(owner: Any, options: DshConfigOptions) {
+    private val live = ConcurrentHashMap<Any, Entry>()
+    private val clock = java.util.concurrent.atomic.AtomicLong()
+
+    fun publish(owner: Any, options: DshConfigOptions, workdir: String? = null) {
         if (options.isEmpty) return // never displace a real catalogue with an empty read-back
-        if (live.put(owner, options) == null) order.addIfAbsent(owner)
+        live[owner] = Entry(workdir?.takeIf { it.isNotBlank() }, options, clock.incrementAndGet())
     }
 
     fun unpublish(owner: Any) {
         live.remove(owner)
-        order.remove(owner)
     }
 
-    /** The oldest still-published catalogue, or null when the daemon drives no dsh session. */
-    fun current(): DshConfigOptions? = order.firstNotNullOfOrNull { live[it] }
+    /** The most recently published catalogue for [workdir], else the most recent of any live session, else null
+     *  when the daemon drives no dsh session. */
+    fun current(workdir: String? = null): DshConfigOptions? {
+        val entries = live.values.toList()
+        val wd = workdir?.takeIf { it.isNotBlank() }
+        val pick = (if (wd != null) entries.filter { it.workdir == wd }.maxByOrNull { it.stamp } else null)
+            ?: entries.maxByOrNull { it.stamp }
+        return pick?.options
+    }
 
     /** VISIBLE FOR TESTS: a leaked publish from one test would silently satisfy the next one's
      *  "no live session" branch. */
     internal fun clearForTest() {
         live.clear()
-        order.clear()
     }
 }

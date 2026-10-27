@@ -88,7 +88,7 @@ class RequestRouterFetchModelsDshTest {
         val list = awaitReply(emitted) as ModelsList
         assertEquals(AgentKind.DSH, list.agent)
         assertNull(list.error, "the #255 placeholder text must be gone")
-        assertEquals(listOf("deepseek-v4-pro"), list.models)
+        assertEquals(listOf("deepseek-official/deepseek-v4-pro"), list.models)
         assertEquals(listOf("off", "high", "max"), list.supportedEfforts)
         assertEquals(listOf("off", "high", "max"), list.modelCapabilities.single().reasoningEfforts)
     }

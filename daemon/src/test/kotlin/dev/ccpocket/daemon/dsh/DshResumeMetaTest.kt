@@ -71,7 +71,7 @@ class DshResumeMetaTest {
                 assistantMessage("deepseek-v4-flash"),
         )
         val backend = backend(root)
-        assertEquals("deepseek-v4-flash", backend.resumeModel(CWD, SESSION))
+        assertEquals("deepseek-official/deepseek-v4-flash", backend.resumeModel(CWD, SESSION))
         assertEquals(1_000_000L, backend.resumeContextWindow(CWD, SESSION))
         assertEquals("high", backend.resumeEffort(CWD, SESSION))
     }
@@ -83,7 +83,7 @@ class DshResumeMetaTest {
         val root = store()
         session(root, CWD, SESSION, userMessage("hello") + assistantMessage("deepseek-v4-flash"))
         val backend = backend(root)
-        assertEquals("deepseek-v4-flash", backend.resumeModel(CWD, SESSION))
+        assertEquals("deepseek-official/deepseek-v4-flash", backend.resumeModel(CWD, SESSION))
         assertNull(backend.resumeContextWindow(CWD, SESSION)) // nothing said a window — so we say nothing
         assertNull(backend.resumeEffort(CWD, SESSION))
     }
@@ -160,7 +160,7 @@ class DshResumeMetaTest {
         Files.setLastModifiedTime(file, java.nio.file.attribute.FileTime.fromMillis(before + 2_000))
 
         assertEquals(1_000_000L, backend.resumeContextWindow(CWD, SESSION))
-        assertEquals("deepseek-v4-flash", backend.resumeModel(CWD, SESSION))
+        assertEquals("deepseek-official/deepseek-v4-flash", backend.resumeModel(CWD, SESSION))
     }
 
     private companion object {

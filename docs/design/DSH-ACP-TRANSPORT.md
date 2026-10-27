@@ -50,7 +50,7 @@
 |---|---|
 | `DshLauncher.kt` | argv → `dsh --profile acp`；**stdin 不再重定向到 /dev/null**（ACP 的上行就是 stdin，指向 /dev/null 等于开机即断连）；握手不应答时由 `outdatedHint()` 给出「dsh 太老」的人话提示 |
 | `DshBackend.kt` | 换轨重写：initialize → session/new｜resume → `session/update` 翻译 → prompt FIFO ＋ 配置链 ＋ 审批桥 |
-| `DshConfigOptions.kt` | 新增：`configOptions` 翻译 ＋ **裸 model id ↔ dsh 不透明 value 的对接**（两侧同一份目录，永不字符串拼装） |
+| `DshConfigOptions.kt` | 新增：`configOptions` 翻译 ＋ **model id ↔ dsh 不透明 value 的对接**（两侧同一份目录，永不字符串拼装；id 形状见 §8） |
 | `DshCatalog.kt` | 新增：活跃会话把自己的目录发布出来，取代 `DshHosts` |
 | `DshModelService.kt` | 目录来源改为「活跃会话的 configOptions」，无会话时**临时起一个 acp 进程 ＋ 临时目录建一个 scratch 会话**再杀掉（ACP 面没有 host 级目录方法，只能这样问；临时目录保证这条 scratch 会话不会污染用户项目的会话列表） |
 | `DshAsk.kt` | 裁到只剩**磁盘回放**那一半；live 那一半（`/api/respond` 的应答构造）随通道一起删除 |
@@ -116,3 +116,27 @@ DSH Web／桌面端按项目分组会话，分组依据是 `$DSH_HOME/storages/w
 实测：Windows + dsh 0.1.5-rc.3，经 daemon 新建的会话写入后，启动 DSH Web 即列在项目 Mind 下；本机 dsh 0.2.0-rc.2 手工写入同样生效。
 
 限制：正在运行的 DSH Web 把登记表放在内存里，要重启后才显示，且它下一次写入可能丢掉这一项；进程结束时的再次登记用于补回。DSH 没有项目的目录不处理（首次启动 DSH Web 会自行按已有会话建项目）。升级 dsh 后若 `workspace.json` 的 `unit.version` 变化，本功能自动停用，需重新核对格式。
+
+## 8. 插件 provider 与模型身份（2026-10 反馈：DSH 插件模型在手机端不可用）
+
+**已确认的事实**（源码 ＋ 本机 0.2.0-rc.2 ＋ 隔离安装的 0.2.1-rc.3）：
+
+- dsh 的插件**按 profile 安装**：`dsh plugin --profile <name> add <pkg>` 把参数原样转给该 profile 目录里的 pnpm，记录在 `$DSH_HOME/profiles/<name>/package.json` 的 `dependencies`。Pairlet 只启动 `acp` profile，所以装在 `web`、`tui` 或自建 profile 里的 provider 插件，Pairlet 读不到它的模型，也用不了。
+- 0.2.1-rc.3 的 `configOptions` 形状不变（`["provider","model"]` 值、按 provider 分组）。它新声明了 `sessionCapabilities.close/list`，Pairlet 目前不使用。`session/resume` 回答的是 dsh **当前**的选择：恢复前写过的 effort 恢复后回到默认值，所以不能指望 resume 自动沿用上次的 provider。
+
+**现在的规则：**
+
+- **wire 上的模型 id 一律是 `<provider>/<model>`**（与 ZCode／OpenCode 同形），从不只用裸模型名：两个 provider 可能提供同名模型，而它们扣的是不同账号的额度。目录按完整 id 去重，同名模型不再合并成一个。id 只用来在目录里查找，不会被拆回两半（模型名本身可能含 `/`）。转录里的模型同样带 provider 拼出（`DshConfigOptions.qualifiedId`），会话列表和恢复时的标题栏都与实时目录一致。
+- **旧的裸模型名**（手机升级前保存的）只有在当前目录里**恰好唯一**匹配、且本身**不含 `/`** 时才自动迁移；多个 provider 都提供这个名字（有歧义）时拒绝发送，提示用户在模型选择器里选一个。凡是含 `/` 的请求都按完整 id 精确匹配：带 provider 的 id 一定含 `/`，失效后只会是"不可用"，绝不会再按名字匹配到另一个 provider（例如 provider `b` 恰好有一个名为 `a/model` 的模型）。代价是旧 App 存下的、本身含 `/` 的裸名（OpenRouter 风格）不迁移，需要用户重选一次。
+- **三种模型来源分开处理**：
+  - **用户明确请求**：`OpenSession.model`／切换模型。
+    - 启动时：不可用、有歧义、写入被 dsh 拒绝、无应答，或应答里的回读没有指向所写模型，都直接让这次启动失败（`STAGE_MODEL`／`STAGE_CONFIG`），不发任何 prompt。
+    - 会话运行中切换：写入先同步排进队列并关闭发送入口（在 Conversation 交出下一条消息之前），dsh 应答、且回读确认新模型后才放行。切换失败（被拒、超时、回读不符）后，该进程拒绝之后的所有 prompt（`STAGE_SWITCH`）。切到当前会话没有的模型时同样从此拒收，并请求重启。正在执行的那一轮（切换前发出）不受影响，排在它后面的消息等它结束后再按顺序拒绝，不会在一轮中间插入错误结果。
+    - 以上情况下，用户改选模型都会重启进程再生效。配置写入一次只发一个、按顺序发送，连续切换时以最后一次请求为准，所有写入应答完毕后才放行。effort 不影响扣费渠道：被拒只提示，不阻断发送。
+  - **后端当前配置**：`configOptions.currentValue`，只用于显示和回读。
+  - **历史显示**：转录记录的模型。只显示，不会被重新写入，也不会挡住发送。恢复会话时如果没有明确请求、且 dsh 回到了另一个模型，会在聊天里提示一次，不会悄悄换渠道。
+- **模型选择器的目录是近似选择**：`FetchModels` 只带 workdir、不带会话，daemon 无法确定选择器属于哪个会话。现在的策略是：同一 workdir 里最近上报的活跃会话 → 任一目录里最近上报的活跃会话 → 临时探针（没有活跃会话时启动的一次性 `acp` 进程）。同一 workdir 有多个会话时，选择器仍可能显示另一个会话的列表。活跃会话的目录每次现读、不缓存；只有临时探针的结果缓存 10 分钟，手动刷新时跳过缓存。这只影响**显示**：每次启动和每次切换都用会话**自己的**目录解析，解析不出来就拒绝发送，不会因为选择器列表不准而换渠道。要做到精确对应，需要在 `FetchModels` 里加上会话标识（协议和手机端都要改），目前没有做。
+
+**诊断（只收集脱敏字段）**：`pairlet diagnostics --dsh` 输出 dsh 版本、`DSH_HOME` 是否被覆盖（不输出它的值）、各 profile 的 bundle 列表、插件包名与版本范围（本地路径或 URL 一律显示为 `<local>`），以及 `cordis.patch.yml` 的条目**数量**（不输出内容，provider 的密钥和端点就写在那里），并列出"其他 profile 有但 `acp` 没有"的插件。模型因此不可用时，报错里也会带上这条提示。不要让用户粘贴完整的 `--dump-config`。
+
+**仍待确认**：反馈中两个插件（Qoder、WorkBuddy）的准确包名、版本、安装方式和所在 profile；插件 provider 是否通过 ACP `configOptions` 暴露模型（如果插件只在 Web UI 层注册，装进 `acp` 也不会出现）。新版 dsh 先在隔离的 `DSH_HOME` 和独立 npm 前缀里验证，不升级正在使用的环境。
