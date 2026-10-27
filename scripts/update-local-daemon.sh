@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}"; export JAVA_HOME
-RELAY="${RELAY:-wss://pocket.ark-nexus.cc}"
+RELAY="${RELAY:-wss://relay.pairlet.cn}"
 DEST="$HOME/Library/Application Support/cc-pocket/cc-pocket-daemon"
 DIST="daemon/build/install/cc-pocket-daemon"
 BIN="$DEST/bin/cc-pocket-daemon"
@@ -67,8 +67,10 @@ echo "── 4/6 注册单实例 launchd 服务（指向 java 构建）──"
 echo "── 5/6 等待起来 ──"; sleep 7
 
 echo "── 6/6 校验：单实例 + relay 已连 ──"
-PID="$(pgrep -f 'Application Support/cc-pocket.*MainKt' | head -1 || true)"
-COUNT="$(pgrep -f 'cc-pocket-daemon run|Application Support/cc-pocket.*MainKt|build/install/cc-pocket.*MainKt' | wc -l | tr -d ' ')"
+# macOS pgrep can truncate the long JVM classpath. Match the installed library path via ps.
+PIDS="$(ps -axo pid=,command= | awk '/cc-pocket-daemon\/lib/ && !/awk/ {print $1}')"
+PID="$(printf '%s\n' "$PIDS" | head -1)"
+COUNT="$(printf '%s\n' "$PIDS" | awk 'NF {n++} END {print n+0}')"
 SOCK=0; [ -n "$PID" ] && SOCK="$(lsof -nP -p "$PID" 2>/dev/null | grep -c ':443.*ESTABLISHED' || true)"
 echo "   daemon 进程数=$COUNT  pid=$PID  relay-socket=$SOCK"
 echo "   服务: $(launchctl list | grep -i ccpocket || echo '未加载')"
@@ -76,6 +78,6 @@ if [ "$COUNT" = "1" ] && [ "$SOCK" -ge 1 ]; then
   echo "✅ 完成：单实例已连上 relay，手机可用"
 else
   echo "⚠️  未达预期（进程数应=1、relay-socket≥1）。看日志：~/Library/Logs/cc-pocket/daemon.err.log"
-  echo "   常见：relay-socket=0 多半是 TUN 代理没放行——把 pocket.ark-nexus.cc 加进代理直连/规则再重跑。"
+  echo "   常见：relay-socket=0 多半是 TUN 代理没放行——把 relay.pairlet.cn 加进代理直连/规则再重跑。"
   exit 1
 fi

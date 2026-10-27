@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.relay
 
+import dev.ccpocket.protocol.RelayEndpoint
 import dev.ccpocket.daemon.DaemonCore
 import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.PushHook
@@ -382,7 +383,7 @@ class RelayClient(
 
     private suspend fun connectOnce() {
         newClient().use { client ->
-            client.webSocket(urlString = "$relayWsBase/v1/daemon") {
+            client.webSocket(urlString = "${RelayEndpoint.transport(relayWsBase)}/v1/daemon") {
                 // Bound the pre-attach handshake: the socket can connect yet the relay/network stay silent (the
                 // half-open path a heartbeat-forced reconnect lands back on), and authenticate() would otherwise
                 // block on incoming.receive() forever — before the heartbeat below is even armed — wedging the

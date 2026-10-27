@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon
 
+import dev.ccpocket.protocol.RelayEndpoint
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.core.subcommands
@@ -45,7 +46,7 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 
 /** Production relay; users connect here by default so `run`/`service-install` need no URL. */
-const val DEFAULT_RELAY = "wss://pocket.ark-nexus.cc"
+const val DEFAULT_RELAY = RelayEndpoint.DEFAULT
 
 /** Pick the most likely LAN IPv4 address: a physical, non-virtual site-local (RFC1918) address. */
 fun lanIp(): String? {

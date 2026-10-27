@@ -8,12 +8,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -28,6 +32,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithTag
@@ -98,8 +103,8 @@ import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
 
 /**
- * Chat Rhythm v1 on the phone chat screen (docs/design/claude-design-handoff/chat-rhythm-v1): the whole-turn copy
- * on the source row, its touch square kept off the body and off the row above, the three copy scopes kept apart,
+ * Chat Rhythm v1 on the phone chat screen (docs/design/claude-design-handoff/chat-rhythm-v1): whole-turn copy
+ * on a reply's footer or a prompt's source row, its touch square kept off the body, the three copy scopes kept apart,
  * the header's context as an overlay, and the 320pt / 1.6× composer keeping Stop until the turn really ends.
  *
  * Real [PocketRepository] fed real wire frames in a real phone-sized scene; `Density(1f, fontScale)` makes one scene
@@ -165,18 +170,35 @@ class ChatRhythmUiTest {
         }
     }
 
+    private class SelectionToolbar : TextToolbar {
+        var copy: (() -> Unit)? = null
+        override var status = TextToolbarStatus.Hidden
+        override fun hide() { status = TextToolbarStatus.Hidden }
+        override fun showMenu(
+            rect: Rect, onCopyRequested: (() -> Unit)?, onPasteRequested: (() -> Unit)?,
+            onCutRequested: (() -> Unit)?, onSelectAllRequested: (() -> Unit)?,
+        ) {
+            copy = onCopyRequested
+            status = TextToolbarStatus.Shown
+        }
+    }
+
     private fun scene(
         width: Int = W,
         fontScale: Float = 1f,
         dark: Boolean = true,
         clipboard: Clipboard = Clipboard(),
+        toolbar: TextToolbar = SelectionToolbar(),
         seed: PocketRepository.() -> Unit,
         assertions: SkikoComposeUiTest.(PocketRepository) -> Unit,
     ) = runDesktopComposeUiTest(width, H) {
         mainClock.autoAdvance = false // a streaming scene animates forever; assertions read settled frames
         lateinit var mounted: PocketRepository
         setContent {
-            CompositionLocalProvider(LocalDensity provides Density(1f, fontScale), LocalClipboardManager provides clipboard) {
+            CompositionLocalProvider(
+                LocalDensity provides Density(1f, fontScale), LocalClipboardManager provides clipboard,
+                LocalTextToolbar provides toolbar,
+            ) {
                 val scope = rememberCoroutineScope()
                 val repo = remember { PocketRepository(scope, account()).apply(seed) }
                 mounted = repo
@@ -209,12 +231,12 @@ class ChatRhythmUiTest {
     // ══ whole-turn copy: scope and honesty ═════════════════════════════════════════════════════════════════
 
     /**
-     * Three copies, three different outputs, no merging: the source row copies the reply's raw text WITH its
+     * Three copies, three different outputs, no merging: the footer copies the reply's raw text WITH its
      * Markdown, the quote's glyph copies the quote as plain text, the code block copies the code. And no 复制 line
      * is left under the body — the only text "copy" on screen is the code block's own.
      */
     @Test
-    fun theSourceRowCopiesTheRawTurnWhileQuoteAndCodeKeepTheirOwnScopes() {
+    fun theFooterCopiesTheRawTurnWhileQuoteAndCodeKeepTheirOwnScopes() {
         val clipboard = Clipboard()
         scene(clipboard = clipboard, seed = {
             receiveForTest(live())
@@ -225,7 +247,7 @@ class ChatRhythmUiTest {
 
             onAllNodes(hasTestTag(TURN_COPY_TAG))[1].performClick()
             advanceFrameAndWait()
-            assertEquals(REPLY, clipboard.copied?.text, "the reply's source row copies the original text, Markdown included")
+            assertEquals(REPLY, clipboard.copied?.text, "the reply's footer copies the original text, Markdown included")
             assertEquals(1, described(str(Res.string.chat_copy_message_done)), "…and says so in place")
 
             onNodeWithTag(QUOTE_COPY_TAG).performClick()
@@ -244,7 +266,52 @@ class ChatRhythmUiTest {
         }
     }
 
-    /** Mid-stream the row copies everything received so far — at tap time, not what the row composed with. */
+    @Test
+    fun repliesSeparatedByToolsCopyOnlyTheirOwnRawMarkdown() {
+        val before = "先检查 **重试逻辑**。"
+        val after = "检查完成，保留 `3` 次重试。"
+        val clipboard = Clipboard()
+        scene(clipboard = clipboard, seed = {
+            receiveForTest(live())
+            receiveForTest(ConvoHistory(convo, listOf(u("检查一下"), a(before), tool("git diff"), a(after))))
+        }) {
+            assertEquals(2, onAllNodes(hasTestTag(TURN_COPY_FOOTER_TAG)).fetchSemanticsNodes().size)
+            assertEquals(3, copyTargets().size, "the prompt and each reply segment have their own copy")
+            listOf(before, after).forEachIndexed { i, expected ->
+                onAllNodes(hasTestTag(TURN_COPY_TAG))[i + 1].performTouchInput { click(center) }
+                advanceFrameAndWait()
+                assertEquals(expected, clipboard.copied?.text, "tool output and neighbouring replies must not leak into copy")
+            }
+            save("reply-segments-copy")
+        }
+    }
+
+    @Test
+    fun longPressOnTheReplysLastLineSelectsTextWithoutTriggeringWholeReplyCopy() {
+        listOf(1f, 1.6f).forEach { scale ->
+            val clipboard = Clipboard()
+            val toolbar = SelectionToolbar()
+            val body = "First line\nFinal selectable word"
+            scene(fontScale = scale, clipboard = clipboard, toolbar = toolbar, seed = {
+                receiveForTest(live())
+                receiveForTest(ConvoHistory(convo, listOf(a(body))))
+            }) {
+                val matcher = hasText("Final selectable word", substring = true)
+                val layout = textLayout(matcher)
+                val lastWord = layout.layoutInput.text.text.lastIndexOf("word")
+                val glyph = layout.getBoundingBox(lastWord)
+                save("reply-last-line-${scale}x")
+                onAllNodes(matcher).onFirst().performTouchInput { longClick(glyph.center) }
+                advanceFrameAndWait()
+                assertEquals(null, clipboard.copied, "${scale}×: selecting the last line must not copy the whole reply")
+                assertEquals(TextToolbarStatus.Shown, toolbar.status, "${scale}×: the text selection gesture reached the body")
+                assertTrue(toolbar.copy != null, "${scale}×: the selected text offers its own copy action")
+                assertEquals(0, described(str(Res.string.chat_copy_message_done)))
+            }
+        }
+    }
+
+    /** Mid-stream the footer copies everything received so far — at tap time, not what it composed with. */
     @Test
     fun aStreamingReplyCopiesEverythingReceivedSoFar() {
         val clipboard = Clipboard()

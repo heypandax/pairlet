@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.peer
 
+import dev.ccpocket.protocol.RelayEndpoint
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
@@ -147,7 +148,7 @@ class RelayPeerTransport : PeerTransport {
     override suspend fun redeem(relay: String, ticket: String, devicePubB64: String): PairCredential? {
         val http = HttpClient(CIO)
         return try {
-            val httpBase = relay.replace("wss://", "https://").replace("ws://", "http://")
+            val httpBase = RelayEndpoint.transport(relay).replace("wss://", "https://").replace("ws://", "http://")
             val body = withTimeout(REDEEM_TIMEOUT_MS) {
                 val response = http.post("$httpBase/v1/pair/redeem") {
                     // headless is advisory only — the relay derives the credential class from the TICKET
@@ -177,7 +178,7 @@ class RelayPeerTransport : PeerTransport {
         val peerPub = b64d(link.peerDaemonPub) // PINNED at join — a different daemon key simply won't decrypt
         val nextId = AtomicLong(0)
         newClient().use { client ->
-            client.webSocket(urlString = "${link.relay}/v1/device") {
+            client.webSocket(urlString = "${RelayEndpoint.transport(link.relay)}/v1/device") {
                 // Bound the whole prelude: a socket that connects but never answers would otherwise hang
                 // this link forever with no guard armed yet (the app's RelayE2EConnection lesson).
                 val e2e = withTimeout(HANDSHAKE_TIMEOUT_MS) {

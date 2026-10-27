@@ -28,6 +28,17 @@ class AcpPromptFifoTest {
     }
 
     @Test
+    fun `a shut during prepare invalidates the stale opening`() = runBlocking {
+        fifo.admit(p("waiting"))
+        assertNull(fifo.open({ fifo.shut(); true }, all, mutableListOf()))
+        assertNull(fifo.admit(p("after model switch")))
+        assertNull(fifo.next(all, mutableListOf()))
+        assertEquals(10L to p("waiting"), fifo.open({ true }, all, mutableListOf()))
+        fifo.settle(10)
+        assertEquals(11L to p("after model switch"), fifo.next(all, mutableListOf()))
+    }
+
+    @Test
     fun `a vetoed opening keeps the gate shut`() = runBlocking {
         fifo.admit(p("one"))
         assertNull(fifo.open({ false }, all, mutableListOf()))

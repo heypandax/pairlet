@@ -1,5 +1,6 @@
 package dev.ccpocket.app.net
 
+import dev.ccpocket.protocol.RelayEndpoint
 import dev.ccpocket.observability.Diagnostics
 import dev.ccpocket.observability.ErrorPath
 import dev.ccpocket.observability.ErrorCode
@@ -144,7 +145,7 @@ class RelayE2EConnection {
     /** @param firstTicket the pairing ticket — supplied as PSK only on the very first connect after pairing. */
     suspend fun connect(paired: PairedDaemon, keys: E2ECrypto.KeyPair, firstTicket: String?) = coroutineScope {
         val gen = ++connSeq
-        client.webSocket(urlString = "${paired.relay}/v1/device") {
+        client.webSocket(urlString = "${RelayEndpoint.transport(paired.relay)}/v1/device") {
             // The relay control plane (RegisterPush and its receipt) is usable from the moment the relay has
             // authenticated us — it does NOT depend on the daemon being online or on the E2E handshake. So
             // its writer starts at Attached, not after the handshake: with the computer off, the handshake

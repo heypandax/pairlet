@@ -10,6 +10,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /** One user prompt as Conversation handed it over: its text and the images riding with it. */
 data class AcpPrompt(val text: String, val images: List<ImageData>) {
@@ -50,8 +51,9 @@ data class AcpPrompt(val text: String, val images: List<ImageData>) {
 class AcpPromptFifo(private val nextId: () -> Long) {
     private val lock = Mutex()
     private val queue = ArrayDeque<AcpPrompt>() // guarded by [lock]
-    /** Opened only under [lock]; [shut] closes it without the lock (see there). */
-    @Volatile private var gateOpen = false
+    /** Odd = closed; every shut changes the generation so a stale prepare cannot reopen it. */
+    private val gateState = AtomicLong(1)
+    private val gateOpen: Boolean get() = gateState.get() and 1L == 0L
 
     /** In-flight `session/prompt` request id → its text, replayed as the consumption receipt on settle (no
      *  ACP agent we drive sends a live `user_message_chunk`, so the settle IS the receipt). */
@@ -59,7 +61,7 @@ class AcpPromptFifo(private val nextId: () -> Long) {
 
     /** A fresh process: nothing queued, nothing in flight, gate shut. */
     suspend fun reset() {
-        lock.withLock { queue.clear(); gateOpen = false }
+        lock.withLock { queue.clear(); shut() }
         inFlight.clear()
     }
 
@@ -92,11 +94,11 @@ class AcpPromptFifo(private val nextId: () -> Long) {
 
     /**
      * Close the gate again, synchronously — callable off a coroutine (dsh does it on Conversation's command path,
-     * before the next prompt can be sent). Deliberately WITHOUT the lock: it only ever closes, and an [admit] or
-     * [open] already deciding under the lock was ahead of it, so the prompt it lets out preceded the shut.
+     * before the next prompt can be sent). A generation change invalidates any opening whose prepare
+     * was already running, without blocking this synchronous command path on the coroutine mutex.
      */
     fun shut() {
-        gateOpen = false
+        gateState.updateAndGet { (it + 2L) or 1L }
     }
 
     /** True while a prompt (or a reserved refusal) awaits its settle. */
@@ -113,8 +115,9 @@ class AcpPromptFifo(private val nextId: () -> Long) {
         acceptable: (AcpPrompt) -> Boolean,
         refused: MutableList<AcpPrompt>,
     ): Pair<Long, AcpPrompt>? = lock.withLock {
+        val generation = gateState.get()
         if (!prepare()) return null
-        gateOpen = true
+        if (!gateState.compareAndSet(generation, generation and -2L)) return null
         takeLocked(acceptable, refused)
     }
 
