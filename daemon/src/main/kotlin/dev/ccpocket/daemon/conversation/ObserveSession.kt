@@ -71,7 +71,10 @@ class ObserveSession(
 
     // the cursor of the last replay WE sent this observer's client — each tail tick then replays only
     // the appended delta instead of re-sending the whole 100-row window on every write (issue #147)
-    private var sentCursor: Long? = sinceSeq?.takeIf { it > 0 }
+    // A client cursor has no rollout identity. On a new observer the same logical Codex session
+    // may already have moved to another file with overlapping line numbers. Establish a fresh tail
+    // window first; only cursors read by THIS observer may drive subsequent append deltas.
+    private var sentCursor: Long? = if (agent == AgentKind.CODEX) null else sinceSeq?.takeIf { it > 0 }
 
     // ONE dispatch point (issue #301): slice/page/state/title all route through the reader picked here,
     // instead of four separately-maintained `when (agent)` blocks that had to stay consistent by hand.
@@ -113,6 +116,12 @@ class ObserveSession(
     fun start() {
         scope.launch {
             runCatching {
+                // Establish the read-only conversation before any metadata/transcript parse.
+                sink.emit(SessionLive(
+                    convoId, workdir, sessionId, observing = true, agent = agent,
+                    notice = if (readOnlyNow) READ_ONLY_NOTICE else null,
+                    observation = if (observationCapable && readOnlyNow) SessionObservation(binding = currentBinding, readOnly = true) else null,
+                ))
                 var initialReplay = true
                 var lastMtime = -2L // first pass always announces, even when the file is missing (-1)
                 var lastSize = -1L
@@ -140,7 +149,6 @@ class ObserveSession(
                     if (changed) {
                         lastMtime = mtime
                         lastSize = size
-                        emitLive(current) // model/window/occupancy move as the observed terminal writes turns
                         val slice = reader.slice(current, sentCursor)
                         // an empty DELTA = the client is already caught up (noise-only appends) — nothing
                         // to send. An empty FULL still goes out: that's today's "file gone/empty" wipe.
@@ -160,6 +168,7 @@ class ObserveSession(
                             sink.completeInitialHistory(convoId, slice.messages.size, slice.messages.isNotEmpty() || !slice.delta, slice.quality, slice.sourceRows, slice.failedRows)
                         }
                         if (sinceSeq != null) sentCursor = slice.lastSeq ?: sentCursor
+                        emitLive(current) // backfill metadata after the first history window is visible
                     } else if (observationCapable) {
                         // no new bytes: the evidence is unchanged, but its AGE is not — re-announce only when the
                         // snapshot itself differs (freshness bucket moved), never on every tick. observedAt is the

@@ -89,6 +89,9 @@ fun DesktopApp(
     val density = LocalDensity.current
     // per-conversation document memory (same key as the Changes dock): see DesktopFilePreviewState
     val filePreview = remember(model) { DesktopFilePreviewState { model.conversationKey } }
+    // The sidebar leaves composition when collapsed. Keep account-wide refresh and the /usage
+    // overlay at the shell root, shared by main chat and split panes, once per shell.
+    model.usageRepo?.let { repo -> DesktopQuotaRefreshEffect(repo) }
     // One silent update check per launch (issue #200), extending the existing #87 checker rather than
     // adding a channel: it only ever moves updateState, never downloads — applying stays a click in
     // Settings ▸ About. Delayed so it can't compete with connect/first paint, and guarded on Idle so a
@@ -263,6 +266,11 @@ fun DesktopApp(
         // every modal/popover that follows — and both it and the drop itself stand down entirely while
         // any overlay is open, so a popover can neither hide the highlight nor be dropped through
         SplitDropOverlay(drag, model)
+        model.usageRepo?.let { repo ->
+            if (repo.usageSheetRequested.value) {
+                dev.ccpocket.app.ui.QuotaSheet(repo) { repo.usageSheetRequested.value = false }
+            }
+        }
         if (model.showNewSession) {
             LaunchedEffect(Unit) { model.fetchModels(AgentKind.CLAUDE) }
             // anchored under the sidebar's New-session row (control row 38 + device line 27 + row 32)

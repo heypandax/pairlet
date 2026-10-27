@@ -94,6 +94,22 @@ class ObserveSessionFileSwitchTest {
     }
 
     @Test
+    fun reopened_observer_does_not_apply_a_cursor_from_an_older_rollout_generation() = runBlocking<Unit> {
+        val resumed = rollout("rollout-2026-10-06T21-00-00-sid_resume.jsonl", "one", "two", "three")
+        val capture = Capture()
+        // The phone retained cursor 3 from another file. It is numerically valid here but means
+        // something different: honoring it would return only the last turn and lose the first two.
+        val obs = ObserveSession("convo", "/repo", "sid", resumed, capture, scope,
+            agent = AgentKind.CODEX, sinceSeq = 3, fileResolver = null, tickMs = 50)
+        obs.start()
+        withTimeout(5_000) { while (capture.frames.none { it is ConvoHistory }) delay(20) }
+        val history = capture.frames.filterIsInstance<ConvoHistory>().single()
+        assertFalse(history.delta)
+        assertEquals(listOf("one", "two", "three"), history.messages.map { it.text })
+        obs.close()
+    }
+
+    @Test
     fun idle_ticks_do_not_re_announce_an_unchanged_snapshot() = runBlocking<Unit> {
         val f = rollout("rollout-2026-10-05T20-00-00-sid3.jsonl", "one")
         f.appendText("""{"timestamp":"2026-10-06T03:00:02.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t"}}""" + "\n")
@@ -108,7 +124,7 @@ class ObserveSessionFileSwitchTest {
         delay(600) // ~30 idle ticks
         val lives = c.frames.filterIsInstance<SessionLive>()
         assertTrue(lives.size <= 2, "idle ticks re-announced ${lives.size} times")
-        assertNotNull(lives.first().observation?.progress)
+        assertNotNull(lives.last().observation?.progress)
         obs.close()
     }
 

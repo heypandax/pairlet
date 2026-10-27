@@ -88,12 +88,29 @@ build 号使用 ios-release 的 run number。工作流成功且目标 build 为 
    ```
 
 4. 所有请求的平台 job 成功后才允许生成 `SHA256SUMS`、签名清单（`sign-manifest`，见下文
-   「更新包签名」）和更新 Scoop。取得两份 macOS daemon
-   的最终 SHA-256 后，更新 `heypandax/homebrew-tap`；不要把仓库模板里的上一版 hash 发布出去。
+   「更新包签名」）和更新 Scoop。`homebrew-candidate` 在校验清单与签名任务成功后下载两份
+   macOS daemon，生成并验证 cask 与发行记录，保存在同名 Actions artifact；
+   验收后将准确 cask 发布到 `heypandax/homebrew-tap`，并将生成的两份文件回写本仓。
+   该任务不会自动推送 tap；不要把上一版 hash 搭配新版本 URL 发布。
 5. 按本文各平台章节完成安装、进程、商店/TestFlight 与下载链接验收。工作流启动不等于发布完成。
 
 版本源由 `scripts/check-release-version.sh` 强制锁步：daemon fallback、Android/桌面版本、iOS
-marketing version、桌面 seed 与 Homebrew 模板必须一致；Android `versionCode` 另行递增。
+marketing version、桌面 seed 与 Harmony；Android `versionCode` 另行递增。普通 PR CI 也执行此门禁。
+
+Homebrew 单独登记在 `packaging/homebrew/release.json`，与 cask 的版本、双架构 hash 和
+固定下载 URL 映射核对。构建候选版时可以继续指向已登记的旧正式版，不能指向未来版本，
+也不能只改版本而保留旧 hash。新正式资产齐备后才能推进登记：
+
+```bash
+# 将目标 Release 的两份 macOS daemon 和 SHA256SUMS 下载到独立目录后：
+python3 scripts/homebrew-release.py prepare 2.6.1 --assets /path/to/final-assets
+python3 scripts/homebrew-release.py prepare 2.6.1 --assets /path/to/final-assets --write
+python3 scripts/homebrew-release.py verify 2.6.1 --assets /path/to/final-assets
+```
+
+`prepare` 默认只预览；`--write` 同时更新 cask 和发行记录。`verify` 要求目标版本、
+两份包的实际字节、`SHA256SUMS` 和 cask 完全一致；缺少一架构或哈希不符均失败。
+同一已登记版本出现不同 hash 也拒绝推进，应使用新版本。此工具不替代签名、公证或安装验收。
 
 ## 更新包签名
 
@@ -339,7 +356,9 @@ security find-identity -v -p codesigning
 
 3. **在主仓 `heypandax/cc-pocket` 建 GitHub Release** `v1.1.0`（tag 用 daemon 版本号），把上面的 tar.gz 作为附件上传。⚠️ 别传到 tap 仓库——tap 只放 cask。
 
-4. **更新 cask**：把 `packaging/homebrew/Casks/cc-pocket.rb` 的 `version` + `sha256` 填好（`url` 已模板化为 `#{version}` 且指向主仓 Release，不用动），提交到 `heypandax/homebrew-tap` 的 `Casks/cc-pocket.rb`。
+4. **更新 cask**：使用 `homebrew-candidate` 产物，或按上方 `homebrew-release.py prepare/verify`
+   流程从最终包生成；将 cask 提交到 `heypandax/homebrew-tap`，同时将 cask 与 `release.json`
+   回写本仓。`url` 已模板化为 `#{version}` 且指向主仓 Release，不需手工替换。
 
 5. **验收**：
 

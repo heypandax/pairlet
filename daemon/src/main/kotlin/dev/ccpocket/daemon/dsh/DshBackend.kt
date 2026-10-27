@@ -61,8 +61,10 @@ import java.util.concurrent.ConcurrentHashMap
  *     unconsumed-prompt ledger never settles and every relaunch re-runs old prompts (issue #122).
  *  3. **`session/set_config_option` takes `configId`, not `optionId`** (a wrong name is a zod error, not
  *     a no-op), and the model VALUE is the opaque `["<provider>","<model>"]` JSON string dsh advertised —
- *     a bare model id is rejected with `unknown model option`. The bare id is what cc-pocket shows the
- *     user, so the two are joined through the advertised catalogue ([DshConfigOptions]).
+ *     a bare model id is rejected with `unknown model option`. cc-pocket shows and stores `provider/model`,
+ *     so the two are joined through the advertised catalogue ([DshConfigOptions]). A requested model that
+ *     catalogue cannot name — or a launch write dsh refuses — FAILS the open rather than running on dsh's
+ *     default provider (a plugin's provider bills a different account).
  *  4. **`session/request_permission` carries only `toolCall.toolCallId`** — no name, no input. The card's
  *     body therefore comes from the `tool_call` update we saw earlier in the turn, which is why tool
  *     calls are tracked even though v1 renders no tool cards.
@@ -151,13 +153,18 @@ class DshBackend(
                 config.onErrorResponse(id, why)
             override suspend fun onSyntheticFrame(type: String?, root: JsonObject): List<AgentEvent>? =
                 config.onSyntheticFrame(type, root)
+
+            // A model/effort switch not answered yet keeps every prompt waiting — see [applySettings].
+            override fun holdsPromptGate(): Boolean = config.busy()
         },
     )
 
     /**
-     * The model/effort writes, on the chain shared with Kimi: sent in order after the session opens, the prompt
-     * gate opening on the last one's answer, each bounded by [configTimeoutMs] (a launch write that never answers
-     * fails the open with [STAGE_CONFIG]; a user switch that never answers is reported like a refusal).
+     * The model/effort writes, on the chain shared with Kimi: sent one at a time, in order, after the session opens
+     * and on every user switch; the prompt gate opens once they are all answered, each bounded by [configTimeoutMs].
+     * A launch write that never answers fails the open with [STAGE_CONFIG]; a MODEL write that is refused, never
+     * answered or not confirmed by the read-back leaves nothing running on another provider — the open fails, or a
+     * running session refuses every prompt with [STAGE_SWITCH] until the next pick relaunches it.
      */
     private val config: AcpConfigChain = AcpConfigChain(
         client, log,
@@ -165,6 +172,7 @@ class DshBackend(
         agentName = "the DeepSeek Harness",
         stageConfig = STAGE_CONFIG,
         timeoutMs = configTimeoutMs,
+        stageSwitch = STAGE_SWITCH,
         host = object : AcpConfigChain.Host {
             override fun describe(configId: String) =
                 if (configId == DshConfigOptions.MODEL) "the model" else "the reasoning effort"
@@ -173,13 +181,32 @@ class DshBackend(
             // request, is what the header is told.
             override suspend fun onApplied(write: AcpConfigChain.Write, result: JsonObject?): List<AgentEvent> {
                 options = DshConfigOptions.parse(result?.arr("configOptions"), fallback = options)
-                catalog.publish(this@DshBackend, options)
+                catalog.publish(this@DshBackend, options, client.workdir)
                 return listOfNotNull(runtimeMeta(model = options.currentModel, effort = options.currentEffort))
             }
 
-            override suspend fun onChainSettled(timedOut: Boolean) = announce(timedOut)
+            // A model switch counts once dsh's read-back NAMES the model written; an answer without a read-back stands as
+            // dsh's word (every probed release answers with the complete state, so that is a future dsh's choice).
+            override fun unconfirmed(write: AcpConfigChain.Write, result: JsonObject?): String? {
+                if (write.configId != DshConfigOptions.MODEL) return null
+                val now = AcpConfigChain.currentValue(result?.arr("configOptions"), DshConfigOptions.MODEL) ?: return null
+                if (DshConfigOptions.modelIdOf(now) == DshConfigOptions.modelIdOf(write.value)) return null
+                return "the DeepSeek Harness still reports ${options.currentModel ?: DshConfigOptions.modelIdOf(now)}"
+            }
+
+            override suspend fun onChainSettled(timedOut: Boolean): List<AgentEvent> {
+                // A write that failed this process (a launch write that never landed, or a model that was not
+                // applied): the next model/effort pick must relaunch.
+                if (timedOut) launchBlocked = true
+                return announce(timedOut)
+            }
         },
     )
+
+    /** This process refuses every prompt because it could not run the requested settings — the model is not
+     *  offered or is ambiguous, or a model write failed, at launch or on a switch. A later model/effort pick therefore
+     *  needs a RELAUNCH: a `set_config_option` on this process cannot lift the refusal. Reset on every attach. */
+    @Volatile private var launchBlocked = false
 
     /** The session's advertised configuration options, as last read back from dsh. The model picker
      *  ([DshModelService]) reads the same catalogue through [DshCatalog], and every model/effort write
@@ -220,7 +247,7 @@ class DshBackend(
         options = DshConfigOptions.EMPTY
         catalog.unpublish(this)
         config.reset(); toolCalls.clear()
-        announced = false; groupingNotice = null
+        announced = false; groupingNotice = null; launchBlocked = false; resumeNotice = null
         scope?.let { runCatching { it.cancel() } }
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         client.attach(io, spec.workdir.toString(), spec.resumeId)
@@ -271,12 +298,26 @@ class DshBackend(
         // avoids repeating it if the same session/new response is delivered twice.
         if (client.resumeId == null && client.sessionId == null) groupingNotice = UNGROUPED_NOTICE
         options = DshConfigOptions.parse(result?.arr("configOptions"))
-        catalog.publish(this, options)
+        catalog.publish(this, options, client.workdir)
         client.bindSession(sid)
+        // A requested model this session's catalogue cannot name — gone, or a bare pre-provider id several
+        // providers share — FAILS the open. Opening the gate anyway would run the turn on dsh's own default,
+        // i.e. on a provider (and an account) the user never chose. The model the transcript recorded is NOT a
+        // request: it only ever reaches the header (resumeModel), so it can neither block nor be re-applied.
+        launchModelProblem()?.let { why ->
+            launchBlocked = true
+            return client.failHostStartup(STAGE_MODEL, why) + announce(timedOut = true)
+        }
+        // `session/resume` answers with dsh's CURRENT selection, not necessarily the one the session last ran on
+        // (probe 0.2.1-rc.3: an effort written before the resume came back at dsh's default), so a resume with no
+        // requested model may run on dsh's default. The transcript's last model is
+        // history, not a request — it is never re-applied — but a silent switch of provider is exactly how a reply
+        // ends up billed to another account, so the difference is said out loud.
+        resumeNotice = resumedOnOtherModelNotice() // said right after the announcement — never injected from the pump
         // Model/effort BEFORE the prompt gate opens: running the opening turn on the previous model and
         // correcting it afterwards would bill the user for a model they did not pick. Each write is a
         // request, so the gate opens on its RESPONSE (see [AcpConfigChain]) rather than on hope.
-        if (startConfigChain(launchModel, launchEffort, announce = false)) return emptyList()
+        if (config.start(plannedWrites(launchModel, launchEffort, announce = false))) return emptyList()
         return announce(timedOut = false) + client.openPromptGate()
     }
 
@@ -290,8 +331,12 @@ class DshBackend(
         return listOfNotNull(
             AgentEvent.SessionInit(sessionId = sid, cwd = client.workdir, model = model, notice = groupingNotice),
             if (timedOut) null else runtimeMeta(model = options.currentModel, effort = options.currentEffort),
+            resumeNotice?.takeIf { !timedOut }?.let { AgentEvent.AssistantText(it) },
         )
     }
+
+    /** [resumedOnOtherModelNotice]'s text for this process, carried to its announcement. */
+    @Volatile private var resumeNotice: String? = null
 
     /** This process's session has been announced — once, after the launch writes ([announce]). */
     @Volatile private var announced = false
@@ -385,42 +430,43 @@ class DshBackend(
     // ---- outbound: model / effort ----
 
     /**
-     * Queue the `session/set_config_option` writes [model] and [effort] need, and send the first.
+     * The `session/set_config_option` writes [model] and [effort] need against this session's catalogue, in order:
+     * the model before the effort, because the valid effort levels are a property of the selected model.
      *
-     * Returns true when a write really went out, i.e. when the caller must wait for its response rather
-     * than proceeding. Nothing is sent for a value the session is ALREADY on — dsh would accept it, but
-     * an unnecessary round trip at launch delays the opening turn for nothing.
+     * Nothing for a value the session is ALREADY on — dsh would accept it, but an unnecessary round trip at launch
+     * delays the opening turn for nothing — unless writes are still pending: then "already on" describes a state the
+     * pending ones are about to change, and the last request has to win. A model the catalogue cannot name contributes
+     * nothing here; both callers refuse it first ([launchModelProblem], [applySettings]).
      */
-    private suspend fun startConfigChain(model: String?, effort: String?, announce: Boolean): Boolean {
-        if (client.sessionId == null) return false
-        val writes = ArrayList<AcpConfigChain.Write>(2)
-        model?.takeIf { it.isNotBlank() && it != options.currentModel }?.let { wanted ->
-            val value = options.modelValue(wanted)
-            if (value == null) {
-                // The id is not in dsh's catalogue: say so rather than sending a value it will reject.
-                log.warn("dsh has no model option for $wanted — leaving the session's own selection")
-                if (announce) client.injectNotice("⚠️ DeepSeek Harness has no model $wanted")
-            } else {
-                // the value is dsh's opaque pair, sent under `configId` (fact 3)
-                writes += AcpConfigChain.Write(DshConfigOptions.MODEL, value, announce)
+    private fun plannedWrites(model: String?, effort: String?, announce: Boolean): List<AcpConfigChain.Write> {
+        val pending = config.busy()
+        return buildList {
+            model?.takeIf { it.isNotBlank() }?.let { wanted ->
+                val r = options.resolve(wanted) as? DshConfigOptions.Resolution.Found ?: return@let
+                if (r.model.id == options.currentModel && !pending) return@let
+                if (r.migrated) log.info("dsh model '$wanted' migrated to '${r.model.id}' (unique name match)")
+                // the value is dsh's opaque pair, sent under `configId` (fact 3); REQUIRED, launch and switch alike —
+                // a model write that fails must never leave prompts running on another provider's account
+                add(AcpConfigChain.Write(DshConfigOptions.MODEL, r.model.value, announce, required = true))
+            }
+            effort?.takeIf { it.isNotBlank() && (it != options.currentEffort || pending) }?.let {
+                add(AcpConfigChain.Write(DshConfigOptions.EFFORT, it, announce))
             }
         }
-        effort?.takeIf { it.isNotBlank() && it != options.currentEffort }?.let {
-            writes += AcpConfigChain.Write(DshConfigOptions.EFFORT, it, announce)
-        }
-        // Only the LAST write opens the prompt gate; the model must land before the effort, because the
-        // valid effort levels are a property of the selected model.
-        return config.start(writes)
     }
 
     /**
-     * A model/effort change applies to the NEXT turn — no relaunch (`session/set_config_option` is
-     * accepted at any point in a session's life). A MODE change does need one: `DSH_PERMISSION_MODE` is
-     * read at process boot and the ACP surface exposes no mode switch.
+     * A model/effort change applies to the NEXT turn — no relaunch (`session/set_config_option` is accepted at
+     * any point in a session's life). A MODE change does need one: `DSH_PERMISSION_MODE` is read at process boot
+     * and the ACP surface exposes no mode switch.
      *
-     * The write is fired on the backend scope rather than awaited: this runs on the Conversation's command
-     * path, which must not block on IO, and the Boolean only answers the relaunch question. The read-back
-     * rides home as a [AgentEvent.RuntimeMeta], so the header follows the truth rather than the request.
+     * NOTHING IS SENT ON THE MODEL BEING LEFT. The writes are queued and the prompt gate shut HERE, synchronously, on
+     * the Conversation's command path — before it can hand over the next prompt — and the gate reopens only once dsh
+     * has answered every write (and, for the model, its read-back names it). The writes themselves go out from the
+     * backend scope: this path must not block on IO, and the Boolean only answers the relaunch question. The
+     * read-back rides home as a [AgentEvent.RuntimeMeta], so the header follows the truth rather than the request.
+     * A model write that fails leaves the process refusing every prompt ([AcpClient.failSettings]); the next pick
+     * relaunches.
      */
     override fun applySettings(mode: PermissionMode?, model: String?, effort: String?): Boolean {
         var relaunch = false
@@ -431,8 +477,30 @@ class DshBackend(
         model?.let { launchModel = it }
         effort?.let { launchEffort = it }
         if (model == null && effort == null) return relaunch
+        // After a refused open no write can help (the process refuses every prompt): the pick stored above takes
+        // effect through a fresh process, whose launch path applies it at session open.
+        if (launchBlocked) return true
         if (client.sessionId == null) return relaunch // stored above; the launch path applies it at session open
-        scope?.launch { startConfigChain(model, effort, announce = true) }
+        model?.takeIf { it.isNotBlank() }?.let { wanted ->
+            val r = options.resolve(wanted)
+            if (r !is DshConfigOptions.Resolution.Found) {
+                // A model this session cannot name. Nothing more may run here: a prompt sent while a turn still runs
+                // rides THIS process (Conversation's relaunch-then-send waits for an idle turn), so the process refuses
+                // from now, and the next idle prompt relaunches — the launch path then refuses with the full reason,
+                // or opens on the model if dsh offers it by then.
+                log.warn("dsh cannot switch to model $wanted: ${describeResolution(wanted, r)}")
+                launchBlocked = true
+                client.refuseFromNow("$STAGE_SWITCH: ${describeResolution(wanted, r)}")
+                return true
+            }
+        }
+        val writes = plannedWrites(model, effort, announce = true)
+        if (writes.isEmpty()) return relaunch
+        // Queue FIRST — the gate's open path asks [AcpConfigChain.busy] under the FIFO lock, so an opening racing
+        // this switch stays shut — THEN shut the gate, so the next prompt queues behind the switch.
+        config.enqueue(writes)
+        client.shutPromptGate()
+        scope?.launch { config.kick() }
         return relaunch
     }
 
@@ -528,6 +596,59 @@ class DshBackend(
 
     private fun storeRoot(): Path = storeRootForTest ?: DshPaths.sessionsRoot()
 
+    /**
+     * Why the launch [launchModel] cannot run in this session, or null when it can (or none was requested).
+     * Only a resolvable request may proceed; the reason names what to do, including the dsh profile hint when
+     * a plugin is installed elsewhere but not in the `acp` profile Pairlet starts.
+     */
+    private fun launchModelProblem(): String? {
+        val wanted = launchModel?.takeIf { it.isNotBlank() } ?: return null
+        val r = options.resolve(wanted)
+        if (r is DshConfigOptions.Resolution.Found) return null
+        val hint = if (r is DshConfigOptions.Resolution.Missing) {
+            runCatching { DshProfiles.missingPluginHint(DshProfiles.read(DshPaths.dshHome())) }.getOrNull()
+        } else {
+            null
+        }
+        return describeResolution(wanted, r) + (hint?.let { " $it" } ?: "")
+    }
+
+    /**
+     * For a RESUME with no requested model: a notice when the model the transcript last recorded is not the one dsh
+     * reopened the session on, or null. Compared through [DshConfigOptions.resolve], so a transcript record without
+     * its provider half that names the same model does not raise a false alarm.
+     */
+    private fun resumedOnOtherModelNotice(): String? {
+        val rid = client.resumeId ?: return null
+        if (!launchModel.isNullOrBlank()) return null
+        val now = options.currentModel ?: return null
+        val recorded = runCatching { resumeMeta(client.workdir, rid).model }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: return null
+        val r = options.resolve(recorded)
+        if (r is DshConfigOptions.Resolution.Found && r.model.id == now) return null
+        val pick = if (r is DshConfigOptions.Resolution.Found) {
+            " To continue on it, pick ${r.model.id} in the model picker."
+        } else {
+            " " + describeResolution(recorded, r)
+        }
+        return "⚠️ This session last ran on $recorded; DeepSeek Harness reopened it on $now, which the next reply " +
+            "will use.$pick"
+    }
+
+    private fun describeResolution(wanted: String, r: DshConfigOptions.Resolution): String = when (r) {
+        is DshConfigOptions.Resolution.Found -> "model $wanted is available"
+        DshConfigOptions.Resolution.Missing -> {
+            val offered = options.models.map { it.id }
+            "DeepSeek Harness (profile `${DshLauncher.PROFILE}`, the one Pairlet starts) offers no model $wanted" +
+                (if (offered.isEmpty()) "" else " — it offers ${offered.take(MAX_LISTED_MODELS).joinToString(", ")}" +
+                    (if (offered.size > MAX_LISTED_MODELS) ", …" else "")) +
+                ". Pick an offered model."
+        }
+        is DshConfigOptions.Resolution.Ambiguous ->
+            "model $wanted is offered by more than one provider (${r.candidates.joinToString(", ") { it.id }}) — " +
+                "pick one so the right account is used."
+    }
+
     /** VISIBLE FOR TESTS ONLY: what dsh last reported as this session's model (the live IT asserts the
      *  read-back rather than the request — see [DshBackendLiveIT]). */
     internal fun liveModelForTest(): String? = options.currentModel
@@ -573,6 +694,17 @@ class DshBackend(
         /** One config write's bound — the handshake watchdog's, for the same reason: a slow machine must not be
          *  accused, and a `set_config_option` is a cheaper round trip than the handshake it follows. */
         const val CONFIG_TIMEOUT_MS = HANDSHAKE_TIMEOUT_MS
+
+        /** A running session's model switch did not take effect: it now refuses every prompt until a new pick. */
+        const val STAGE_SWITCH = "did not switch the DeepSeek Harness session to the chosen model — nothing more " +
+            "is sent on any model until you pick one again"
+
+        /** The requested model is not in this session's catalogue (or is ambiguous): nothing was sent. */
+        const val STAGE_MODEL = "did not start the DeepSeek Harness session on the chosen model — " +
+            "nothing was sent on a different model"
+
+        /** How many offered ids a "no such model" reason lists before eliding the rest. */
+        const val MAX_LISTED_MODELS = 8
 
         /** The launch-time model/effort never landed: the session was not started on the user's choice. */
         const val STAGE_CONFIG = "could not apply the chosen model settings to the DeepSeek Harness session — " +

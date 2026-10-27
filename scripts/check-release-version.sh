@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fail-fast release guard: every shipped client/daemon version source must agree.
+# Fail-fast release guard: candidate sources agree; Homebrew pins a verified release separately.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,7 +12,6 @@ DAEMON_VERSION=$(sed -nE 's/.*findProperty\("appVersion"\).*\?: "([^"]+)".*/\1/p
 MOBILE_VERSION=$(sed -nE 's/.*val appVersionName = "([^"]+)".*/\1/p' mobile/composeApp/build.gradle.kts | head -1)
 DESKTOP_VERSION=$(sed -nE 's/.*packageVersion = "([^"]+)".*/\1/p' mobile/composeApp/build.gradle.kts | head -1)
 SEED_VERSION=$(sed -nE 's/.*override val appVersion = "([^"]+)".*/\1/p' mobile/composeApp/src/desktopMain/kotlin/dev/ccpocket/app/desktop/SeedDesktopModel.kt | head -1)
-CASK_VERSION=$(sed -nE 's/^[[:space:]]*version "([^"]+)".*/\1/p' packaging/homebrew/Casks/cc-pocket.rb | head -1)
 IOS_VERSION=$(python3 - <<'PY'
 import plistlib
 
@@ -37,8 +36,7 @@ for entry in \
   "desktop-package:$DESKTOP_VERSION" \
   "desktop-seed:$SEED_VERSION" \
   "ios:$IOS_VERSION" \
-  "harmony:$HARMONY_VERSION" \
-  "homebrew-template:$CASK_VERSION"
+  "harmony:$HARMONY_VERSION"
 do
   label=${entry%%:*}
   value=${entry#*:}
@@ -57,3 +55,4 @@ grep -Fq "本次更新（${MOBILE_VERSION}）" fastlane/metadata/zh-Hans/release
   fail "Chinese release notes do not name $MOBILE_VERSION"
 
 echo "Release version lockstep OK: $MOBILE_VERSION"
+python3 scripts/homebrew-release.py check "$MOBILE_VERSION"

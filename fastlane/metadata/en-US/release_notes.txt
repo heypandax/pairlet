@@ -1,8 +1,8 @@
-What's new in 2.6.0
+What's new in 2.6.1
 
-- Choose what happens after dictation: put the text in the composer, or enable correction before sending. Preview the text and highlighted changes; if correction fails or a change needs review, the text stays available for you to check.
-- Improved session recovery when switching between Wi-Fi and cellular networks. Fixed missing session content after returning to a local connection.
-- Fixed history loading for newer DeepSeek Harness sessions, preserving messages and tool results.
-- Cleaner session lists with fewer internal subtask records, and improved session grouping after a project is moved.
+- Improved Codex usage details, including available quota reset cards and confirmation when redeeming an eligible card.
+- Request an update for a compatible paired computer from Settings, with progress and recovery status shown in the app.
+- DeepSeek Harness model choices now retain their provider. If the selected model cannot be applied, your message is kept instead of being sent with another model.
+- The copy button now appears after each agent reply, making it easier to copy the answer after reading it.
 
-Update Pairlet on your computer too. Voice correction requires a compatible computer app and a configured agent. A disclosure explains data use before you first enable it.
+Update Pairlet on your computer too to use the new capabilities. Quota reset cards are available only when supported by your existing account.

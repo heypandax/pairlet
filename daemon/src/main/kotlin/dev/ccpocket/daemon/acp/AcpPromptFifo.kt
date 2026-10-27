@@ -10,6 +10,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /** One user prompt as Conversation handed it over: its text and the images riding with it. */
 data class AcpPrompt(val text: String, val images: List<ImageData>) {
@@ -39,9 +40,10 @@ data class AcpPrompt(val text: String, val images: List<ImageData>) {
  * flushed when the in-flight one settles (any stopReason, error included).
  *
  * THE GATE: prompts that arrive before the session can take them wait in the SAME queue, behind a gate the
- * client opens once the session is ready (for dsh: once its launch-time model/effort landed too). Entries
- * still queued when the process dies stay unsettled in Conversation's ledger, which re-injects them into
- * the fresh process — so [reset] loses nothing.
+ * client opens once the session is ready (for dsh: once its launch-time model/effort landed too), and that a
+ * host may [shut] again mid-session (dsh: while a model switch awaits its answer). Entries still queued when
+ * the process dies stay unsettled in Conversation's ledger, which re-injects them into the fresh process — so
+ * [reset] loses nothing.
  *
  * Every decision and its in-flight mark happen under ONE lock: registering after the write left a window
  * where a racing send saw "idle" and double-sent — the very rejection the FIFO exists to prevent.
@@ -49,7 +51,9 @@ data class AcpPrompt(val text: String, val images: List<ImageData>) {
 class AcpPromptFifo(private val nextId: () -> Long) {
     private val lock = Mutex()
     private val queue = ArrayDeque<AcpPrompt>() // guarded by [lock]
-    @Volatile private var gateOpen = false // guarded by [lock] for writes
+    /** Odd = closed; every shut changes the generation so a stale prepare cannot reopen it. */
+    private val gateState = AtomicLong(1)
+    private val gateOpen: Boolean get() = gateState.get() and 1L == 0L
 
     /** In-flight `session/prompt` request id → its text, replayed as the consumption receipt on settle (no
      *  ACP agent we drive sends a live `user_message_chunk`, so the settle IS the receipt). */
@@ -57,7 +61,7 @@ class AcpPromptFifo(private val nextId: () -> Long) {
 
     /** A fresh process: nothing queued, nothing in flight, gate shut. */
     suspend fun reset() {
-        lock.withLock { queue.clear(); gateOpen = false }
+        lock.withLock { queue.clear(); shut() }
         inFlight.clear()
     }
 
@@ -76,6 +80,30 @@ class AcpPromptFifo(private val nextId: () -> Long) {
      *  FIFO until that settle, like an in-flight prompt. */
     suspend fun reserve(text: String): Long = lock.withLock { reserveLocked(text) }
 
+    /** [reserve] for a prompt that is to be REFUSED, in turn order: only when nothing is in flight or queued ahead
+     *  of it; otherwise it queues, and settles when what is ahead of it has. Returns the reserved id, or null when
+     *  queued. A refusal settled while another prompt runs would end that turn early. */
+    suspend fun reserveIfIdle(prompt: AcpPrompt): Long? = lock.withLock {
+        if (inFlight.isEmpty() && queue.isEmpty()) {
+            reserveLocked(prompt.text)
+        } else {
+            queue.addLast(prompt)
+            null
+        }
+    }
+
+    /**
+     * Close the gate again, synchronously — callable off a coroutine (dsh does it on Conversation's command path,
+     * before the next prompt can be sent). A generation change invalidates any opening whose prepare
+     * was already running, without blocking this synchronous command path on the coroutine mutex.
+     */
+    fun shut() {
+        gateState.updateAndGet { (it + 2L) or 1L }
+    }
+
+    /** True while a prompt (or a reserved refusal) awaits its settle. */
+    fun busy(): Boolean = inFlight.isNotEmpty()
+
     /**
      * Open the gate and reserve the head, all under the lock. [prepare] runs first, inside the lock, and may
      * veto the opening (returning false) — kimi binds the session id there so the binding and the release
@@ -87,8 +115,9 @@ class AcpPromptFifo(private val nextId: () -> Long) {
         acceptable: (AcpPrompt) -> Boolean,
         refused: MutableList<AcpPrompt>,
     ): Pair<Long, AcpPrompt>? = lock.withLock {
+        val generation = gateState.get()
         if (!prepare()) return null
-        gateOpen = true
+        if (!gateState.compareAndSet(generation, generation and -2L)) return null
         takeLocked(acceptable, refused)
     }
 

@@ -1,5 +1,6 @@
 package dev.ccpocket.app.net
 
+import dev.ccpocket.protocol.RelayEndpoint
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
@@ -67,7 +68,7 @@ object RelayControlDial {
         try {
             return withTimeout(budget) {
                 var outcome: DepositOutcome = DepositOutcome.Legacy
-                client.webSocket(urlString = "${paired.relay}/v1/device") {
+                client.webSocket(urlString = "${RelayEndpoint.transport(paired.relay)}/v1/device") {
                     outgoing.send(WsFrame.Text(control(DeviceHello(paired.deviceId, paired.credential))))
                     var protoV = 0
                     while (true) { // await the relay's auth verdict

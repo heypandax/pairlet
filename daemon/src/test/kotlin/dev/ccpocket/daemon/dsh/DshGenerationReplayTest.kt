@@ -97,7 +97,7 @@ class DshGenerationReplayTest {
             assertEquals("Final reply", replay.messages.last().text)
             assertEquals("File contents", replay.messages[2].output)
             assertEquals(true, replay.messages[2].ok)
-            assertEquals("fixture-model", DshTranscript.resumeMeta(transcript).model)
+            assertEquals("fixture/fixture-model", DshTranscript.resumeMeta(transcript).model)
         }
     }
 
@@ -290,7 +290,7 @@ class DshGenerationReplayTest {
         val replay = DshTranscriptReplay.slice(transcript, null)
         assertEquals("complete", replay.quality)
         assertEquals(listOf("Question", "Visible answer"), replay.messages.map { it.text })
-        assertEquals("fixture-model", DshTranscript.resumeMeta(transcript).model)
+        assertEquals("fixture/fixture-model", DshTranscript.resumeMeta(transcript).model)
         assertEquals(1, DshUsageScanner.usageRecords(0, root).size)
     }
 

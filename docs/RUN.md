@@ -154,6 +154,16 @@ daemon/build/install/cc-pocket-daemon/bin/pairlet pair
 
 ---
 
+## 在手机上更新电脑守护进程
+
+新版 App 的「设置 → 帮助与关于」提供官网入口。点击「当前 App」的可更新提示可打开确认弹窗，iOS 前往已有 App Store 页面，Android 前往已有发布下载页。
+
+点击「电脑守护进程」的可更新提示后，机主可确认让新版 daemon 自行检查、下载并校验最新发布版。此入口复用原更新器，仅对官方安装器管理、且后台服务指向稳定启动器的 macOS/Linux 安装开放；Homebrew、Scoop、源码/开发安装和旧 daemon 显示各自的原更新命令，不由 App 替换其安装方式。
+
+电脑有正在执行或等待处理的任务时，本次请求会拒绝更新；任务在下载期间开始时，会等任务结束再重启，不强制超时中断。重启会暂时断开连接，App 自动重连，并以 daemon 回报的实际版本确认结果。后台自动更新与手机请求共用执行锁，重复请求不会同时安装。开始安装后，手机会持续显示“电脑守护端正在更新”，暂停发送新提示词、新建会话和修改设置；历史、文件、额度等只读查看保持可用。已有任务的审批、问题回答和停止仍然允许，避免下载期间启动的后台任务与等待空闲的更新器互相阻塞。daemon 会在入口再次拦截控制帧，手机每隔数秒查询进度，断线重连后继续查询，确认更新结束或失败后恢复操作。被拦截的提示词保留在输入框，不会显示成已发送。
+
+协议为可选的 `DaemonInfo.daemonUpdateMode`（缺省 null），以及仅机主可用的 `pocket/daemon.update.start` / `pocket/daemon.update.get` / `pocket/daemon.update.status`；可选 `DaemonInfo.daemonUpdateInProgress` 帮助新连接立即暂停控制。更新拒绝使用 `PocketError(code=daemon_updating, promptId=...)`，让 App 保留未发送的提示词。App 仅在收到 `remote` 能力声明后发送更新请求；请求不携带 shell 命令、下载地址或目标版本。
+
 ## 一键自检（可选）
 
 ```bash

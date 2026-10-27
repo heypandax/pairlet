@@ -153,10 +153,18 @@ class CodexObserveParityTest {
         )
 
         assertTrue(registry.observing(convo))
+        // The first live announce is deliberately sparse and history arrives before metadata.
+        // Capture the seeded frame itself; seeing history alone does not prove backfill completed.
+        var seededLive: SessionLive? = null
         withTimeout(3_000) {
-            while (snapshot().none { it is SessionLive } || snapshot().none { it is ConvoHistory }) delay(20)
+            while (seededLive == null || snapshot().none { it is ConvoHistory }) {
+                seededLive = snapshot().filterIsInstance<SessionLive>().lastOrNull {
+                    it.model != null && it.contextWindow != null && it.contextUsed != null && it.title != null
+                }
+                if (seededLive == null || snapshot().none { it is ConvoHistory }) delay(20)
+            }
         }
-        val live = snapshot().filterIsInstance<SessionLive>().last()
+        val live = requireNotNull(seededLive)
         assertTrue(live.observing)
         assertEquals(AgentKind.CODEX, live.agent)
         assertEquals("gpt-5.6-sol", live.model)

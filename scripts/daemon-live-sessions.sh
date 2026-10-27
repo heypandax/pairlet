@@ -12,7 +12,7 @@ exclude=" $* "
 # 先把 daemon pid 列表兜住再遍历：没有 daemon 在跑时 `grep -v grep` 以 1 退出，pipefail 会把整条
 # 管道判为失败；调用方（两个 update 脚本）是 set -e 的，会在会话门这一步被静默中止（2026-09-04 实测，
 # 恰好是 daemon 已死、最需要更新的场景）。没有 daemon ⇒ 没有活会话 ⇒ 空输出 + 退出 0。
-daemons="$(ps aux | grep 'cc-pocket-daemon/lib' | grep -v grep | awk '{print $2}' || true)"
+daemons="$(ps -axo pid=,command= | awk '/cc-pocket-daemon\/lib/ && !/awk/ {print $1}')"
 for d in $daemons; do
   ps -axo pid=,ppid=,command= | while read -r pid ppid cmd; do
     [ "$ppid" = "$d" ] || continue

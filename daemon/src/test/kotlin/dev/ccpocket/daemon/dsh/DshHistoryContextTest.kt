@@ -186,7 +186,7 @@ class DshHistoryContextTest {
         )
         val backend = backend(root)
         assertEquals(1_100L, backend.resumeContextTokens(CWD, SESSION))
-        assertEquals("deepseek-v4-flash", backend.resumeModel(CWD, SESSION))
+        assertEquals("deepseek-official/deepseek-v4-flash", backend.resumeModel(CWD, SESSION))
     }
 
     /** An id that resolves to nothing is not an error — it is a null, and the open proceeds. */
@@ -216,7 +216,7 @@ class DshHistoryContextTest {
                 answered(seq = 5, model = "deepseek-v4-flash", input = 20, output = 2),
         )
         val row = DshTranscriptScanner.scan(CWD, root).single { it.sessionId == SESSION }
-        assertEquals("deepseek-v4-flash", row.model, "last-wins: the row must say what the session IS")
+        assertEquals("deepseek-official/deepseek-v4-flash", row.model, "last-wins: the row must say what the session IS")
     }
 
     /** …and a chat that never named a model stays blank rather than borrowing the local default. */

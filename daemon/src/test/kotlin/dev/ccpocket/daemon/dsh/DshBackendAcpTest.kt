@@ -46,6 +46,11 @@ class DshBackendAcpTest {
           "options":[{"value":"off","name":"Off"},{"value":"high","name":"High"},{"value":"max","name":"Max"}]}]
     """.trimIndent().replace("\n", "")
 
+    /** [configOptions] as dsh answers once it is on [model] / [effort]: a write's read-back names what it set. */
+    private fun configOptionsOn(model: String, effort: String = "high") = configOptions
+        .replace(""""currentValue":"[\"deepseek-official\",\"deepseek-v4-flash\"]"""", """"currentValue":"[\"deepseek-official\",\"$model\"]"""")
+        .replace(""""currentValue":"high"""", """"currentValue":"$effort"""")
+
     private fun update(body: String, session: String = SESSION) =
         """{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"$session","update":$body}}"""
 
@@ -107,9 +112,9 @@ class DshBackendAcpTest {
         assertTrue(w.any { """"method":"session/new"""" in it }, "a fresh conversation creates a session")
         val init = assertIs<AgentEvent.SessionInit>(events.first())
         assertEquals(SESSION, init.sessionId)
-        assertEquals("deepseek-v4-flash", init.model, "the bare id, never dsh's opaque selection value")
+        assertEquals("deepseek-official/deepseek-v4-flash", init.model, "provider/model, never dsh's opaque selection value")
         val meta = assertIs<AgentEvent.RuntimeMeta>(events[1])
-        assertEquals("deepseek-v4-flash", meta.model)
+        assertEquals("deepseek-official/deepseek-v4-flash", meta.model)
         assertEquals("high", meta.effort)
     }
 
@@ -198,14 +203,14 @@ class DshBackendAcpTest {
 
         // the model write settles → the effort write goes out (levels are a property of the model)
         b.parse(
-            """{"jsonrpc":"2.0","id":3,"result":{"configOptions":$configOptions}}""",
+            """{"jsonrpc":"2.0","id":3,"result":{"configOptions":${configOptionsOn("deepseek-v4-pro")}}}""",
         )
         val effortWrite = w.last { """"method":"session/set_config_option"""" in it }
         assertTrue(""""configId":"reasoning_effort"""" in effortWrite && """"value":"max"""" in effortWrite)
         assertTrue(w.none { """"method":"session/prompt"""" in it }, "still gated behind the last write")
 
         // the last write settles → the gate opens
-        b.parse("""{"jsonrpc":"2.0","id":4,"result":{"configOptions":$configOptions}}""")
+        b.parse("""{"jsonrpc":"2.0","id":4,"result":{"configOptions":${configOptionsOn("deepseek-v4-pro", "max")}}}""")
         assertTrue(w.any { """"method":"session/prompt"""" in it && "hello" in it })
     }
 
@@ -471,7 +476,7 @@ class DshBackendAcpTest {
         val b = ready(w, spec = AgentSpec(Path.of("/repo"), model = "deepseek-v4-pro", mode = PermissionMode.DEFAULT))
         b.sendPrompt("look", listOf(PNG))
         b.sendPrompt("then this", emptyList())
-        val events = b.parse("""{"jsonrpc":"2.0","id":3,"result":{"configOptions":$configOptions}}""")
+        val events = b.parse("""{"jsonrpc":"2.0","id":3,"result":{"configOptions":${configOptionsOn("deepseek-v4-pro")}}}""")
         assertEquals("look", events.filterIsInstance<AgentEvent.UserReplay>().single().text)
         assertTrue(events.filterIsInstance<AgentEvent.TurnResult>().single().isError)
         assertEquals(blocks("then this"), contentOf(prompts(w).single()))

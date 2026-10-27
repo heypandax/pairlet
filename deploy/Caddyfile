@@ -83,7 +83,7 @@ pocket.ark-nexus.cc {
 	# internet for the ACME challenge) and auto-handles the WebSocket upgrade,
 	# so the relay's /v1/daemon and /v1/device WS endpoints just work.
 	handle {
-		reverse_proxy 127.0.0.1:9000 {
+		reverse_proxy 127.0.0.1:19001 {
 			# Same rule as /support-api above: never forward a caller-supplied address. Caddy
 			# APPENDS to an existing X-Forwarded-For, so without this overwrite the relay's
 			# rate limiters key on a string the caller wrote — rotate it per request and the
@@ -179,7 +179,7 @@ relay.pairlet.org {
     request_body @analytics {
         max_size 8KB
     }
-    reverse_proxy 127.0.0.1:9000 {
+    reverse_proxy 127.0.0.1:19001 {
         header_up X-Forwarded-For {remote_host}
         header_up X-Real-IP {remote_host}
     }

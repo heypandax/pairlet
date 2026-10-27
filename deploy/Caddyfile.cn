@@ -1,0 +1,18 @@
+{
+    admin 127.0.0.1:2019
+    servers {
+        protocols h1 h2
+    }
+}
+
+# Mainland primary since 2026-10-27; HK legacy entries tunnel to this same relay.
+relay.pairlet.cn {
+    @analytics path /v1/analytics/*
+    request_body @analytics {
+        max_size 8KB
+    }
+    reverse_proxy 127.0.0.1:9000 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+    }
+}

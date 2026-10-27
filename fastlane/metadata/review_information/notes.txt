@@ -12,4 +12,6 @@ OPTIONAL HELP: the Help screen opens our website's AI support, a separate HTTPS 
 
 DIAGNOSTICS: Settings has "Share usage and diagnostics" and a copy-latest-diagnostic-ID button when an ID is available. Firebase provides usage analytics and crash reports. Sentry receives structured diagnostic errors, logs and timing information, excluding prompts, conversation text, file paths/contents, agent output and pairing credentials. These use separate HTTPS requests, outside the encrypted relay channel. The app toggle controls this app; the daemon has its own setting.
 
+NEW IN 2.6.1: usage controls show quota reset cards already available in the user's existing Codex account on their computer. Pairlet does not sell cards. Redemption requires explicit confirmation and is handled by the computer-side CLI. Settings can request an update of a compatible paired computer. DeepSeek Harness retains the chosen model's provider and keeps the message unsent if that model cannot be applied.
+
 No Pairlet account or login is required. Coding-session transport uses standard TLS + Noise/X25519/AES-GCM; ITSAppUsesNonExemptEncryption is false.

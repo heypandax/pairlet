@@ -86,9 +86,7 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun QuotaBar(model: DesktopModel) {
     val repo = model.usageRepo ?: return
-    // The refresh driver must run even when there is nothing to draw — otherwise the very first fetch
-    // would never fire and the strip could never appear. Hence: effect first, render decision after.
-    ClaudeQuotaRefreshEffect(repo)
+    // DesktopApp owns refresh and the /usage sheet; both outlive a collapsed sidebar.
 
     // one thin row per backend that has numbers (issue #348), Claude first. A single backend is the
     // pre-#348 strip unchanged; the second row only appears on a machine that really has two accounts.
@@ -271,7 +269,7 @@ private fun QuotaPopover(repo: PocketRepository, sec: QuotaSection, titled: Bool
  * without it.
  */
 @Composable
-private fun ClaudeQuotaRefreshEffect(repo: PocketRepository) {
+internal fun DesktopQuotaRefreshEffect(repo: PocketRepository) {
     val policy = remember(repo) {
         ClaudeQuotaRefreshPolicy(now = { epochMillis() }, fetch = { force -> repo.fetchAllQuotas(force) })
     }

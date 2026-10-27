@@ -21,8 +21,12 @@ jpackage 不能跨平台编译，所以每个平台的产物都在对应 OS 上�
 ## 常用命令
 
 ```bash
-# 发布前：校验 daemon / Android / iOS / 桌面 / Homebrew 模板版本锁步
+# 发布前：校验源码版本锁步及 Homebrew 已登记发行版
 bash scripts/check-release-version.sh <ver>
+
+# 资产齐备后：校验双架构真实包和 SHA256SUMS，再生成 Homebrew 配置
+python3 scripts/homebrew-release.py prepare <ver> --assets /path/to/final-assets --write
+python3 scripts/homebrew-release.py verify <ver> --assets /path/to/final-assets
 
 # 只构建桌面端（mac，签名+公证；要 .env 里的 DEVELOPER_ID + APPLE_* 凭证）
 scripts/release-desktop-macos.sh

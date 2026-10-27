@@ -57,7 +57,9 @@ class DshBackendLiveIT {
         val spec = AgentSpec(
             workdir = workdir,
             mode = PermissionMode.DEFAULT,
-            model = "deepseek-v4-pro", // exercises the opaque-value join before the first turn
+            // a PRE-PROVIDER bare name, as an older app saved it: exercises the unique-name migration and the
+            // opaque-value join before the first turn
+            model = "deepseek-v4-pro",
             effort = "high",
         )
         val process = backend.processBuilder(spec).start()
@@ -99,8 +101,8 @@ class DshBackendLiveIT {
                 }
             }
             assertTrue(text.contains("hello-from-cc-pocket"), "unexpected reply: $text")
-            // the model the user asked for is the model dsh reports back, not the one we requested
-            assertEquals("deepseek-v4-pro", backend.liveModelForTest())
+            // the model the user asked for is the model dsh reports back, not the one we requested — named with its provider
+            assertEquals("deepseek-official/deepseek-v4-pro", backend.liveModelForTest())
         } finally {
             reader.cancel(); pump.cancel(); stderr.cancel()
             lines.close(); events.close()
@@ -158,12 +160,12 @@ class DshBackendLiveIT {
     @Test
     fun a_new_session_announces_the_model_it_was_switched_to() = runBlocking {
         val backend = DshBackend(null)
-        val h = launch(backend, AgentSpec(workdir = scratch(), mode = PermissionMode.DEFAULT, model = "deepseek-v4-pro"), "announce")
+        val h = launch(backend, AgentSpec(workdir = scratch(), mode = PermissionMode.DEFAULT, model = PRO), "announce")
         val init = awaitEvent<AgentEvent.SessionInit>(h.events, 60_000)
         val open = h.lines.firstOrNull { !it.outbound && it.id == h.outbound("session/new").single().id }?.text
         println("[dsh-live] announce: SessionInit.model=${init?.model} live=${backend.liveModelForTest()} " +
             "session/new currentValue=${open?.substringAfter("\"currentValue\":")?.take(50)}")
-        assertEquals("deepseek-v4-pro", init?.model, "the header was told another model than the session runs")
+        assertEquals(PRO, init?.model, "the header was told another model than the session runs")
     }
 
     /**
@@ -238,7 +240,7 @@ class DshBackendLiveIT {
      *  the session existed — and each write answers well inside the 30 s config watchdog. */
     @Test
     fun the_launch_config_chain_gates_the_opening_prompt() = runBlocking {
-        val spec = AgentSpec(workdir = scratch(), mode = PermissionMode.DEFAULT, model = "deepseek-v4-pro", effort = "max")
+        val spec = AgentSpec(workdir = scratch(), mode = PermissionMode.DEFAULT, model = PRO, effort = "max")
         val backend = DshBackend(null)
         val h = launch(backend, spec, "config")
         // sent at once: it has to wait behind the handshake, the session open AND the config chain
@@ -253,8 +255,55 @@ class DshBackendLiveIT {
         val lastAnswer = h.lines.last { !it.outbound && it.method == null && it.id == writes.last().first.id }
         assertTrue(prompt.nanos >= lastAnswer.nanos, "the opening prompt went out before the config chain settled")
         assertTrue(writes.all { (_, ms) -> ms != null && ms < 30_000 }, "a config write was slow: $writes")
-        assertEquals("deepseek-v4-pro", backend.liveModelForTest())
+        assertEquals(PRO, backend.liveModelForTest())
         assertTrue(turn.events.none { it is AgentEvent.AssistantText && it.text.contains("⚠️") }, "a config warning surfaced")
+    }
+
+    /**
+     * A model switch in a RUNNING session: the prompt sent right after it goes out only once the real dsh has
+     * answered the write and its read-back names the new model — never on the model being left, which may bill
+     * another provider's account. And every id the session's catalogue hands out names its provider.
+     */
+    @Test
+    fun a_live_model_switch_holds_the_next_prompt_until_dsh_confirms_it() = runBlocking {
+        val backend = DshBackend(null)
+        val h = launch(backend, AgentSpec(workdir = scratch(), mode = PermissionMode.DEFAULT), "switch")
+        assertTrue(awaitEvent<AgentEvent.SessionInit>(h.events, 60_000) != null, "the session never opened")
+        val ids = DshCatalog.current()?.models?.map { it.id }.orEmpty()
+        println("[dsh-live] switch: catalogue ids $ids")
+        assertTrue(ids.isNotEmpty() && ids.all { it.startsWith("deepseek-official/") }, "an id without its provider: $ids")
+
+        assertEquals(false, backend.applySettings(mode = null, model = PRO, effort = null), "a live switch, no relaunch")
+        backend.sendPrompt("Reply with exactly: switched-ok. Do not use any tool.", emptyList())
+        val turn = h.turn(120_000)
+        h.dump("switch"); h.timings("switch")
+        assertTrue(turn.result?.isError == false, "turn failed: ${turn.text}")
+        assertTrue(turn.text.contains("switched-ok"), "unexpected reply: ${turn.text}")
+        val write = h.outbound("session/set_config_option").single()
+        val answer = h.lines.first { !it.outbound && it.method == null && it.id == write.id }
+        val prompt = h.outbound("session/prompt").single()
+        assertTrue(prompt.nanos >= answer.nanos, "the prompt went out before dsh answered the switch")
+        assertEquals(PRO, backend.liveModelForTest())
+    }
+
+    /**
+     * A switch to a model this dsh does not offer — a plugin's provider missing from the `acp` profile: the prompt
+     * after it is refused with the reason, and nothing reaches dsh at all, on the old model or any other.
+     */
+    @Test
+    fun a_switch_to_a_model_dsh_does_not_offer_refuses_the_next_prompt() = runBlocking {
+        val backend = DshBackend(null)
+        val h = launch(backend, AgentSpec(workdir = scratch(), mode = PermissionMode.DEFAULT), "switch-missing")
+        assertTrue(awaitEvent<AgentEvent.SessionInit>(h.events, 60_000) != null, "the session never opened")
+        assertEquals(true, backend.applySettings(mode = null, model = "qoder/deepseek-v4-pro", effort = null), "asks for a relaunch")
+        backend.sendPrompt("Reply with exactly: must-not-run. Do not use any tool.", emptyList())
+        val turn = h.turn(30_000)
+        h.dump("switch-missing")
+        println("[dsh-live] switch-missing: ${turn.text.take(300)}")
+        assertTrue(turn.result?.isError == true, "the prompt was not refused: ${turn.events}")
+        assertTrue(turn.text.contains("offers no model qoder/deepseek-v4-pro"), turn.text)
+        assertTrue(h.outbound("session/prompt").isEmpty(), "a prompt reached dsh")
+        assertTrue(h.outbound("session/set_config_option").isEmpty(), "a write reached dsh")
     }
 
     @Test
@@ -385,6 +434,11 @@ class DshBackendLiveIT {
         println("[dsh-live] relaunch-3: silent process settled in $ms ms: ${stranded.text.take(200)}")
         assertTrue(stranded.result?.isError == true, "the silent relaunch was not bounded: ${stranded.events}")
         assertTrue(stranded.text.contains("never completed its handshake"), stranded.text)
+    }
+
+    private companion object {
+        /** dsh's official route, as the catalogue names it on the wire (`provider/model`). */
+        const val PRO = "deepseek-official/deepseek-v4-pro"
     }
 
     private suspend inline fun <reified T : AgentEvent> awaitEvent(

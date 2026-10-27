@@ -102,6 +102,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -387,6 +388,7 @@ fun App(scope: CoroutineScope) {
                 )
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
                 // preview/recording mode hides the demo banner for a clean marketing capture
+                if (repo.daemonControlsBlocked) StatusBanner(Tok.warn, stringResource(Res.string.updates_daemon_controls_paused))
                 if (repo.demoMode.value && !dev.ccpocket.app.isPreviewMode()) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))
                 if (repo.sessionActive.value && repo.phase.value == ConnPhase.Reconnecting) StatusBanner(Tok.danger, stringResource(Res.string.reconnect_banner))
                 // entering a chat before the first link-up used to look identical to "connected" — say so (issue #41)
@@ -468,6 +470,7 @@ fun App(scope: CoroutineScope) {
             }
             // tap a document → native preview, over whatever screen it was tapped on; below the approval sheet
             DocumentOpener(repo)
+            if (repo.usageSheetRequested.value) QuotaSheet(repo) { repo.usageSheetRequested.value = false }
             // AskUserQuestion (ask.questions != null) renders as the docked QuestionCard inside
             // ChatScreen instead — questions are conversation, not a safety gate, and the user
             // should be able to scroll the chat for context while answering.
@@ -3327,7 +3330,19 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     onOwnsInput = { cardOwnsInput = it },
                 )
             }
-            if (questionAsk != null && cardOwnsInput) {
+            if (repo.daemonControlsBlocked) {
+                Row(
+                    Modifier.fillMaxWidth().background(Tok.surface)
+                        .windowInsetsPadding(WindowInsets.navigationBars).padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(Res.string.updates_daemon_controls_paused),
+                        color = Tok.tx2, style = tightCenter(13.sp), modifier = Modifier.weight(1f),
+                    )
+                    if (repo.streaming.value || repo.pendingAsk.value != null) StopButton { repo.cancelTurn() }
+                }
+            } else if (questionAsk != null && cardOwnsInput) {
                 // composer yields while the card's field has the keyboard
             } else if (repo.observing.value) {
                 val observation = repo.sessionObservation.value
@@ -3354,8 +3369,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 var recElapsed by remember { mutableStateOf(0L) }
                 if (voiceState is VoiceState.Recording) recElapsed = voiceState.elapsedMs
                 val slashQuery = slashQueryOf(input)
-                val suggestions = remember(slashQuery, repo.slashCommands.toList()) {
-                    slashSuggestions(slashQuery, repo.slashCommands)
+                val suggestions = remember(slashQuery, repo.slashCommands.toList(), repo.sessionAgent.value) {
+                    val commands = repo.slashCommands.toMutableList()
+                    // Local system commands remain available before metadata/CommandList arrives.
+                    if (repo.sessionAgent.value in setOf(AgentKind.CLAUDE, AgentKind.CODEX) && commands.none { it.name == "usage" }) {
+                        commands.add(0, SlashCommand("usage", "Show account usage and available resets"))
+                    }
+                    slashSuggestions(slashQuery, commands)
                 }
                 // "@file" completion (issue #75): tap-only and cursor-at-end (the common mobile case) — the
                 // daemon browses the session cwd, a folder tap drills in, a file tap inserts its path. Yields
@@ -4024,11 +4044,12 @@ private fun MessageItem(
             }
         }
         // the agent flows in the base surface: no container at all, so long prose reads as prose
-        // Chat Rhythm v1: the source row carries the one-tap copy of the whole turn — the raw text as received so
-        // far, Markdown included (a quote's own glyph copies plain text, a code block's its code). The body follows
-        // 2dp under it, 14/22 with a 10dp paragraph step.
+        // Chat Rhythm v1: the source row names the agent; the body follows 2dp under it, 14/22 with a 10dp paragraph
+        // step. The one-tap copy of the whole reply — the raw text as received so far, Markdown included (a quote's
+        // own glyph copies plain text, a code block's its code) — sits at the reply's END, where reading it ends and
+        // the next step is decided. Every reply segment has its own, so a step between tool calls copies alone.
         is ChatItem.Assistant -> Column {
-            TurnSourceRow(agentName(agent ?: AgentKind.CLAUDE), copyText = m.text.takeIf { it.isNotBlank() })
+            TurnSourceRow(agentName(agent ?: AgentKind.CLAUDE), copyText = null)
             Spacer(Modifier.height(TURN_SOURCE_BODY_GAP))
             val scale = LocalFontScale.current
             CompositionLocalProvider(
@@ -4037,6 +4058,7 @@ private fun MessageItem(
             ) {
                 SelectionContainer { MarkdownText(m.text, Tok.tx) } // drag-select any span to copy
             }
+            if (m.text.isNotBlank()) dev.ccpocket.app.ui.chat.TurnCopyFooter(m.text)
         }
         is ChatItem.Thinking -> ThinkingRow(m)
         // a Workflow tool call with a bound run renders the orchestration card (issue #106);
@@ -4111,8 +4133,10 @@ private fun MessageItem(
 /**
  * Chat Rhythm v1 list rhythm: the space display row [ri] adds above itself, on top of the list's 12dp in-turn step.
  * Where the speaker changes (user ↔ agent side) it makes 24dp. Above a turn with a source row it makes at least
- * 16dp: that row's copy target is a 44dp square rising 16dp out of the 28dp row (TurnCopyButton), and the gap is
- * what keeps it off the row above — the one deliberate step past the 12dp in-turn spec.
+ * 16dp: a user turn's copy target is a 44dp square rising 16dp out of the 28dp row (TurnCopyButton), and the gap is
+ * what keeps it off the row above — the one deliberate step past the 12dp in-turn spec. BELOW an agent reply it makes
+ * the same 16dp, for the mirror reason: the reply's copy sits at its end (TurnCopyFooter) and its square reaches 16dp
+ * down out of the footer row.
  */
 private fun dev.ccpocket.app.data.ChatPresentation.rhythmExtraAbove(ri: Int): Dp {
     if (ri <= 0) return 0.dp
@@ -4121,7 +4145,7 @@ private fun dev.ccpocket.app.data.ChatPresentation.rhythmExtraAbove(ri: Int): Dp
     val prev = itemOf(rows.getOrNull(ri - 1))
     return when {
         (cur is ChatItem.User) != (prev is ChatItem.User) -> 12.dp
-        (cur is ChatItem.User && !cur.compactSummary) || cur is ChatItem.Assistant -> 4.dp
+        (cur is ChatItem.User && !cur.compactSummary) || cur is ChatItem.Assistant || prev is ChatItem.Assistant -> 4.dp
         else -> 0.dp
     }
 }

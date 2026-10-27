@@ -44,10 +44,11 @@ class DshModelServiceTest {
         ).fetch()
         assertEquals(AgentKind.DSH, list.agent)
         assertNull(list.error)
-        assertEquals(listOf("deepseek-v4-flash", "deepseek-v4-pro"), list.models)
+        assertEquals(listOf("deepseek-official/deepseek-v4-flash", "deepseek-official/deepseek-v4-pro"), list.models)
         assertEquals(listOf("off", "high", "max"), list.supportedEfforts)
         val current = list.modelCapabilities.single()
-        assertEquals("deepseek-v4-flash", current.model)
+        assertEquals("deepseek-official/deepseek-v4-flash", current.model)
+        assertEquals("DeepSeek-V4-Flash", current.displayName)
         assertEquals("high", current.defaultReasoningEffort)
         // The ACP surface has no agent-preset axis — advertising one we cannot select would be a lie.
         assertTrue(list.agentPresets.isEmpty())
@@ -94,22 +95,66 @@ class DshModelServiceTest {
     }
 
     @Test
-    fun a_successful_read_is_cached_for_ten_minutes_and_then_refreshed() = runBlocking {
-        var reads = 0
+    fun a_throwaway_read_is_cached_for_ten_minutes_and_then_refreshed() = runBlocking {
+        var boots = 0
         var now = 0L
         val svc = DshModelService(
-            liveOptions = { reads++; options() },
-            transientRead = { null },
+            liveOptions = { null },
+            transientRead = { boots++; options() },
             nowMs = { now },
         )
         svc.fetch()
-        assertEquals(1, reads)
+        assertEquals(1, boots)
         now = 9 * 60 * 1000L
         svc.fetch()
-        assertEquals(1, reads, "a second fetch inside the TTL must not re-ask dsh")
+        assertEquals(1, boots, "a second fetch inside the TTL must not boot dsh again")
         now = 11 * 60 * 1000L
         svc.fetch()
-        assertEquals(2, reads, "past the TTL a newly configured model must become visible")
+        assertEquals(2, boots, "past the TTL a newly configured model must become visible")
+    }
+
+    /** The user pressed refresh (a plugin was just installed): the cached throwaway answer is not the answer. */
+    @Test
+    fun a_manual_refresh_bypasses_the_throwaway_cache() = runBlocking {
+        var boots = 0
+        val svc = DshModelService(liveOptions = { null }, transientRead = { boots++; options() }, nowMs = { 0L })
+        svc.fetch()
+        svc.fetch(forceRefresh = true)
+        assertEquals(2, boots)
+    }
+
+    /**
+     * A live session's answer describes THAT session and is read on every fetch: caching it served session A's
+     * catalogue to a picker opened on session B for ten minutes, and kept a closed session's list alive.
+     */
+    @Test
+    fun a_live_answer_is_never_served_from_cache() = runBlocking {
+        var live: DshConfigOptions? = options()
+        var boots = 0
+        val svc = DshModelService(liveOptions = { live }, transientRead = { boots++; null }, nowMs = { 0L })
+        assertNull(svc.fetch().error)
+        live = options(configOptions.replace("deepseek-v4-pro", "deepseek-v4-max"))
+        assertTrue("deepseek-official/deepseek-v4-max" in svc.fetch().models, "the live session's newest answer wins")
+        assertEquals(0, boots)
+    }
+
+    @Test
+    fun the_pickers_workdir_selects_the_live_session_it_describes() = runBlocking {
+        val a = Any()
+        val b = Any()
+        try {
+            DshCatalog.publish(a, options(), workdir = "/proj/a")
+            DshCatalog.publish(b, options(configOptions.replace("deepseek-v4-pro", "deepseek-v4-max")), workdir = "/proj/b")
+            val svc = DshModelService(transientRead = { error("must not boot dsh while a session is live") })
+            assertTrue("deepseek-official/deepseek-v4-pro" in svc.fetch("/proj/a").models)
+            assertTrue("deepseek-official/deepseek-v4-max" in svc.fetch("/proj/b").models)
+            // no session in this workdir: the most recent report of any live session
+            assertTrue("deepseek-official/deepseek-v4-max" in svc.fetch("/elsewhere").models)
+            DshCatalog.publish(a, options(), workdir = "/proj/a") // a re-publish makes it the newest
+            assertTrue("deepseek-official/deepseek-v4-pro" in svc.fetch(null).models)
+        } finally {
+            DshCatalog.clearForTest()
+        }
     }
 
     /**

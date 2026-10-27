@@ -184,6 +184,7 @@ class RequestRouter(
     private val voiceMemo: dev.ccpocket.daemon.memo.VoiceMemoService? = null,
     /** Voice input v2's transcript refine. Null = not wired: no agent is advertised and every refine is dropped. */
     private val transcriptRefine: dev.ccpocket.daemon.transcribe.TranscriptRefineService? = null,
+    private val daemonUpdater: dev.ccpocket.daemon.update.DaemonUpdateController? = null,
 ) {
     /** Both transports attach their owner push targets through the router they already hold (issue #360). */
     internal val managedSessionService: dev.ccpocket.daemon.session.ManagedSessionService? get() = managedSessions
@@ -533,6 +534,12 @@ class RequestRouter(
     // relay ingress passes the deviceId — its single reader serves every device, so a listing produced
     // inline holds all of them. Null (LAN socket, in-process callers, tests) keeps the reply inline.
     suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, pinConnection: dev.ccpocket.daemon.pins.ProjectPinConnection? = null, listingLane: String? = null, onOpened: suspend (String) -> Unit = {}) {
+        if (dev.ccpocket.daemon.update.UpdateState.controlsBlocked && !dev.ccpocket.protocol.DaemonUpdateAccess.allowed(frame)) {
+            val prompt = frame as? SendPrompt
+            sink.emit(PocketError("daemon_updating", "The computer daemon is updating. Control operations are temporarily paused.",
+                convoId = prompt?.convoId, promptId = prompt?.promptId))
+            return
+        }
         when (frame) {
             // capability declaration (wire-compat gate for AgentKind additions) — no reply; the very
             // next list request answers unfiltered. Ingress handlers may process frames concurrently,
@@ -656,6 +663,22 @@ class RequestRouter(
             // account-wide BILLING state for the machine's owner, strictly wider than anything a restricted
             // credential covers, so a non-owner gets SILENCE (no reply frame at all) rather than an empty
             // snapshot that would read as "your allowance is fine".
+            is dev.ccpocket.protocol.DaemonUpdateGet -> if (gitOwnerOnly(origin)) {
+                if (frame.requestId.isNotBlank() && frame.requestId.length <= 128)
+                    sink.emit(dev.ccpocket.daemon.update.UpdateState.snapshot(frame.requestId))
+            }
+            is dev.ccpocket.protocol.DaemonUpdateStart -> if (gitOwnerOnly(origin)) {
+                scope.launch {
+                    val updater = daemonUpdater
+                    if (updater == null) sink.emit(dev.ccpocket.protocol.DaemonUpdateStatus(frame.requestId, "manual"))
+                    else updater.request(frame.requestId) { sink.emit(it) }
+                }
+            }
+
+            is dev.ccpocket.protocol.RedeemQuotaReset -> if (gitOwnerOnly(origin)) {
+                scope.launch { sink.emit(codexQuota.redeem(frame)) }
+            }
+
             is ClaudeQuotaGet ->
                 if (gitOwnerOnly(origin)) {
                     scope.launch {
@@ -678,7 +701,7 @@ class RequestRouter(
                         // claude so that client sees the mismatch against what it asked for and drops the
                         // reading. Stamping the service's own idea of its agent would instead hand that
                         // client a Claude number wearing the label it hoped for.
-                        val tagged = reply.copy(agent = frame.agent)
+                        val tagged = reply.copy(agent = frame.agent, requestId = frame.requestId)
                         // status + row count only — never the payload (it is billing state, and error
                         // strings must stay token-free by ClaudeQuotaService's contract anyway)
                         quotaLog.info("quota → ${sinkKey(sink)} agent=${frame.agent} status=${tagged.status} limits=${tagged.limits.size}")
@@ -1078,7 +1101,8 @@ class RequestRouter(
                     // answer without a session, so the picker gets real rows (and the agent-preset row)
                     // instead of the "not supported yet" placeholder. Failures still come back as an
                     // explicit ModelsList.error — never silence, which would hang the picker.
-                    AgentKind.DSH -> dshModels.fetch()
+                    // the picker's workdir picks the live session it describes; a manual refresh re-reads
+                    AgentKind.DSH -> dshModels.fetch(frame.workdir, frame.forceRefresh)
                 })
             }
 

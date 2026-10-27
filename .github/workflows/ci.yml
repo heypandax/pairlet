@@ -35,7 +35,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Verify repository content boundaries
-        run: python3 scripts/check-repository-content.py
+        run: |
+          python3 scripts/check-repository-content.py
+          bash scripts/check-release-version.sh
 
       - name: Verify support knowledge and generated manual
         run: |

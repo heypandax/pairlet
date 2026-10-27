@@ -5,7 +5,6 @@ import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.attribute.FileTime
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.io.path.getLastModifiedTime
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
@@ -17,10 +16,8 @@ import kotlin.io.path.isRegularFile
  * remains the logical thread id. Unlike Claude's per-project folders, rollouts are global — callers filter
  * by the `cwd` recorded in each file's session_meta line.
  *
- * Both listing entry points are on hot paths (the 10-second project refresh lists the whole tree; opening
- * one Codex session looked one id up four times), so both are memoized — see [entriesOf] and [findSession].
- * The memos key on the DIRECTORY's own mtime, never on wall-clock TTLs: a rollout appearing or vanishing
- * is exactly what bumps its parent's mtime.
+ * Directory listings are memoized by directory mtime. Session lookups validate those listings on every
+ * call: a resume can create a new rollout between list refreshes, and writer detection must see it.
  */
 object CodexPaths {
     fun codexHome(): Path =
@@ -45,13 +42,12 @@ object CodexPaths {
             .sortedByDescending { it.second }
             .take(limit)
             .map { it.first }
-        noteListing(sorted)
         return sorted
     }
 
     /** [sessionFiles] with the facts a durable decision needs (issue #360): whether the root provably does not
      *  exist, how many directories could not be listed (the legacy walk silently treats those as empty), and
-     *  whether [limit] cut rollouts off. Shares the listing memo; does not advance [listingGeneration]. */
+     *  whether [limit] cut rollouts off. Shares the directory listing memo. */
     class Listing(val files: List<Path>, val truncated: Boolean, val unreadableDirs: Int)
 
     fun sessionListing(limit: Int, root: Path = sessionsRoot()): Listing {
@@ -72,18 +68,11 @@ object CodexPaths {
      * `-<threadId>.jsonl` and a resumed `-<threadId>_<runId>.jsonl`; replay/resume must follow the latter
      * or every message written after the branch/resume disappears from cc-pocket (issue #312).
      *
-     * Answered from a lazy id→path index: opening ONE Codex session asks for the same id four times
-     * (resumeContextTokens / resumeModel / resumeTitle plus SessionRegistry's own lookup), and each of those
-     * used to walk the entire tree (PR #296 review). A changed [sessionFiles] path set advances
-     * [listingGeneration], invalidating the cached choice once; the next lookup resolves the newest matching
-     * rollout and the other three accessors stay O(1).
+     * Revalidate directory listings before choosing a file. Caching only by the last periodic listing
+     * could return the old rollout while a terminal already owns its continuation, falsely allowing a
+     * second writer. Only directory contents are cached; candidate mtimes are always read afresh.
      */
     fun findSession(sessionId: String, root: Path = sessionsRoot()): Path? {
-        val generation = listingGeneration.get()
-        idIndex[sessionId]?.let { indexed ->
-            if (indexed.generation == generation && indexed.path.isRegularFile()) return indexed.path
-            if (!indexed.path.isRegularFile()) idIndex.remove(sessionId, indexed)
-        }
         if (!root.isDirectory()) return null
         val files = ArrayList<Path>()
         collectRollouts(root, 0, files)
@@ -94,7 +83,6 @@ object CodexPaths {
             .mapNotNull { path -> runCatching { path.getLastModifiedTime().toMillis() }.getOrNull()?.let { path to it } }
             .maxByOrNull { it.second }
             ?.first
-        if (hit != null) idIndex[sessionId] = IndexedSession(hit, generation)
         return hit
     }
 
@@ -110,25 +98,6 @@ object CodexPaths {
     private class DirEntry(val path: Path, val isDir: Boolean)
 
     private val dirCache = ConcurrentHashMap<Path, Pair<FileTime, List<DirEntry>>>()
-
-    private data class IndexedSession(val path: Path, val generation: Long)
-
-    /** id → newest rollout path, backfilled by [findSession] for the current [listingGeneration]. */
-    private val idIndex = ConcurrentHashMap<String, IndexedSession>()
-
-    // Only path-set changes matter here. Appends move a file's mtime but keep the cached path correct; a
-    // branch/resume creates a NEW path, which invalidates every logical-id choice exactly once.
-    private val listingGeneration = AtomicLong(0)
-    private var lastListing: Set<Path>? = null
-
-    @Synchronized
-    private fun noteListing(files: List<Path>) {
-        val paths = files.toSet()
-        if (lastListing != paths) {
-            lastListing = paths
-            listingGeneration.incrementAndGet()
-        }
-    }
 
     /**
      * [dir]'s children, re-listed only when its mtime moved. The rollout tree is date-nested, so every
@@ -171,9 +140,6 @@ object CodexPaths {
     /** Cross-test isolation: these memos are process-wide state on an object singleton. */
     internal fun clearForTest() {
         dirCache.clear()
-        idIndex.clear()
-        synchronized(this) { lastListing = null }
-        listingGeneration.set(0)
     }
 
     private const val MAX_DEPTH = 8

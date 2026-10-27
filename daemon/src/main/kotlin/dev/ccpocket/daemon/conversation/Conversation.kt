@@ -1189,6 +1189,19 @@ class Conversation(
             // change: the phone reconciles every SessionLive field-by-field.
             sink.emit(live(resumeId))
             log.info("$convoId SessionLive early (resume=${resumeId?.take(8) ?: "-"}) +${System.currentTimeMillis() - openedAtMs}ms")
+            if (resumeId != null) {
+                // incremental reattach (issue #147): a client that still holds the transcript sends its
+                // cursor and gets only the delta; anything un-honorable falls back to the full window
+                // inside replaySlice. An EMPTY delta is never emitted — the client is already caught up,
+                // and an empty non-delta ConvoHistory means /clear to it. A DELTA goes to the OPENER's
+                // sink only (it continues that client's cursor); the full window keeps the fan-out.
+                val readStart = System.nanoTime()
+                val slice = clipToRewind(backend.replaySlice(workdir.toString(), resumeId, sinceSeq))
+                val meter = HistoryFrameMeter(System.nanoTime() - readStart)
+                val emitted = emitMeteredHistory(meter, slice, if (slice.delta) openerSink else sink, errorTo = openerSink)
+                openerSink.completeInitialHistory(convoId, if (emitted) slice.messages.size else 0, emitted, slice.quality, slice.sourceRows, slice.failedRows, meter.frameBytes)
+                replayWorkflowRuns(resumeId, sink)
+            } else openerSink.completeInitialHistory(convoId, quality = "not_required")
             // Assign only a real read, and only while nothing better arrived: this launch races the first
             // prompt's seeding (sendPrompt), and an unconditional write here re-nulled a just-seeded title
             // after a slow multi-MB transcript parse (PR #296 review) — every later SessionLive (including
@@ -1260,19 +1273,6 @@ class Conversation(
             // why it always read "instant" while a phone was timing out — issue #340).
             sink.emit(live(resumeId))
             log.info("$convoId SessionLive seeded (resume=${resumeId?.take(8) ?: "-"}) +${System.currentTimeMillis() - openedAtMs}ms")
-            if (resumeId != null) {
-                // incremental reattach (issue #147): a client that still holds the transcript sends its
-                // cursor and gets only the delta; anything un-honorable falls back to the full window
-                // inside replaySlice. An EMPTY delta is never emitted — the client is already caught up,
-                // and an empty non-delta ConvoHistory means /clear to it. A DELTA goes to the OPENER's
-                // sink only (it continues that client's cursor); the full window keeps the fan-out.
-                val readStart = System.nanoTime()
-                val slice = clipToRewind(backend.replaySlice(workdir.toString(), resumeId, sinceSeq))
-                val meter = HistoryFrameMeter(System.nanoTime() - readStart)
-                val emitted = emitMeteredHistory(meter, slice, if (slice.delta) openerSink else sink, errorTo = openerSink)
-                openerSink.completeInitialHistory(convoId, if (emitted) slice.messages.size else 0, emitted, slice.quality, slice.sourceRows, slice.failedRows, meter.frameBytes)
-                replayWorkflowRuns(resumeId, sink)
-            } else openerSink.completeInitialHistory(convoId, quality = "not_required")
             emitCommands()
         }
     }

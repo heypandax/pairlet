@@ -10,6 +10,7 @@ const val USER_MANUAL_URL = "https://pocket.ark-nexus.cc/manual/"
 const val USER_MANUAL_TROUBLESHOOTING_URL = "${USER_MANUAL_URL}?q=offline"
 // Public browser-based support; it must never require membership in a messaging team.
 const val SUPPORT_URL = "https://pocket.ark-nexus.cc/support/"
+const val WEBSITE_URL = "https://pairlet.org/"
 // App support opens the same public surface in ready-to-type chat mode. The query is deliberately
 // stable and non-sensitive; optional App context rides in the URL fragment so it never reaches the
 // static-site request, proxy logs, or Referer headers.

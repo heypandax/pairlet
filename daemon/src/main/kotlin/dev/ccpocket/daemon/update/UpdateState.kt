@@ -12,6 +12,24 @@ import dev.ccpocket.protocol.DaemonInfo
  * date". [updateCommand] is resolved once — how this binary was installed cannot change while it runs.
  */
 object UpdateState {
+    private val applying = java.util.concurrent.atomic.AtomicBoolean(false)
+    internal fun tryBeginApply(): Boolean = applying.compareAndSet(false, true)
+    @Volatile var controlsBlocked: Boolean = false
+        private set
+    @Volatile private var phase: String = "idle"
+    @Volatile private var target: String? = null
+    internal fun blockControls() { controlsBlocked = true }
+    internal fun recordPhase(value: String, version: String? = null) { target = version; phase = value }
+    fun snapshot(requestId: String) = dev.ccpocket.protocol.DaemonUpdateStatus(requestId, phase, target, controlsBlocked)
+    internal fun finishApply() {
+        controlsBlocked = false
+        if (phase in setOf("checking", "downloading", "waiting", "restarting")) phase = "idle"
+        applying.set(false)
+    }
+
+    val updateMode: String by lazy {
+        DaemonUpdateController.modeFor(UpdateService.managedInstallOf(UpdateService.selfExe()), System.getProperty("os.name"))
+    }
 
     /** The version actually running (`0.0.0-dev` for a build that came from gradle, not a release). */
     val current: String get() = UpdateService.currentVersion()
@@ -37,7 +55,8 @@ object UpdateState {
 
     /** Stamp the version-visibility fields onto a [DaemonInfo] about to go out to a device. */
     fun stamp(info: DaemonInfo): DaemonInfo =
-        info.copy(daemonVersion = current, latestVersion = latest, updateCommand = updateCommand)
+        info.copy(daemonVersion = current, latestVersion = latest, updateCommand = updateCommand,
+            daemonUpdateMode = updateMode, daemonUpdateInProgress = controlsBlocked)
 
     /** Test seam — the daily check is a singleton, so state leaks between tests otherwise. */
     internal fun resetForTest() { latest = null }

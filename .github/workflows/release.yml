@@ -970,6 +970,31 @@ jobs:
                   '{message:$msg, content:$content, sha:$sha}')" >/dev/null
           echo "scoop bucket bumped to $VER (sha256 $SHA)"
 
+  # Generate a tap-ready cask only after all final artifacts and manifests succeed.
+  # This job does not push the tap: publish this exact candidate after verification.
+  homebrew-candidate:
+    if: ${{ !cancelled() && !failure() && needs.checksums.result == 'success' && needs.sign-manifest.result == 'success' && !inputs.only_android && !inputs.only_macos_desktop && !inputs.only_harmony && !inputs.only_linux_desktop }}
+    needs: [checksums, sign-manifest]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prepare and verify Homebrew from final release bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          gh release download "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --dir homebrew-assets \
+            --pattern "cc-pocket-daemon-$RELEASE_VERSION-macos-*.tar.gz" --pattern SHA256SUMS
+          python3 scripts/homebrew-release.py prepare "$RELEASE_VERSION" --assets homebrew-assets --write
+          python3 scripts/homebrew-release.py verify "$RELEASE_VERSION" --assets homebrew-assets
+      - uses: actions/upload-artifact@v7
+        with:
+          name: homebrew-candidate-${{ inputs.version }}
+          path: |
+            packaging/homebrew/Casks/cc-pocket.rb
+            packaging/homebrew/release.json
+          retention-days: 30
+
   # One SHA256SUMS over every release asset, for the installers' + self-updater's download verification
   # (the Claude Code pattern: manifest + per-platform checksum). Runs after all uploads so the sums
   # cover the final artifacts; --clobber makes re-runs safe.

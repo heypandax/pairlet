@@ -7,6 +7,7 @@ import dev.ccpocket.app.telemetry.ProductOutcome
 import dev.ccpocket.app.telemetry.ProductResult
 import dev.ccpocket.protocol.HistoryComplete
 import dev.ccpocket.protocol.HistoryApplied
+import dev.ccpocket.protocol.PocketJson
 
 import dev.ccpocket.observability.OperationTrace
 import dev.ccpocket.observability.Outcome
@@ -1303,7 +1304,9 @@ class PocketRepository(
         diagnosticsSupported = { daemonDiagnostics && paired.value?.role == BindingRole.OWNER && !demoMode.value },
         productDimensions = ::productDimensions,
         receiptExpired = { cid, pid -> promptOutcomes.receiptExpired(cid, pid, appIsForeground.value) },
-        responseExpired = { cid, pid, queued -> promptOutcomes.responseExpired(cid, pid, appIsForeground.value, queued) })
+        responseExpired = { cid, pid, queued -> promptOutcomes.responseExpired(cid, pid, appIsForeground.value, queued) },
+        handleLocalCommand = ::handleLocalSystemCommand,
+        controlsBlocked = { daemonControlsBlocked })
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
     private var fileUploadJob: Job? = null                 // the chunk-send loop of the ONE Uploading file
@@ -1799,7 +1802,10 @@ class PocketRepository(
      *  session and resend this once — the fix for "sent a message into a ghost session, nothing happened".
      *  Cleared on the first sign of processing; consumed (single retry, no loops) by the resend.
      *  [promptId] rides along so the resend reuses it — the daemon dedupes if the original landed (#66). */
-    private class PromptRetry(val text: String, val images: List<ImageData>, val workdir: String, val promptId: String?)
+    private class PromptRetry(
+        val text: String, val images: List<ImageData>, val workdir: String, val promptId: String?,
+        val refusedByUpdate: Boolean = false,
+    )
     private var promptRetry: PromptRetry? = null
     private var promptResendArmed = false // set by SessionGone: the next matching SessionLive resends promptRetry
     private var promptPending = false // a User bubble is marked pending until the daemon shows signs of life
@@ -1881,6 +1887,8 @@ class PocketRepository(
      *  [exactPrompt] is reserved for evidence that names/resolves this prompt itself (currently a matching
      *  ConvoHistory USER row) and for terminal teardown where no delivery claim remains on screen. */
     private fun promptEvidence(exactPrompt: Boolean = false) {
+        // Output from work admitted BEFORE the update cannot acknowledge a refused prompt.
+        if (promptRetry?.refusedByUpdate == true && !exactPrompt) return
         clearTurnWatchdogState() // any real frame retires a silence-only turn inference
         if (promptPending && promptQueued && !exactPrompt) return
 
@@ -2949,6 +2957,9 @@ class PocketRepository(
     private fun onTransportDown(err: Throwable?) {
         connected.value = false
         pushConnected.value = false
+        if (daemonUpdateBusy) daemonUpdateStatus.value = daemonUpdateStatus.value?.copy(state = "unknown")
+        daemonUpdateMode.value = null
+        daemonUpdateDeadline?.cancel()
         linkStableJob?.cancel(); linkStableJob = null // #144: this link died — it never (or no longer) counts as stable
         presenceProbeJob?.cancel(); presenceProbeJob = null // #145: the retry path owns recovery from here
         if (!sessionActive.value) { // an intentional teardown is not a connection failure — don't report it
@@ -3172,8 +3183,10 @@ class PocketRepository(
         sessionGroups.clear()
         // per-daemon truth: the allowance belongs to the ACCOUNT on the machine we just left. Showing it
         // under the next machine's name would be a straight lie about a billing number.
-        quotaDeadlines.values.forEach { it.cancel() }; quotaDeadlines.clear(); quotaOutstanding.clear()
+        quotaDeadlines.values.forEach { it.cancel() }; quotaDeadlines.clear(); quotaOutstanding.clear(); quotaRequestIds.clear(); quotaForceRefreshPending.clear()
         quotaByAgent.clear(); quotaLoadingByAgent.clear(); quotaStatusByAgent.clear()
+        quotaReset.reset()
+        usageSheetRequested.value = false
         daemonQuotaAgents.value = emptyList() // #348 capability: the next machine re-advertises its own
         connectionDiagnostic?.finish(Outcome.CANCELLED, DiagnosticStage.COMPLETE, ErrorCode.CANCELLED)
         connectionDiagnostic = null; connectionDiagnosticEnded = false
@@ -3186,6 +3199,12 @@ class PocketRepository(
         daemonLeanHistory.value = false // ditto: an older next daemon's history pages are not byte-bounded
         daemonTranscriptRefineAgentsState.value = emptyList() // voice input v2: the next machine re-advertises its refiners
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
+        daemonUpdateMode.value = null
+        daemonUpdateStartJob?.cancel(); daemonUpdateStartJob = null
+        daemonUpdateDeadline?.cancel(); daemonUpdateDeadline = null
+        daemonUpdateRequestId = null; daemonUpdateInitialVersion = null; daemonUpdateStatus.value = null
+        daemonUpdateRemoteInProgress.value = false
+        daemonUpdatePoll?.cancel(); daemonUpdatePoll = null
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
         skillCatalog.value = null; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
@@ -3467,7 +3486,9 @@ class PocketRepository(
             NonSessionRequest.QUOTA -> {
                 val agent = quotaOutstanding.entries.first { it.value > 0 }.key
                 quotaDeadlines.remove(agent)?.cancel()
-                quotaOutstanding[agent] = 0
+                quotaOutstanding.remove(agent)
+                quotaRequestIds.remove(agent)
+                quotaForceRefreshPending.remove(agent)
                 quotaLoadingByAgent[agent] = false
                 if (quotaLoadingByAgent.none { it.value }) onClaudeQuotaReply?.invoke()
             }
@@ -3646,6 +3667,11 @@ class PocketRepository(
 
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(request: Frame) {
+        if (daemonControlsBlocked && !dev.ccpocket.protocol.DaemonUpdateAccess.allowed(request)) {
+            val prompt = request as? SendPrompt
+            handleDaemonUpdating(prompt?.convoId, prompt?.promptId)
+            return
+        }
         // Reconnect, SessionGone recovery and split panes also resume through this seam. Restore the
         // session's choice here so none of those OpenSession paths silently falls back to CLI default.
         var frame = if (request is OpenSession && request.thinking == null) {
@@ -4038,6 +4064,7 @@ class PocketRepository(
             // chip would name an agent whose numbers are not on screen yet — a mislabeled ratio, which is
             // the exact failure the per-agent label exists to remove.
             is Usage -> { usage.value = f; usageAgent.value = usageRequestedAgent; usageLoading.value = false }
+            is dev.ccpocket.protocol.QuotaResetResult -> quotaReset.onResult(f)
             // The Claude subscription allowance behind the CLI's `/usage` panel. Two different kinds of
             // non-OK reply, deliberately handled differently:
             //  · NO_TOKEN is AUTHORITATIVE — the machine signed out, or authenticates with an API key.
@@ -4055,12 +4082,18 @@ class PocketRepository(
                 // drawing Claude's percentages under a Codex label.
                 val agent = f.agent
                 val pending = quotaOutstanding[agent] ?: 0
-                if (pending <= 0) return // unsolicited or late: no slot may claim it
-                quotaOutstanding[agent] = pending - 1
+                if (pending <= 0 || (f.requestId != null && f.requestId != quotaRequestIds[agent])) return
+                quotaOutstanding.remove(agent)
+                quotaRequestIds.remove(agent)
+                val refreshAgain = quotaForceRefreshPending.remove(agent)
                 quotaDeadlines.remove(agent)?.cancel()
                 quotaStatusByAgent[agent] = f.status
                 if (f.status == CLAUDE_QUOTA_OK || f.status == CLAUDE_QUOTA_NO_TOKEN) quotaByAgent[agent] = f
                 quotaLoadingByAgent[agent] = false
+                if (agent == AgentKind.CODEX && f.status == CLAUDE_QUOTA_OK && !refreshAgain) {
+                    quotaReset.onQuotaRefreshed()
+                }
+                if (refreshAgain) fetchQuota(agent, forceRefresh = true)
                 // one policy drives every agent: open its latch only once nothing is still in flight
                 if (quotaLoadingByAgent.none { it.value }) onClaudeQuotaReply?.invoke()
             }
@@ -4191,6 +4224,16 @@ class PocketRepository(
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
             // address that already answered with the WRONG daemon key stays blacklisted — the daemon
             // re-advertises the same value on every handshake, which must not resurrect a dead probe.
+            is dev.ccpocket.protocol.DaemonUpdateStatus -> {
+                if (f.requestId != daemonUpdateRequestId) return
+                daemonUpdateDeadline?.cancel()
+                daemonUpdateRemoteInProgress.value = f.controlsBlocked
+                daemonUpdateStatus.value = if (f.state == "idle") f.copy(state = "unknown") else f
+                if (!f.controlsBlocked && f.state in setOf("busy", "up_to_date", "failed", "manual", "idle", "unknown")) {
+                    daemonUpdateRequestId = null
+                    daemonUpdatePoll?.cancel(); daemonUpdatePoll = null
+                }
+            }
             is DaemonInfo -> {
                 redeclareCaps() // before anything below can queue a capability-gated frame
                 paired.value?.let { p ->
@@ -4245,7 +4288,7 @@ class PocketRepository(
                 // #362: this connection's advertisement is the only thing that starts pin sync with this computer
                 pinLink.onDaemonInfo(f.supportsProjectPins, paired.value, pairedTransport = useRelay && !demoMode.value, outbound = capturePinOutbound())
                 memoHost.onDaemonInfo(f) // voice memo: this connection's advertisement, and the connection itself
-                if (daemonOwnsPromptRecovery) clearTurnWatchdogState()
+                if (daemonOwnsPromptRecovery && promptRetry?.refusedByUpdate != true) clearTurnWatchdogState()
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
                 // the fields — "unknown" must not be shown as the previous machine's numbers
                 versionStatus.value = VersionStatus(
@@ -4254,6 +4297,21 @@ class PocketRepository(
                     latestVersion = f.latestVersion,
                     updateCommand = f.updateCommand,
                 )
+                daemonUpdateMode.value = f.daemonUpdateMode
+                daemonUpdateRemoteInProgress.value = f.daemonUpdateInProgress
+                if (f.daemonUpdateInProgress) ensureDaemonUpdatePolling()
+                val previousVersion = daemonUpdateInitialVersion
+                val actualVersion = f.daemonVersion
+                val targetVersion = daemonUpdateStatus.value?.targetVersion
+                if (daemonUpdateRequestId != null && previousVersion != null && actualVersion != null &&
+                    dev.ccpocket.protocol.update.ReleaseVersions.isNewer(actualVersion, previousVersion) &&
+                    (targetVersion == null || !dev.ccpocket.protocol.update.ReleaseVersions.isNewer(targetVersion, actualVersion))) {
+                    daemonUpdateDeadline?.cancel()
+                    daemonUpdateStatus.value = daemonUpdateStatus.value?.copy(state = "updated", targetVersion = actualVersion)
+                    daemonUpdateRequestId = null
+                    daemonUpdateRemoteInProgress.value = false
+                    daemonUpdatePoll?.cancel(); daemonUpdatePoll = null
+                } else if (daemonUpdateRequestId != null) ensureDaemonUpdatePolling()
                 // Codex catalog cache: prefetch once a daemon that ADVERTISES Codex has introduced itself, so the
                 // first picker opens on this link's confirmed answer rather than on the restored preview. Only on
                 // the advertisement (an older daemon without the list is asked when a surface opens), never for a
@@ -4275,7 +4333,7 @@ class PocketRepository(
                 // Reattach is an authoritative lifecycle snapshot. A local 45s deadline may have fired while
                 // the phone was suspended and missed both output + TurnDone; never carry that stale inference
                 // over the daemon's fresh executing/idle truth (the screenshot bug).
-                if (f.executing != null) clearTurnWatchdogState()
+                if (f.executing != null && promptRetry?.refusedByUpdate != true) clearTurnWatchdogState()
                 openJob?.cancel(); openJob = null // the answer owns the view; retire its dormant 8s deadline
                 pendingNewOpenWd = null // the in-flight open (if any) is answered by this announce
                 openInFlight = null // …and so is its #235 claim — the next click on this row is a real request again
@@ -4377,7 +4435,7 @@ class PocketRepository(
                 sessionDegraded.value = f.degraded
                 if (!f.degraded) degradedSendArmed = false
                 val retry = promptRetry
-                if (promptResendArmed && retry != null && !f.observing && f.workdir == retry.workdir) {
+                if (promptResendArmed && retry != null && !retry.refusedByUpdate && !f.observing && f.workdir == retry.workdir) {
                     promptRetry = null; promptResendArmed = false
                     activePromptId = retry.promptId
                     promptPending = true
@@ -4571,6 +4629,10 @@ class PocketRepository(
                 workflowAgentDetails["${f.runId}#${f.agentIndex}"] = f
             }
             is PocketError -> {
+                if (f.code == "daemon_updating") {
+                    handleDaemonUpdating(f.convoId, f.promptId)
+                    return
+                }
                 // dsh incomplete-install one-tap repair (rides PocketError.repair): capture the offer for
                 // THIS conversation regardless of which error sub-branch renders the text below. The error
                 // row still shows; the offer just arms the repair banner (see startAgentRepair).
@@ -4615,7 +4677,7 @@ class PocketRepository(
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
-                    promptEvidence(exactPrompt = true)
+                    if (promptRetry?.refusedByUpdate != true) promptEvidence(exactPrompt = true)
                     finishThinking(); streaming.value = false
                     noteCurrentSettledSeen(sessionKey.value ?: currentSessionId)
                 }
@@ -4644,7 +4706,10 @@ class PocketRepository(
             // Recover instead of spinning: re-open (resume) the same session, and the SessionLive handler
             // resends the pending prompt exactly once. No session to resume → surface it honestly.
             is SessionGone -> if (f.convoId == convoId.value) {
-                if (observing.value) {
+                if (promptRetry?.refusedByUpdate == true) {
+                    // An update refusal requires an explicit retry, including after the old process dies.
+                    finishThinking(); streaming.value = false
+                } else if (observing.value) {
                     // an observe view can't run turns — a stray send must not leave the caret spinning
                     // forever (the old blanket ignore did exactly that, issue #45 ②)
                     promptEvidence(exactPrompt = true); finishThinking(); streaming.value = false
@@ -5156,6 +5221,83 @@ class PocketRepository(
      *  as "unknown" everywhere rather than as "up to date". */
     val versionStatus = mutableStateOf(VersionStatus(APP_VERSION))
 
+    val daemonUpdateMode = mutableStateOf<String?>(null)
+    val daemonUpdateStatus = mutableStateOf<dev.ccpocket.protocol.DaemonUpdateStatus?>(null)
+    private var daemonUpdateRequestId: String? = null
+    private var daemonUpdateInitialVersion: String? = null
+    private var daemonUpdateStartJob: Job? = null
+    private var daemonUpdateDeadline: Job? = null
+    private var daemonUpdatePoll: Job? = null
+    private val daemonUpdateRemoteInProgress = mutableStateOf(false)
+    val daemonControlsBlocked: Boolean get() = daemonUpdateRemoteInProgress.value || daemonUpdateBusy
+    val daemonUpdateBusy: Boolean get() = daemonUpdateStatus.value?.state in
+        setOf("checking", "downloading", "waiting", "restarting")
+
+    fun canUpdateDaemon(): Boolean = connected.value && !demoMode.value &&
+        paired.value?.role == BindingRole.OWNER && daemonUpdateMode.value == "remote"
+
+    fun startDaemonUpdate(): Boolean {
+        if (!canUpdateDaemon() || daemonControlsBlocked) return false
+        val targetIdentity = historyCacheIdentity() ?: return false
+        val requestId = newPromptId()
+        daemonUpdateRequestId = requestId
+        daemonUpdateInitialVersion = versionStatus.value.daemonVersion
+        daemonUpdateRemoteInProgress.value = true
+        daemonUpdateStatus.value = dev.ccpocket.protocol.DaemonUpdateStatus(requestId, "checking", controlsBlocked = true)
+        daemonUpdateDeadline?.cancel()
+        daemonUpdateDeadline = scope.launch {
+            delay(12_000)
+            if (daemonUpdateRequestId == requestId) daemonUpdateStatus.value = daemonUpdateStatus.value?.copy(state = "unknown")
+        }
+        daemonUpdateStartJob = scope.launch {
+            // The repository scope survives a machine switch. Never let a deferred owner action
+            // cross onto another binding, even if the caller replaced it without disconnecting.
+            if (canUpdateDaemon() && historyCacheIdentity() == targetIdentity && daemonUpdateRequestId == requestId) {
+                send(dev.ccpocket.protocol.DaemonUpdateStart(requestId))
+            }
+        }
+        ensureDaemonUpdatePolling()
+        return true
+    }
+
+    private fun ensureDaemonUpdatePolling() {
+        if (daemonUpdateRequestId == null) {
+            daemonUpdateRequestId = newPromptId()
+            daemonUpdateInitialVersion = versionStatus.value.daemonVersion
+        }
+        if (daemonUpdatePoll?.isActive == true) return
+        daemonUpdatePoll = scope.launch {
+            while (daemonUpdateRequestId != null) {
+                delay(3_000)
+                val id = daemonUpdateRequestId ?: break
+                if (connected.value && daemonUpdateMode.value != null) send(dev.ccpocket.protocol.DaemonUpdateGet(id))
+            }
+        }
+    }
+
+    private fun handleDaemonUpdating(conversation: String?, promptId: String?) {
+        daemonUpdateRemoteInProgress.value = true
+        ensureDaemonUpdatePolling()
+        if (conversation != null && promptId != null) sidePanes.promptRefused(conversation, promptId)
+        if (promptId != null && promptId == activePromptId && conversation == convoId.value) {
+            val olderTurnRunning = promptQueued
+            promptWatchdog?.cancel(); promptWatchdog = null
+            promptPending = false
+            promptRetry = promptRetry?.let { PromptRetry(it.text, it.images, it.workdir, it.promptId, refusedByUpdate = true) }
+            promptResendArmed = false
+            sendStalled.value = true
+            streaming.value = olderTurnRunning
+            clearTurnWatchdogState()
+            turnStalled.value = true // show the existing explicit resend affordance; never auto-replay
+        }
+        if (conversation == null && opening.value) {
+            memoHost.onOpenRefused("daemon_updating")
+            openJob?.cancel(); openJob = null
+            opening.value = false; switchingSession.value = false
+            pendingNewOpenWd = null; managedOpeningNew = false; openInFlight = null
+        }
+    }
+
     fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
 
     /** Per-agent model lists from the daemon ([FetchModels] → [ModelsList]) — what the picker offers
@@ -5561,11 +5703,46 @@ class PocketRepository(
     //  windows read off `codex app-server`. One slot per agent, never one shared slot: the two are
     //  different accounts with different reset clocks, and a single slot would make the last reply to
     //  land silently overwrite the other backend's numbers under whatever label the UI drew last.
+    /** System commands are handled locally, including while observing a terminal session. */
+    val usageSheetRequested = mutableStateOf(false)
+    private val quotaReset = QuotaResetController(
+        scope = scope,
+        canSend = { connected.value && !daemonControlsBlocked },
+        availableCount = { quotaByAgent[AgentKind.CODEX]?.resetCredits?.availableCount ?: 0L },
+        newRequestId = { newPromptId() + newPromptId() },
+        restore = {
+            quotaResetStorageKey()?.let(SecureStore::getString)?.let { saved ->
+                runCatching { PocketJson.decodeFromString(dev.ccpocket.protocol.RedeemQuotaReset.serializer(), saved) }.getOrNull()
+            }
+        },
+        persist = { request ->
+            quotaResetStorageKey()?.let { key ->
+                if (request == null) SecureStore.remove(key)
+                else SecureStore.putString(key, PocketJson.encodeToString(dev.ccpocket.protocol.RedeemQuotaReset.serializer(), request))
+            }
+        },
+        send = { send(it) },
+        refreshQuota = { fetchQuota(AgentKind.CODEX, forceRefresh = true) },
+    )
+    val quotaResetBusy: State<Boolean> get() = quotaReset.busy
+    val quotaResetNeedsRefresh: State<Boolean> get() = quotaReset.needsRefresh
+    val quotaResetOutcome: State<String?> get() = quotaReset.outcome
+    val quotaResetPending: Boolean get() = quotaReset.pending
+    val canRedeemQuotaReset: Boolean get() = quotaReset.canRedeem
+    val canRetryQuotaReset: Boolean get() = quotaReset.canRetry
+
+    private fun quotaResetStorageKey(): String? = historyCacheIdentity()?.let { "quota-reset-attempt:$it" }
+
+    fun redeemQuotaReset(creditId: String? = null): Boolean = quotaReset.redeem(creditId)
+    fun retryQuotaReset(): Boolean = quotaReset.retry()
+
     /** The latest reading per backend. Absent = we have not been told: the fetch is still in flight, this
      *  daemon predates the frame and silently dropped the request, or (for a non-Claude agent) we never
      *  asked because [daemonQuotaAgents] did not advertise it. All indistinguishable on the wire, which is
      *  why every surface hides the block in ALL of those cases rather than showing an error. */
     val quotaByAgent = mutableStateMapOf<AgentKind, ClaudeQuota>()
+    fun quotaLoading(agent: AgentKind): Boolean = quotaLoadingByAgent[agent] == true
+
     private val quotaLoadingByAgent = mutableStateMapOf<AgentKind, Boolean>()
     private val quotaStatusByAgent = mutableStateMapOf<AgentKind, String>()
 
@@ -5599,6 +5776,8 @@ class PocketRepository(
      * agent it names, and a reply naming an agent we are not waiting on is dropped.
      */
     private val quotaOutstanding = mutableMapOf<AgentKind, Int>()
+    private val quotaRequestIds = mutableMapOf<AgentKind, String>()
+    private val quotaForceRefreshPending = mutableSetOf<AgentKind>()
 
     /** Ask the daemon for one backend's subscription allowance; the reply lands in [quotaByAgent].
      *
@@ -5607,18 +5786,24 @@ class PocketRepository(
      * numbers — the mis-attribution the echo check catches, prevented one step earlier. */
     fun fetchQuota(agent: AgentKind = AgentKind.CLAUDE, forceRefresh: Boolean = false) {
         if (agent != AgentKind.CLAUDE && agent.name.lowercase() !in daemonQuotaAgents.value) return
+        if ((quotaOutstanding[agent] ?: 0) > 0) {
+            if (forceRefresh) quotaForceRefreshPending.add(agent)
+            return
+        }
+        val requestId = newPromptId()
+        quotaRequestIds[agent] = requestId
         quotaLoadingByAgent[agent] = true
-        quotaOutstanding[agent] = (quotaOutstanding[agent] ?: 0) + 1
+        quotaOutstanding[agent] = 1
         quotaDeadlines.remove(agent)?.cancel()
-        scope.launch { send(ClaudeQuotaGet(forceRefresh, agent)) }
         quotaDeadlines[agent] = scope.launch {
             delay(12_000)
             quotaLoadingByAgent[agent] = false
-            // the request is no longer outstanding: a reply arriving after this deadline is a LATE one and
-            // must not be attributed, exactly like a mis-labelled one
-            quotaOutstanding[agent] = ((quotaOutstanding[agent] ?: 0) - 1).coerceAtLeast(0)
+            quotaOutstanding.remove(agent)
+            quotaRequestIds.remove(agent)
+            quotaForceRefreshPending.remove(agent)
             if (quotaLoadingByAgent.none { it.value }) onClaudeQuotaReply?.invoke()
         }
+        scope.launch { send(ClaudeQuotaGet(forceRefresh, agent, requestId)) }
     }
 
     /** One refresh trigger, every backend this daemon can answer for. */
@@ -6475,6 +6660,7 @@ class PocketRepository(
     }
 
     private fun beginOpen(attempt: OpenAttempt): Boolean {
+        if (daemonControlsBlocked) return false
         val (wd, resumeId, _, _, agent) = attempt
         // Gate the EFFECTIVE agent (the same ladder openAgent resolves below: explicit row value, then the
         // remembered backend, then the default) rather than only the caller's seed. This is synchronous like
@@ -6955,8 +7141,17 @@ class PocketRepository(
         return sendPrompt(prompt, includeAttachments = false)
     }
 
+    private fun handleLocalSystemCommand(agent: AgentKind?, text: String): Boolean {
+        if (agent == null || text.trim() != "/usage" || agent !in setOf(AgentKind.CLAUDE, AgentKind.CODEX)) return false
+        usageSheetRequested.value = true
+        fetchQuota(agent, forceRefresh = true)
+        return true
+    }
+
     @OptIn(ExperimentalEncodingApi::class)
     private fun sendPrompt(text: String, includeAttachments: Boolean): Boolean {
+        if (handleLocalSystemCommand(sessionAgent.value, text)) return true
+        if (daemonControlsBlocked) return false
         memoHost.onManualSend() // a message of the user's own pauses whatever a memo batch had left to send
         // about to start work whose completion is exactly what a push would announce — a cheap, honest
         // moment to notice that this pairing is not actually registered. Non-blocking: it only enqueues
@@ -7082,7 +7277,7 @@ class PocketRepository(
      *  turn frame retracts first, so a resend can't land on top of a turn that actually started. No second
      *  User bubble is added (that duplicate "You" is the very symptom #104 is about); we just re-run the turn. */
     fun resendStalledPrompt() {
-        if (!turnStalled.value) return
+        if (daemonControlsBlocked || !turnStalled.value) return
         val c = convoId.value ?: run { turnStalled.value = false; return }
         val retry = promptRetry ?: run { turnStalled.value = false; return }
         if (activePromptId != retry.promptId) { clearTurnWatchdogState(); return }
@@ -8659,6 +8854,7 @@ class PocketRepository(
     /** Send a daemon-intercepted relaunch command and hold the "switching" affordance until the next SessionLive. */
     private fun switchViaCommand(command: String) {
         val c = convoId.value ?: return
+        if (daemonControlsBlocked) return
         memoHost.onManualSend() // a command of the user's own, like a message, pauses a memo batch
         switching.value = true
         scope.launch {
@@ -8670,6 +8866,7 @@ class PocketRepository(
     /** Clear the conversation — the daemon starts a fresh session (keeps model/effort/mode) and wipes history. */
     fun clearConversation() {
         val c = convoId.value ?: return
+        if (daemonControlsBlocked) return
         memoHost.onManualSend() // nothing more of a memo batch may go into a conversation that is being wiped
         clearPromptLifecycleState()
         transcript.clearMessages(); chatTitle.value = null; contextUsed.value = null
@@ -8835,6 +9032,7 @@ class PocketRepository(
 
     /** Take over an observed (terminal-running) session: stop the read-only tail, resume a controllable process. */
     fun takeOver() {
+        if (daemonControlsBlocked) return
         val obs = convoId.value
         val sid = currentSessionId ?: return
         val wd = workdir.value ?: return

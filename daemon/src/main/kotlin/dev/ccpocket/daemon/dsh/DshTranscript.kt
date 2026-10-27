@@ -276,9 +276,9 @@ object DshTranscript {
      * session announces what the running one would have. Three sources, all LAST-WINS in file order — a
      * session that switched model or effort mid-chat must resume as what it is NOW, not what it started as,
      * and a session that COMPACTED must resume at its new, smaller occupancy rather than a historic peak:
-     *  - `request/context` → `data.model`, `data.contextWindow`
-     *  - `request/header`  → `data.header.config.model`, `data.header.config.reasoningEffort`
-     *  - `assistant/message` → `data.message.source.model` (who actually answered) and `data.usage`
+     *  - `request/context` → `data.provider` + `data.model`, `data.contextWindow`
+     *  - `request/header`  → `data.header.config.provider` + `.model`, `data.header.config.reasoningEffort`
+     *  - `assistant/message` → `data.message.source.provider` + `.model` (who actually answered) and `data.usage`
      *    (what that answer cost the window — see [ResumeMeta.contextUsed])
      *
      * The title is written by a SEPARATE small request against a possibly different model, but dsh records
@@ -327,18 +327,25 @@ object DshTranscript {
             // dsh's own "this record carries no meaning" marker — the live path drops these too
             if (root["ignorable"]?.toString() == "true") return@forEachLine
             when (type) {
+                // Every model is named with its provider, exactly as the live catalogue spells it
+                // ([DshConfigOptions.qualifiedId]) — a resumed header must not read `deepseek-v4-pro` for a session
+                // a plugin's provider answered, nor for one the official route did.
                 EVENT_REQUEST_CONTEXT -> {
-                    data.str("model")?.takeIf { it.isNotBlank() }?.let { model = it }
+                    data.str("model")?.takeIf { it.isNotBlank() }
+                        ?.let { model = DshConfigOptions.qualifiedId(data.str("provider"), it) }
                     data.long("contextWindow")?.takeIf { it > 0 }?.let { window = it }
                 }
                 EVENT_REQUEST_HEADER -> {
                     val config = data.obj("header")?.obj("config") ?: return@forEachLine
-                    config.str("model")?.takeIf { it.isNotBlank() }?.let { model = it }
+                    config.str("model")?.takeIf { it.isNotBlank() }
+                        ?.let { model = DshConfigOptions.qualifiedId(config.str("provider"), it) }
                     config.str("reasoningEffort")?.takeIf { it.isNotBlank() }?.let { effort = it }
                 }
                 EVENT_ASSISTANT -> {
-                    data.obj("message")?.obj("source")?.str("model")
-                        ?.takeIf { it.isNotBlank() }?.let { model = it }
+                    data.obj("message")?.obj("source")?.let { source ->
+                        source.str("model")?.takeIf { it.isNotBlank() }
+                            ?.let { model = DshConfigOptions.qualifiedId(source.str("provider"), it) }
+                    }
                     // ⚠️ `usage` is a SIBLING of `message` under `data`, not a member of it — the one
                     // detail most likely to be "tidied" into a bug later (same warning DshUsageScanner
                     // carries). A turn that reported no usage at all leaves the previous reading standing:

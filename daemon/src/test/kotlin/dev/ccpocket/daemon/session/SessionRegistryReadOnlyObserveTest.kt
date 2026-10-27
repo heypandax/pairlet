@@ -80,9 +80,17 @@ class SessionRegistryReadOnlyObserveTest {
         Files.setLastModifiedTime(rollout, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 3_600_000))
     }
 
-    private suspend fun awaitLive(c: Capture): SessionLive = withTimeout(5_000) {
-        while (c.last<SessionLive>() == null) delay(20)
-        c.last<SessionLive>()!!
+    // The first live frame establishes identity before replay/backfill. Wait for each test's
+    // required fields, rather than treating any early announce as a complete progress snapshot.
+    private suspend fun awaitLive(c: Capture, ready: (SessionLive) -> Boolean = { true }): SessionLive {
+        var live: SessionLive? = null
+        withTimeout(5_000) {
+            while (live?.let(ready) != true) {
+                live = c.last<SessionLive>()
+                if (live?.let(ready) != true) delay(20)
+            }
+        }
+        return requireNotNull(live)
     }
 
     @AfterTest
@@ -101,7 +109,7 @@ class SessionRegistryReadOnlyObserveTest {
         assertTrue(convoId.isNotEmpty(), "an observe view, not a refusal: ${c.frames}")
         assertTrue(r.observing(convoId))
         assertFalse(r.isLiveSession(sid), "no controllable conversation was created")
-        val live = awaitLive(c)
+        val live = awaitLive(c) { it.observation?.progress != null }
         assertTrue(live.observing)
         assertEquals(sid, live.sessionId)
         val obs = assertNotNull(live.observation)
@@ -133,7 +141,7 @@ class SessionRegistryReadOnlyObserveTest {
         val c = Capture()
         val convoId = registry().open(OpenSession(workdir, sid, agent = AgentKind.CODEX, observeOnly = true), sink("dev:phone", c), peerSupportsObservation = true)
         assertTrue(convoId.isNotEmpty(), "${c.frames}")
-        val live = awaitLive(c)
+        val live = awaitLive(c) { it.observation?.progress != null }
         val obs = assertNotNull(live.observation)
         assertTrue(obs.readOnly)
         assertNull(obs.binding)
@@ -241,13 +249,15 @@ class SessionRegistryReadOnlyObserveTest {
         val c = Capture()
         val convoId = registry().open(OpenSession(workdir, sid, agent = AgentKind.CODEX, lastEventSeq = 0), sink("dev:phone", c), peerSupportsObservation = true)
         assertTrue(convoId.isNotEmpty())
-        assertEquals(ObservedStates.IDLE, assertNotNull(awaitLive(c).observation?.progress).state)
+        assertEquals(ObservedStates.IDLE, assertNotNull(awaitLive(c) { it.observation?.progress != null }.observation?.progress).state)
         // the outside driver starts a new turn: the tail sees it within a tick or two
         rollout.appendText("""{"timestamp":"2026-10-06T03:10:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t2"}}""" + "\n")
         rollout.appendText("""{"timestamp":"2026-10-06T03:10:01.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"shell","call_id":"c","input":"make test"}}""" + "\n")
         Files.setLastModifiedTime(rollout, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis()))
         withTimeout(10_000) {
-            while (c.last<SessionLive>()?.observation?.progress?.state != ObservedStates.RUNNING) delay(50)
+            while (c.last<SessionLive>()?.observation?.progress?.let {
+                it.state == ObservedStates.RUNNING && it.turnId == "t2" && it.currentAction != null
+            } != true) delay(50)
         }
         val p = assertNotNull(c.last<SessionLive>()?.observation?.progress)
         assertEquals("t2", p.turnId)

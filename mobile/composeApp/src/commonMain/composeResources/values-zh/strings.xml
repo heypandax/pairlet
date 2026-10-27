@@ -309,6 +309,25 @@
     <!-- ── 设置（关于 + 已配对设备）──────────────────────────────── -->
     <string name="settings_title">设置</string>
     <!-- versions &amp; updates (issue #200) -->
+    <string name="settings_website">官网</string>
+    <string name="updates_app_dialog_title">更新 App</string>
+    <string name="updates_app_dialog_body">当前版本 %1$s，检测到新版 %2$s。可前往发布页面查看可用更新。</string>
+    <string name="updates_daemon_dialog_title">更新电脑守护进程</string>
+    <string name="updates_daemon_confirm">立即更新</string>
+    <string name="updates_daemon_confirm_body">将在这台电脑上下载并校验最新版本。更新完成后守护进程会重启，App 会自动重新连接。</string>
+    <string name="updates_daemon_checking">正在检查最新版本…</string>
+    <string name="updates_daemon_downloading">正在下载、校验并安装更新…</string>
+    <string name="updates_daemon_waiting">更新已就绪，等待电脑上的任务结束后重启…</string>
+    <string name="updates_daemon_restarting">正在重启，等待重新连接…</string>
+    <string name="updates_daemon_in_progress">电脑已有更新进行中，完成后会重新连接。</string>
+    <string name="updates_daemon_busy">电脑正在运行任务，暂不更新。请等任务结束后重试。</string>
+    <string name="updates_daemon_updated">电脑守护进程已更新。</string>
+    <string name="updates_daemon_failed">更新未完成。请重试，或在电脑上执行更新命令。</string>
+    <string name="updates_daemon_uncertain">尚未确认更新结果。重新连接后查看版本，或重试。</string>
+    <string name="updates_daemon_manual">此安装方式需要在电脑上更新，请执行下方命令。</string>
+    <string name="updates_daemon_legacy">这台电脑的版本尚不支持从 App 发起更新，请先在电脑上执行下方命令。</string>
+    <string name="updates_daemon_offline">请先连接这台电脑。</string>
+    <string name="updates_daemon_owner_only">只有配对机主可以更新电脑守护进程。</string>
     <string name="updates_section">版本</string>
     <string name="updates_app">当前 App</string>
     <string name="updates_daemon">电脑守护进程</string>
@@ -581,6 +600,7 @@
     <string name="usage_cache_ratio">%1$s / %2$s tokens</string>
     <!-- ── Claude 订阅额度（CLI /usage 面板背后的 5 小时 / 7 天窗口）── -->
     <string name="quota_title_generic">订阅额度</string>
+    <string name="quota_details">用量详情</string>
     <string name="quota_title">Claude 订阅额度</string>
     <string name="quota_5h">5 小时</string>
     <string name="quota_7d">7 天</string>
@@ -2298,4 +2318,19 @@
     <string name="memo_whole_transcript_note">整段转写，目标会话的 Agent 会自行整理</string>
     <string name="memo_degraded_next">可以重新整理，或手动添加待办。</string>
     <string name="memo_degraded_next_manual">可以手动添加待办。</string>
+    <string name="quota_reset_cards">Codex 额度重置卡：%1$d 张可用</string>
+    <string name="quota_reset_redeem">使用重置卡</string>
+    <string name="quota_reset_confirm_title">使用一张额度重置卡？</string>
+    <string name="quota_reset_confirm_body">将消耗一张重置卡，恢复账号符合条件的使用额度。会话记录会保留。</string>
+    <string name="quota_reset_cancel">取消</string>
+    <string name="quota_reset_pending">正在兑换…</string>
+    <string name="quota_reset_done">额度已重置。</string>
+    <string name="quota_reset_none">暂无可用重置卡。</string>
+    <string name="quota_reset_unneeded">当前没有符合重置条件的额度窗口。</string>
+    <string name="quota_reset_unknown">暂时无法确认兑换结果。重试会沿用同一请求，避免重复消耗重置卡。</string>
+    <string name="quota_loading">正在查询账号额度…</string>
+    <string name="quota_unavailable">暂时无法获取账号额度，请刷新重试。</string>
+    <string name="quota_reset_expires">有效期至：%1$s</string>
+    <string name="quota_reset_retry">重试确认兑换结果</string>
+    <string name="updates_daemon_controls_paused">电脑守护端正在更新，新消息和新会话已暂停。你仍可查看历史、处理已有任务的审批或问题，以及停止运行中的任务。</string>
 </resources>

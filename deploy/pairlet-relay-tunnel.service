@@ -1,0 +1,22 @@
+[Unit]
+Description=Pairlet HTTPS outbound through HK
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=pairlet-tunnel
+Group=pairlet-tunnel
+EnvironmentFile=/etc/pairlet-relay-tunnel.conf
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/var/lib/pairlet-tunnel/.ssh/known_hosts -i /var/lib/pairlet-tunnel/.ssh/id_ed25519 -L 127.0.0.1:18888:127.0.0.1:18888 pairlet-cn-tunnel@${RELAY_ORIGIN}
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
