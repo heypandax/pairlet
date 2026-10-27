@@ -600,6 +600,7 @@
     <string name="usage_cache_ratio">%1$s / %2$s tokens</string>
     <!-- ── Claude subscription allowance (the 5h/7d windows behind the CLI's own /usage panel) ── -->
     <string name="quota_title_generic">Plan allowance</string>
+    <string name="quota_details">Usage details</string>
     <string name="quota_title">Claude plan allowance</string>
     <string name="quota_5h">5-hour</string>
     <string name="quota_7d">7-day</string>

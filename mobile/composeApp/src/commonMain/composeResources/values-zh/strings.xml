@@ -600,6 +600,7 @@
     <string name="usage_cache_ratio">%1$s / %2$s tokens</string>
     <!-- ── Claude 订阅额度（CLI /usage 面板背后的 5 小时 / 7 天窗口）── -->
     <string name="quota_title_generic">订阅额度</string>
+    <string name="quota_details">用量详情</string>
     <string name="quota_title">Claude 订阅额度</string>
     <string name="quota_5h">5 小时</string>
     <string name="quota_7d">7 天</string>

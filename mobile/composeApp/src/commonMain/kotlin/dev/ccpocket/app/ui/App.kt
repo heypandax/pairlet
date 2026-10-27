@@ -3034,11 +3034,6 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         }
                     },
                 )
-                if (repo.observing.value && repo.sessionAgent.value in setOf(AgentKind.CLAUDE, AgentKind.CODEX)) {
-                    TextButton(onClick = { repo.sendPrompt("/usage") }) {
-                        Text("/usage", style = tightCenter(12.sp))
-                    }
-                }
                 if (!repo.observing.value) {
                     Spacer(Modifier.width(6.dp))
                     // the streaming chip is gone from here: execution state (issue #52) is now the pinned
