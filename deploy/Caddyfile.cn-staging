@@ -1,0 +1,19 @@
+{
+    admin 127.0.0.1:2019
+    auto_https off
+}
+
+# Internal verification only. Do not expose this listener before ICP approval.
+http://relay.pairlet.cn:18080 {
+    bind 127.0.0.1
+    @analytics path /v1/analytics/*
+    request_body @analytics {
+        max_size 8KB
+    }
+    reverse_proxy 127.0.0.1:19000 {
+        # The SSH tunnel goes straight to the existing relay, bypassing HK Caddy.
+        # Overwrite caller headers; the relay trusts the last proxy's IP.
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+    }
+}

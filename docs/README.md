@@ -11,6 +11,7 @@
 | 实施本轮八项 Issue 修复（不含 #352／#381／#342） | [2026-09-19 批次规划与逐项方案](iterations/2026-09-19-claude-code/README.md) |
 | 2.1.2 全平台发布与验收 | [2026-09-22 发布记录](iterations/2026-09-22-release/RELEASE-2.1.2.md) |
 | 2.6.0 发布与验收 | [2026-10-18 发布记录](iterations/2026-10-18-release/RELEASE-2.6.0.md) |
+| 2.6.1 合并发布、中国区恢复与域名过渡 | [2026-10-27 核查与实施方案](iterations/2026-10-27-release-plan/PLAN.md)、[2.6.1 发版准备清单](iterations/2026-10-27-release-plan/RELEASE-2.6.1.md)（尚未正式发布或切换） |
 | 2.5.0 发布与验收 | [2026-10-06 发布记录](iterations/2026-10-06-release/RELEASE-2.5.0.md) |
 | 2.4.0 全平台发布与验收 | [2026-10-06 发布记录](iterations/2026-10-06-release/RELEASE-2.4.0.md) |
 | 2.3.0 全平台发布与验收 | [2026-10-05 发布记录](iterations/2026-10-05-release/RELEASE-2.3.0.md) |
@@ -28,7 +29,7 @@
 | 审核推送注册确认与存量用户自动恢复 | [推送恢复方案（待审核）](design/PUSH-REGISTRATION-RECOVERY.md) |
 | 查看直连／中继路径选择与 P2P 的评估结论 | [路径选择与 P2P 评估（已搁置：三段式实施不合理，P2P 不立项；A0 另行跟踪）](design/TRANSPORT-PATH-SELECTION-EVALUATING.md) |
 | 品牌迁移与升级兼容 | [命名](PAIRLET-NAMING.md)、[兼容清单](PAIRLET-COMPATIBILITY.md)、[CLI 兼容](PAIRLET-CLI-COMPATIBILITY.md)、[发布准备](PAIRLET-ROLLOUT.md) |
-| 部署网站与服务 | [部署说明](../deploy/README.md)、[网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)（日期快照） |
+| 部署网站与服务 | [部署说明](../deploy/README.md)、[网站部署记录](PAIRLET-WEBSITE-DEPLOYMENT.md)（日期快照）、[国内入口与备案迁移](PAIRLET-CN-INGRESS.md)（内部验证，尚未公开切换） |
 | 支持知识与跨人协作 | [支持知识](SUPPORT-KNOWLEDGE.md)、[飞书菜单](FEISHU-BOT-MENU.md)；已下线的协作交接说明见[历史归档](archive/COLLABORATION-HANDOFF.md) |
 | 安全、原创性与问题分析 | [安全模型](SECURITY.md)、[原创性说明](ANTIPLAGIARISM.md)、[问题分析](analysis/) |
 | 查询旧方案和验收依据 | [历史归档](archive/README.md)，实现与发布状态需另行核实 |
