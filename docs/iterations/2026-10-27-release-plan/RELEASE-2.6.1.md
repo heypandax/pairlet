@@ -1,6 +1,21 @@
 # 2.6.1 发布准备与验收清单
 
-更新日期：2026-10-28。状态：用户已授权全平台正式发布 2.6.1，正在执行发布门禁；各渠道完成情况以 Actions、Release 和 ASC 回读为准。中国区已恢复可见，国内 ECS 迁移已完成。域名迁移见 [部署记录](../../PAIRLET-CN-INGRESS.md)。
+更新日期：2026-10-28。2.6.1 正式安装资产已发布，Homebrew/Scoop 已同步；iOS 2.6.1（72）已提交正式审核并设置通过后自动发布，外部 TestFlight 同步等待 Beta 审核。产品源码固定在 `v2.6.1` → `c8e102d25864cd00317f1f457656d58ace6a537b`。中国区和国内 ECS 已恢复正常，既有配对保持兼容。
+
+## 2026-10-28 正式发布记录
+
+- #412、#413、#414 均已合并；本机完整测试 6,088 项，0 失败、21 条件跳过。最终 PR CI 和合并提交 CI 全通过。
+- [GitHub Release](https://github.com/heypandax/pairlet/releases/tag/v2.6.1)：27 个安装资产与 1 份 `SHA256SUMS`，平台清单与上一正式版一致。逐包 SHA-256 对照 GitHub 资产摘要通过，五份 daemon 包内版本均为 2.6.1。
+- [主发布任务](https://github.com/heypandax/pairlet/actions/runs/40550579414)因 macos-14 runner 容量不足取消部分任务。Intel daemon 补跑成功；ARM64 Pairlet 桌面包两次未获 runner，改用[独立补包任务](https://github.com/heypandax/pairlet/actions/runs/40561101117)的 macos-26 runner。补包检出原版本标签并校验精确提交，不移动标签，不覆盖已有资产。完成后重新生成完整 SHA256SUMS 并逐字回读。
+- macOS 两架构 daemon 代码签名、四份桌面镜像与两份 daemon 公证票据验证通过。Android 版本 2.6.1（43），签名证书与 2.6.0 一致。Windows/Linux 包由正式 CI 执行包内验证；不把这些检查等同于所有实机环境安装验收。
+- 旧域下载镜像同步服务成功；公网 `latest.json` 为 2.6.1，28 项资产清单完整，镜像 SHA256SUMS 与最终发布清单逐字节哈希一致。
+- Homebrew 从最终双架构字节与 SHA256SUMS 生成，和 CI 候选一致，tap 回读一致；Scoop 2.6.1 的线上哈希与实际 Windows daemon 包一致。
+- [iOS 发布任务](https://github.com/heypandax/pairlet/actions/runs/40550586511)：首次因开发证书数量上限归档失败；只清理最早一张 CI 创建的开发证书后重试成功。build 72 为 VALID，线上版本回读 `WAITING_FOR_REVIEW` / `AFTER_APPROVAL`，中英文各 9 项文本及审核备注一致。年龄分级检查通过。
+- [TestFlight 公测入口](https://testflight.apple.com/join/8z26MWWr)已关联新构建并提交 Beta 审核；提交时状态 `WAITING_FOR_REVIEW`，不等同于新构建已对外可安装。
+- 延续既有发行配置：更新清单 Ed25519 密钥仍未配置，客户端信任列表为空，使用 SHA256SUMS；未将签名任务跳过误记为已签署更新清单。macOS Developer ID 签名/公证和 Android APK 签名已单独验证。
+- HarmonyOS 是独立 opt-in，本次未发布；本次没有再次部署 relay 或重启本机 daemon。
+
+下面保留准备阶段记录，未勾选的扩展实机验收不应被理解为已执行。
 
 ## 候选范围
 
@@ -18,7 +33,7 @@
 | daemon、移动端、桌面、iOS marketing version、Harmony | 2.6.1，源码门禁通过 |
 | Android versionCode | 43，上一正式版为 42 |
 | iOS 本地 fallback build | 32；正式上传使用 `ios-release` 的 run number，不能预先把本地值当作 ASC build |
-| Homebrew | 保留已发行 2.6.0 的准确双架构 hash；新资产齐备后才推进为 2.6.1 |
+| Homebrew | 已登记并发布 2.6.1，双架构 hash 来自最终资产 |
 | iOS What's New | `fastlane/metadata/en-US/release_notes.txt` 与 `zh-Hans/release_notes.txt` |
 | 审核备注 | 保留免配对 Demo 入口、数据披露与诊断说明，补充重置卡和电脑更新的实际行为；未超过 4,000 字符 |
 
