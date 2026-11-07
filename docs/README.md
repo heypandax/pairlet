@@ -4,6 +4,7 @@
 
 | 任务 | 入口 |
 |---|---|
+| 2.6.3 发布与验收 | [完整更新说明](iterations/2026-11-08-release/RELEASE-2.6.3.md)、[发布状态与验证边界](iterations/2026-11-08-release/DELIVERY-2.6.3.md) |
 | 2.6.2 候选审核 | [审核发现、修复与发布边界](iterations/2026-11-08-release/REVIEW.md) |
 | 2026-11-08 外部用户反馈 | [Codex 增量观察、多用户端口与验收边界](analysis/2026-11-08-github-issues.md) |
 | 2026-10-17 GitHub issue 核查与修复候选 | [全部 16 项分诊、DSH v4 与桌面菜单修复及验证限制](analysis/2026-10-17-github-issues.md) |
