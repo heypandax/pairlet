@@ -1,5 +1,6 @@
 package dev.ccpocket.app.telemetry
 
+import dev.ccpocket.protocol.RelayEndpoint
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -27,7 +28,7 @@ internal data class IngressResponse(val status: Int, val body: String)
  * register) we stop touching the network for an hour / ten minutes instead of letting a 32-event queue drain
  * into a wall. [send] therefore returns 0 while dormant, which [Ga4TransportProbe] reports as `http_other`.
  *
- * @param endpoint scheme+host only, e.g. `https://pocket.ark-nexus.cc`; this class owns the path join.
+ * @param endpoint scheme+host only, e.g. `https://relay.pairlet.cn`; this class owns the path join.
  * @param transport does the actual POST — injected so tests never reach the network.
  */
 internal class AnalyticsIngressClient(
@@ -35,8 +36,9 @@ internal class AnalyticsIngressClient(
     private val clock: () -> Long = System::currentTimeMillis,
     private val transport: suspend (path: String, bearer: String?, body: String) -> IngressResponse,
 ) {
-    private val registerUrl = endpoint.trimEnd('/') + "/v1/analytics/register"
-    private val collectUrl = endpoint.trimEnd('/') + "/v1/analytics/collect"
+    private val networkEndpoint = RelayEndpoint.httpBase(endpoint.trimEnd('/'))
+    private val registerUrl = networkEndpoint + "/v1/analytics/register"
+    private val collectUrl = networkEndpoint + "/v1/analytics/collect"
 
     // Written by the serial delivery worker, read by reset() on the UI thread.
     @Volatile private var token: String? = null

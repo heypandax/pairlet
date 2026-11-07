@@ -16,6 +16,14 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CodexToolOutcomeTest {
+    @Test fun largeNonEnvelopeOutputDoesNotSearchForEmbeddedShellHeaders() {
+        // A dump with thousands of candidate headers used to trigger repeated suffix scans.
+        val text = "untrusted output " + "Wall time: ".repeat(100_000)
+        val start = System.nanoTime()
+        assertNull(codexRolloutToolOutcome("exec_command", buildJsonObject { put("output", text) }))
+        assertTrue((System.nanoTime() - start) / 1_000_000 < 2_000, "only inspect the envelope at offset zero")
+    }
+
     private fun call(id: String, name: String = "exec_command", custom: Boolean = false) = buildJsonObject {
         put("type", "response_item")
         put("payload", buildJsonObject {

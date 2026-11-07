@@ -5,6 +5,7 @@ import dev.ccpocket.daemon.peer.b64d
 import dev.ccpocket.daemon.peer.validDaemonPub
 import dev.ccpocket.protocol.EXECUTION_GRANT_INVITE_URI_PREFIX
 import dev.ccpocket.protocol.PocketJson
+import dev.ccpocket.protocol.RelayEndpoint
 import kotlinx.serialization.Serializable
 import java.net.URI
 
@@ -103,8 +104,8 @@ class ExecutionRelayPolicy(knownRelayAuthorities: Set<String>) {
     }
 
     companion object {
-        /** The public Pairlet relay front (AGENTS.md: Cloudflare-fronted `pocket.ark-nexus.cc`). */
-        val DEFAULT = ExecutionRelayPolicy(setOf("pocket.ark-nexus.cc"))
+        /** Official fronts share one relay core; explicit custom authorities still need confirmation. */
+        val DEFAULT = ExecutionRelayPolicy(RelayEndpoint.officialAuthorities)
     }
 }
 

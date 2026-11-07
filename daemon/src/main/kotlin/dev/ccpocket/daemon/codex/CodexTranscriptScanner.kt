@@ -265,7 +265,7 @@ object CodexTranscriptScanner {
 
     /** Fold one rollout line into [current]. Only `event_msg` lifecycle records move the turn; every business
      *  record moves `lastActivityAt`; a tool call opens `lastAction`, its output / completion closes it. */
-    private fun mergeTurnEvidence(current: TurnEvidence?, obj: JsonObject): TurnEvidence? {
+    internal fun mergeTurnEvidence(current: TurnEvidence?, obj: JsonObject): TurnEvidence? {
         val payload = obj.obj("payload") ?: return current
         val ts = recordTime(obj)
         val base = current ?: TurnEvidence()
@@ -319,7 +319,7 @@ object CodexTranscriptScanner {
         }
     }
 
-    private fun mergeRuntimeState(current: RuntimeState, obj: JsonObject): RuntimeState {
+    internal fun mergeRuntimeState(current: RuntimeState, obj: JsonObject): RuntimeState {
         val payload = obj.obj("payload") ?: return current
         val model = when (obj.str("type")) {
             "turn_context" -> payload.str("model")

@@ -818,8 +818,10 @@ internal class ConfigCmd(
     }
 }
 
-private class ServiceInstallCmd : CliktCommand(name = "service-install") {
+internal class ServiceInstallCmd : CliktCommand(name = "service-install") {
     private val exec by option("--exec", help = "path to the cc-pocket-daemon launcher (default: auto-detect)")
+    private val pairPort by option("--pair-port", help = "loopback control port; choose a different port for each OS user").int()
+    private val port by option("--port", help = "encrypted direct-listener port; choose a different port for each OS user").int()
     private val relay by option("--relay").default(DEFAULT_RELAY)
     private val claudeBin by option("--claude-bin")
     private val codexBin by option("--codex-bin")
@@ -830,6 +832,9 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
     private val apply by option("--apply", help = "actually write + load the service (default: print only)").flag()
 
     override fun run() {
+        if (pairPort != null && pairPort !in 1..65535) throw com.github.ajalt.clikt.core.CliktError("--pair-port must be between 1 and 65535")
+        if (port != null && port !in 1..65535) throw com.github.ajalt.clikt.core.CliktError("--port must be between 1 and 65535")
+        if ((pairPort ?: 8799) == (port ?: 8765)) throw com.github.ajalt.clikt.core.CliktError("--pair-port and --port must be different")
         val launcher = exec ?: resolveLauncher()
         // Every backend `run` accepts a --*-bin for must pass through here (issue #286): the launcher
         // resolvers tell users to "pass --dsh-bin", and for a service-managed daemon THIS command is the
@@ -837,6 +842,8 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
         val runArgs = buildList {
             add("run")
             add("--relay"); add(relay)
+            pairPort?.let { add("--pair-port"); add(it.toString()) }
+            port?.let { add("--port"); add(it.toString()) }
             claudeBin?.let { add("--claude-bin"); add(it) }
             codexBin?.let { add("--codex-bin"); add(it) }
             opencodeBin?.let { add("--opencode-bin"); add(it) }

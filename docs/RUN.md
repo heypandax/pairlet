@@ -170,3 +170,29 @@ daemon/build/install/cc-pocket-daemon/bin/pairlet pair
 ./gradlew test                      # 全部单元/契约测试
 ./gradlew build                     # 四个模块全量编译 + 测试
 ```
+
+## 同一台服务器的多个系统用户（#415）
+
+每个系统用户使用自己的 HOME、Pairlet 身份和后台服务，同时分配不同的两个端口：
+
+| 用途 | 用户 A（默认） | 用户 B（示例） |
+| --- | --- | --- |
+| 本机控制、配对、状态查询 | 8799 | 18899 |
+| 加密直连 | 8765 | 18765 |
+
+支持以下参数的新版 daemon 可在**用户 B 自己的终端**中安装服务：
+
+```bash
+# 先预览生成的服务配置；此命令不启动 daemon
+pairlet service-install --pair-port 18899 --port 18765
+# 确认该用户没有需要保留的运行中会话后，安装/重启该用户的服务
+pairlet service-install --pair-port 18899 --port 18765 --apply
+pairlet status --pair-port 18899
+pairlet pair --pair-port 18899
+```
+
+`service-install` 的这两个参数是 #415 本轮新增，旧发行版可能报未知参数；必须安装包含该修复的 daemon。已有 `run --pair-port … --port …` 支持仅用于前台参数，不应在常驻服务旁再启动第二个 daemon。
+
+Linux 使用各用户自己的 `systemctl --user` 服务，不用 sudo 安装到另一个用户下。不要复制其他用户的 Pairlet 身份文件或让多个用户共用 HOME。控制端口仍只监听本机；更换端口不会改变加密或授权机制。
+
+后续 CLI 控制命令需要带同一个 `--pair-port`（以各子命令 `--help` 为准）。再次执行 `service-install` 时仍应带自定义端口；安装器/更新脚本若重建服务，也需要核对生成参数，不能假定其保留了手工端口。桌面 App 的默认本机自动发现不在这项服务端多用户配置的覆盖范围内。

@@ -148,7 +148,7 @@ class RelayPeerTransport : PeerTransport {
     override suspend fun redeem(relay: String, ticket: String, devicePubB64: String): PairCredential? {
         val http = HttpClient(CIO)
         return try {
-            val httpBase = RelayEndpoint.transport(relay).replace("wss://", "https://").replace("ws://", "http://")
+            val httpBase = RelayEndpoint.httpBase(relay)
             val body = withTimeout(REDEEM_TIMEOUT_MS) {
                 val response = http.post("$httpBase/v1/pair/redeem") {
                     // headless is advisory only — the relay derives the credential class from the TICKET

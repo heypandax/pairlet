@@ -144,7 +144,7 @@ class ObserveSession(
                     // the binding can change under an open view (bind / unbind from the session sheet): re-read it
                     // on a coarse cadence (a small JSON file) and re-announce when the policy moved
                     val policyChanged = if (policy != null && policyTick++ % POLICY_RECHECK_TICKS == 0) refreshPolicy() else false
-                    val changed = mtime != lastMtime || size != lastSize
+                    val changed = mtime != lastMtime || size != lastSize || reader.retryRead
                     if (policyChanged && !changed) emitLive(current)
                     if (changed) {
                         lastMtime = mtime
@@ -252,32 +252,35 @@ class ObserveSession(
 
         /** Whether this backend's transcript carries turn-lifecycle records the progress reducer understands. */
         val hasProgress: Boolean get() = false
+        val retryRead: Boolean get() = false
 
         /** The latest turn's evidence, or null when the backend has none / the file could not be read. */
         fun turns(file: Path): TurnEvidence? = null
 
         companion object {
             fun forAgent(agent: AgentKind): Reader = when (agent) {
-                AgentKind.CODEX -> CodexReader
+                AgentKind.CODEX -> CodexReader()
                 AgentKind.CLAUDE -> ClaudeReader
                 else -> InertReader // no per-session file → never admitted to observe (SessionRegistry)
             }
         }
     }
 
-    private object CodexReader : Reader {
-        override fun slice(file: Path, sinceSeq: Long?) = CodexTranscriptReplay.slice(file, sinceSeq = sinceSeq)
+    private class CodexReader : Reader {
+        private val tail = CodexTranscriptReplay.Tail()
+        override val retryRead: Boolean get() = tail.retryRead
+        override fun slice(file: Path, sinceSeq: Long?) = tail.slice(file, sinceSeq)
         override fun page(file: Path, beforeSeq: Long, limit: Int) = CodexTranscriptReplay.page(file, beforeSeq, limit)
         override fun state(file: Path): ObservedState {
-            val rt = runCatching { CodexTranscriptScanner.runtimeState(file) }.getOrNull()
-            return ObservedState(rt?.model, rt?.contextUsed, rt?.contextWindow)
+            val rt = tail.runtime
+            return ObservedState(rt.model, rt.contextUsed, rt.contextWindow)
         }
         override fun title(file: Path, workdir: String, sessionId: String): String? =
             CodexTranscriptScanner.threadNames()[sessionId]?.takeIf { it.isNotBlank() }
-                ?: runCatching { CodexTranscriptScanner.summarize(file, workdir)?.title }.getOrNull()
+                ?: tail.title
         override val hasProgress: Boolean get() = true
-        // served by the same (path, mtime) memo as state(): one read per file version, not one per field
-        override fun turns(file: Path): TurnEvidence? = runCatching { CodexTranscriptScanner.turnEvidence(file) }.getOrNull()
+        // History, runtime settings and turn evidence share this observer's incremental parse.
+        override fun turns(file: Path): TurnEvidence? = tail.turns
     }
 
     private object ClaudeReader : Reader {

@@ -4,6 +4,7 @@ import { b64UrlEncode } from '../util/B64Url';
 import { E2EKeyPair } from '../crypto/E2ECrypto';
 import { PairedDaemon, Store } from '../store/Store';
 import { jo, js } from '../protocol/Protocol';
+import { RelayEndpoint } from './RelayEndpoint';
 
 /**
  * 配对（ArkTS 移植 mobile/pairing/Pairing.kt 的网络部分）。
@@ -14,10 +15,10 @@ import { jo, js } from '../protocol/Protocol';
  */
 
 /** 与 Kotlin Pairing.DEFAULT_RELAY 一致。 */
-export const DEFAULT_RELAY = 'wss://pocket.ark-nexus.cc';
+export const DEFAULT_RELAY = RelayEndpoint.DEFAULT;
 
 function httpBase(relay: string): string {
-  return relay.replace('wss://', 'https://').replace('ws://', 'http://');
+  return RelayEndpoint.httpBase(relay);
 }
 
 async function postJson(url: string, body: string): Promise<string> {

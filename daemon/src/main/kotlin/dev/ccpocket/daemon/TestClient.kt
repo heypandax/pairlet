@@ -18,6 +18,7 @@ import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.Route
+import dev.ccpocket.protocol.RelayEndpoint
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.Sessions
@@ -74,7 +75,7 @@ class TestClient private constructor(
 
         val client = HttpClient(CIO) { install(WebSockets) }
         try {
-            client.webSocket(urlString = "$relayWs/v1/device") {
+            client.webSocket(urlString = "${RelayEndpoint.webSocketBase(relayWs)}/v1/device") {
                 login(deviceId, credential)
                 val session = e2eHandshake(keys)
                 println("[device] E2E channel up")
@@ -101,7 +102,7 @@ class TestClient private constructor(
     private suspend fun redeem(devicePub: ByteArray): Pair<String, String> {
         val http = HttpClient(CIO)
         try {
-            val httpBase = relayWs.replace("ws://", "http://").replace("wss://", "https://")
+            val httpBase = RelayEndpoint.httpBase(relayWs)
             val body = http.post("$httpBase/v1/pair/redeem") {
                 setBody("""{"ticket":"$ticket","devicePubKey":"${b64u(devicePub)}"}""")
             }.bodyAsText()

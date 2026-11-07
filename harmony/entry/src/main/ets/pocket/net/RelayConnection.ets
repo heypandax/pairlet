@@ -7,6 +7,7 @@ import { b64UrlDecode } from '../util/B64Url';
 import { concatBytes, fromUtf8, utf8 } from '../util/Bytes';
 import { controlDeviceHello, controlPing, envelopeJson, parseEnvelope } from '../protocol/Protocol';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { RelayEndpoint } from './RelayEndpoint';
 
 /**
  * relay E2E 连接（ArkTS 移植 mobile/net/RelayE2EConnection.kt）。
@@ -112,7 +113,7 @@ export class RelayConnection {
       this.fail(`error:${err?.code ?? 'unknown'}`);
     });
 
-    ws.connect(`${paired.relay}/v1/device`, (err: BusinessError) => {
+    ws.connect(`${RelayEndpoint.webSocketBase(paired.relay)}/v1/device`, (err: BusinessError) => {
       if (!this.alive) return;
       if (err) this.fail(`connect:${err.code}`);
     });

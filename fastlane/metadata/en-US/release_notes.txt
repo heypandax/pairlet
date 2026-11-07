@@ -1,8 +1,6 @@
-What's new in 2.6.1
+What's new in 2.6.2
 
-- Improved Codex usage details, including available quota reset cards and confirmation when redeeming an eligible card.
-- Request an update for a compatible paired computer from Settings, with progress and recovery status shown in the app.
-- DeepSeek Harness model choices now retain their provider. If the selected model cannot be applied, your message is kept instead of being sent with another model.
-- The copy button now appears after each agent reply, making it easier to copy the answer after reading it.
+- Improved responsiveness when following long, active sessions by reducing repeated history processing on your computer. This improvement requires updating Pairlet on your computer too.
+- Improved connection endpoint migration while preserving existing pairings, without scanning a new code.
 
-Update Pairlet on your computer too to use the new capabilities. Quota reset cards are available only when supported by your existing account.
+We recommend updating Pairlet on your computer as well.

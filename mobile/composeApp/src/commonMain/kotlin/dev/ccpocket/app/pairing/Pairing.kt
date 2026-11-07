@@ -109,7 +109,7 @@ object Pairing {
         client: HttpClient,
         role: BindingRole,
     ): PairedDaemon {
-        val httpBase = RelayEndpoint.transport(info.relay).replace("wss://", "https://").replace("ws://", "http://")
+        val httpBase = RelayEndpoint.httpBase(info.relay)
         val resp = client.post("$httpBase/v1/pair/redeem") {
             setBody("""{"ticket":"${info.ticket}","devicePubKey":"${B64Url.encode(keys.publicRaw)}"}""")
         }.bodyAsText()
@@ -131,7 +131,7 @@ object Pairing {
 
     /** Resolve a 6-digit code typed by the user into the full pairing info (relay-assisted path). */
     suspend fun resolveCode(code: String, client: HttpClient): PairingInfo {
-        val httpBase = DEFAULT_RELAY.replace("wss://", "https://").replace("ws://", "http://")
+        val httpBase = RelayEndpoint.httpBase(DEFAULT_RELAY)
         val resp = client.post("$httpBase/v1/pair/code") { setBody("""{"code":"$code"}""") }.bodyAsText()
         val payload = runCatching { json.decodeFromString<PairCodePayload>(resp) }.getOrElse { error("invalid or expired code") }
         return PairingInfo(DEFAULT_RELAY, payload.accountId, payload.daemonPub, payload.ticket)

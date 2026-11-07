@@ -280,6 +280,10 @@ class ExecutionGrantG0Test {
         assertEquals(ExecutionRelayPolicy.Verdict.ConfirmedByUser, ok.relay)
         assertIs<ExecutionRelayPolicy.Verdict.Refused>(ExecutionRelayPolicy.DEFAULT.requireKnownRelay(appr.invite, null))
         assertEquals(ExecutionRelayPolicy.Verdict.Known, ExecutionRelayPolicy.DEFAULT.requireKnownRelay(appr.invite.copy(relay = "wss://pocket.ark-nexus.cc"), null))
+        assertEquals(ExecutionRelayPolicy.Verdict.Known, ExecutionRelayPolicy.DEFAULT.requireKnownRelay(appr.invite.copy(relay = "wss://relay.pairlet.cn"), null))
+        assertEquals(ExecutionRelayPolicy.Verdict.Known, ExecutionRelayPolicy.DEFAULT.requireKnownRelay(appr.invite.copy(relay = "wss://relay.pairlet.org"), null))
+        assertIs<ExecutionRelayPolicy.Verdict.Refused>(ExecutionRelayPolicy.DEFAULT.requireKnownRelay(appr.invite.copy(relay = "wss://relay.pairlet.cn:8443"), null))
+        assertIs<ExecutionRelayPolicy.Verdict.Refused>(ExecutionRelayPolicy.DEFAULT.requireKnownRelay(appr.invite.copy(relay = "wss://relay.pairlet.cn.attacker.example"), null))
     }
 
     // ------------------------------------------------------------------ purpose isolation

@@ -14,6 +14,18 @@ import kotlin.test.*
  * regression here can never leak an event or a token to a real host.
  */
 class AnalyticsIngressClientTest {
+    @Test fun oldOfficialConfigurationRegistersAndSendsOnlyToCn() = runBlocking {
+        for (endpoint in listOf("https://pocket.ark-nexus.cc", "https://relay.pairlet.org/")) {
+            val fake = Fake { n, _ -> if (n == 1) granted("T1") else accepted }
+            val migrated = AnalyticsIngressClient(endpoint) { p, b, body -> fake.handle(p, b, body) }
+            assertEquals(202, migrated.sendOne())
+            assertEquals(listOf(
+                "https://relay.pairlet.cn/v1/analytics/register",
+                "https://relay.pairlet.cn/v1/analytics/collect",
+            ), fake.calls.map { it.path })
+        }
+    }
+
     private data class Call(val path: String, val bearer: String?, val body: String)
 
     private class Fake(private val reply: (Int, Call) -> IngressResponse) {

@@ -72,7 +72,7 @@ internal fun codexRolloutToolOutcome(tool: String, payload: JsonObject): Boolean
     if (name in shellTools) {
         val exit = obj?.obj("metadata")?.long("exit_code") ?: obj?.long("exit_code")
         if (exit != null) return exit == 0L
-        shellExit.find(text.orEmpty())?.takeIf { it.range.first == 0 }?.let {
+        shellExit.matchAt(text.orEmpty(), 0)?.let {
             return it.groupValues[1].toLongOrNull()?.let { code -> code == 0L }
         }
     }
