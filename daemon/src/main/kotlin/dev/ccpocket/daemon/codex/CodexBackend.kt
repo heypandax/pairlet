@@ -606,7 +606,7 @@ class CodexBackend(
             // reached the phone, but `partial ?: failure` hid WHY the turn died (PR #296 re-review).
             finalText = when {
                 status == "failed" -> failure ?: lastAgentText
-                compact && status == "completed" -> "Context compacted."
+                compact && status == "completed" -> CODEX_COMPACTION_NOTICE
                 compact && status == "interrupted" -> "Context compaction interrupted."
                 else -> lastAgentText
             },
@@ -618,7 +618,10 @@ class CodexBackend(
         lastErrorText = null
         deltaSeen.clear()
         fileChangePaths.clear(); fileChangeDiffs.clear() // approvals for this turn are resolved by now — don't accumulate
-        return listOf(ev)
+        // TurnDone.finalText is a completion/push preview, not a chat row. Send the existing compact
+        // card too, only after a successful terminal event (never on the scheduling acknowledgement).
+        return if (compact && status == "completed") listOf(AgentEvent.CompactSummary(CODEX_COMPACTION_NOTICE), ev)
+        else listOf(ev)
     }
 
     private fun captureUsage(usage: JsonObject?) {

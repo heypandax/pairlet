@@ -200,6 +200,12 @@ object CodexTranscriptReplay {
             runtime = CodexTranscriptScanner.mergeRuntimeState(runtime, obj)
             turns = CodexTranscriptScanner.mergeTurnEvidence(turns, obj)
             val p = obj.obj("payload") ?: return
+            if (obj.str("type") == "compacted") {
+                out += ReplaySlicer.Row(
+                    HistoryMessage(ChatRole.USER, CODEX_COMPACTION_NOTICE, compactSummary = true), lineNo,
+                )
+                return
+            }
             if (obj.str("type") == "event_msg" && p.str("type") == "item_completed") {
                 val item = p.obj("item") ?: return
                 val id = item.str("id") ?: return

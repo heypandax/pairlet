@@ -184,6 +184,8 @@ class ConversationCompactTest {
                 if (!reject) {
                     assertTrue(convo.isExecuting(), "accepted compaction must remain protected as active work")
                     assertEquals(index, frames.filterIsInstance<TurnDone>().size)
+                    assertEquals(index, frames.filterIsInstance<SessionLive>().count { it.compactSummary != null },
+                        "acceptance must not announce success")
                     Files.writeString(release, "complete")
                 }
                 withTimeout(10_000) {
@@ -193,10 +195,14 @@ class ConversationCompactTest {
                 assertEquals(index + 1, cleanExits.get())
                 assertEquals(index + 1, frames.filterIsInstance<TurnDone>().size)
                 val done = frames.filterIsInstance<TurnDone>().last()
+                val cards = frames.filterIsInstance<SessionLive>().filter { it.compactSummary != null }
+                assertEquals(if (reject) 0 else index + 1, cards.size)
                 if (reject) assertTrue(done.error.orEmpty().contains("compact unsupported"), done.toString())
                 else {
                     assertNull(done.error)
                     assertEquals("Context compacted.", done.finalText)
+                    assertEquals(done.finalText, cards.last().compactSummary)
+                    assertTrue(frames.indexOf(cards.last()) < frames.indexOf(done))
                 }
                 assertFalse(convo.isExecuting())
             }
