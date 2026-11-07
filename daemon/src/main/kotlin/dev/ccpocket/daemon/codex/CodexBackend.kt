@@ -69,6 +69,7 @@ class CodexBackend(
     private var startingTurn = false // turn/start selected but turn/started has not landed (guarded by [bootstrap])
     private var promptWriteInFlight = 0 // closes sendPrompt selection -> JSON-RPC registration race (guarded by [bootstrap])
     private var pendingCompact = false // /compact may arrive while thread resume/fork is still handshaking
+    private var compactInFlight = false // accepted locally until its terminal event, NOT just the RPC ack (bootstrap)
     private var pendingReview: String? = null // empty marker = uncommitted-changes review
 
     // JSON-RPC id correlation: which of our outstanding requests this id belongs to
@@ -140,7 +141,7 @@ class CodexBackend(
         // reset per-process protocol state (this runs on every (re)launch)
         threadId = null; currentTurnId = null
         bootstrap.withLock {
-            pendingPrompt = null; pendingCompact = false; pendingReview = null
+            pendingPrompt = null; pendingCompact = false; compactInFlight = false; pendingReview = null
             phase = ProcessPhase.OPENING
             startingTurn = false
             promptWriteInFlight = 0
@@ -196,8 +197,9 @@ class CodexBackend(
         }
         // A steer may be accepted just as its turn completes. turn/completed deliberately waits while the
         // steer response is outstanding; once success lands there is no next turn to start, so release now.
-        // Compact is a bounded control operation and emits no turn/completed of its own. Review does start
-        // a real turn, so its successful response deliberately waits for that turn's terminal notification.
+        // Compact's {} response only acknowledges scheduling. compactInFlight holds the writer until
+        // turn/completed, including the gap before turn/started. If completion preceded the RPC ack,
+        // draining pendingControls here can finally release the process.
         if (completedSteer != null || completedStart != null || completedControl == "compact") {
             maybeRequestProcessExit()
         }
@@ -259,6 +261,10 @@ class CodexBackend(
         pendingControls.remove(id)?.let { op ->
             // A rejected control cannot produce a later terminal notification. Release the idle writer now;
             // the visible error below remains the operation's final result.
+            if (op == "compact") {
+                finishTurnAndDrain()
+                return listOf(AgentEvent.TurnResult("⚠️ Codex /compact failed: $msg", usage = null, isError = true))
+            }
             maybeRequestProcessExit()
             return listOf(AgentEvent.AssistantText("⚠️ Codex /$op failed: $msg"))
         }
@@ -328,7 +334,9 @@ class CodexBackend(
         val flush = bootstrap.withLock {
             threadId = tid
             phase = ProcessPhase.READY
-            val prompt = pendingPrompt.also { pendingPrompt = null }
+            val prompt = pendingPrompt.also { pendingPrompt = null }?.let {
+                if (compactInFlight) { queuedStarts.addFirst(it); null } else it
+            }
             startingTurn = prompt != null
             val compact = pendingCompact.also { pendingCompact = false }
             val review = pendingReview.also { pendingReview = null }
@@ -410,6 +418,7 @@ class CodexBackend(
                 phase == ProcessPhase.READY &&
                 currentTurnId == null &&
                 !startingTurn &&
+                !compactInFlight &&
                 promptWriteInFlight == 0 &&
                 pendingPrompt == null &&
                 queuedStarts.isEmpty() &&
@@ -476,15 +485,8 @@ class CodexBackend(
                 emptyList()
             }
             "turn/completed" -> {
-                val events = onTurnCompleted(params.obj("turn"))
-                // One parked prompt per boundary becomes the NEXT turn. If none exists, end this app-server
-                // process so another app can own the rollout immediately (#316).
-                val next = bootstrap.withLock {
-                    currentTurnId = null
-                    startingTurn = false
-                    queuedStarts.removeFirstOrNull()?.also { startingTurn = true }
-                }
-                if (next != null) writeTurnStart(next.text, next.images) else maybeRequestProcessExit()
+                val events = onTurnCompleted(params.obj("turn"), bootstrap.withLock { compactInFlight })
+                finishTurnAndDrain()
                 events
             }
             "error" -> {
@@ -581,7 +583,18 @@ class CodexBackend(
         }
     }
 
-    private fun onTurnCompleted(turn: JsonObject?): List<AgentEvent> {
+    private suspend fun finishTurnAndDrain() {
+        // A queued prompt must start AFTER compaction, never steer the compaction task itself.
+        val next = bootstrap.withLock {
+            currentTurnId = null
+            startingTurn = false
+            compactInFlight = false
+            queuedStarts.removeFirstOrNull()?.also { startingTurn = true }
+        }
+        if (next != null) writeTurnStart(next.text, next.images) else maybeRequestProcessExit()
+    }
+
+    private fun onTurnCompleted(turn: JsonObject?, compact: Boolean = false): List<AgentEvent> {
         val status = turn?.str("status")
         // The stashed notification text is only evidence about THIS turn when the turn actually failed:
         // unconditioned, a leftover error became the "final answer" of a later tool-only turn that
@@ -591,7 +604,12 @@ class CodexBackend(
         val ev = AgentEvent.TurnResult(
             // A FAILED turn reports its reason even when partial text streamed first: the deltas already
             // reached the phone, but `partial ?: failure` hid WHY the turn died (PR #296 re-review).
-            finalText = if (status == "failed") failure ?: lastAgentText else lastAgentText,
+            finalText = when {
+                status == "failed" -> failure ?: lastAgentText
+                compact && status == "completed" -> "Context compacted."
+                compact && status == "interrupted" -> "Context compaction interrupted."
+                else -> lastAgentText
+            },
             // a turn that never saw a tokenUsage event reports "unknown" (null), not an empty window
             usage = if (usageSeen) TokenUsage(u.input, u.output, null, u.cached) else null,
             isError = status == "failed",
@@ -675,6 +693,10 @@ class CodexBackend(
                 ProcessPhase.READY -> {
                     val activeTurn = currentTurnId
                     when {
+                        compactInFlight -> {
+                            queuedStarts.addLast(prompt)
+                            null
+                        }
                         activeTurn != null && prompt.images.isNotEmpty() -> {
                             // turn/steer has no image transport (Tier C): preserve the whole prompt and
                             // start it at the boundary instead of silently dropping its images.
@@ -784,10 +806,16 @@ class CodexBackend(
     override suspend fun compact(): Boolean {
         var accepted = true
         val tid = bootstrap.withLock {
+            if (compactInFlight) return@withLock null // repeated tap shares the outstanding operation
+            if (currentTurnId != null || startingTurn || pendingPrompt != null || pendingReview != null) {
+                accepted = false
+                return@withLock null
+            }
             when (phase) {
-                ProcessPhase.READY -> threadId
+                ProcessPhase.READY -> threadId.also { compactInFlight = true }
                 ProcessPhase.OPENING -> {
                     pendingCompact = true
+                    compactInFlight = true
                     null
                 }
                 ProcessPhase.EXITING -> {
@@ -808,6 +836,10 @@ class CodexBackend(
         val review = instructions?.trim().orEmpty()
         var accepted = true
         val tid = bootstrap.withLock {
+            if (compactInFlight) {
+                accepted = false
+                return@withLock null
+            }
             when (phase) {
                 ProcessPhase.READY -> threadId
                 ProcessPhase.OPENING -> {

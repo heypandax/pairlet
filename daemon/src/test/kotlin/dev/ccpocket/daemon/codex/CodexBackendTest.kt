@@ -337,7 +337,15 @@ class CodexBackendTest {
         assertTrue("\"method\":\"thread/compact/start\"" in request, request)
         assertTrue("\"threadId\":\"thr-1\"" in request, request)
         b.parse("""{"id":${requestId(request)},"result":{}}""")
-        assertEquals(1, exits, "compact has no turn/completed, so its response is the handoff boundary")
+        assertEquals(0, exits, "RPC acceptance must not shut down asynchronous compaction")
+        b.parse(compactStarted())
+        b.parse(compactItem("started"))
+        b.parse(compactItem("completed"))
+        assertEquals(0, exits, "even item completion must wait for the terminal turn")
+        val result = assertIs<AgentEvent.TurnResult>(b.parse(compactCompleted()).single())
+        assertFalse(result.isError)
+        assertEquals("Context compacted.", result.finalText)
+        assertEquals(1, exits)
     }
 
     @Test
@@ -352,6 +360,105 @@ class CodexBackendTest {
         b.parse(threadStartResponse(2, "thr-1"))
 
         assertEquals(1, w.count { "thread/compact/start" in it })
+    }
+
+    private fun compactStarted(thread: String = "thr-1") =
+        """{"method":"turn/started","params":{"threadId":"$thread","turn":{"id":"tc","status":"inProgress"}}}"""
+
+    private fun compactItem(stage: String) =
+        """{"method":"item/$stage","params":{"threadId":"thr-1","turnId":"tc","item":{"id":"ic","type":"contextCompaction"}}}"""
+
+    private fun compactCompleted(status: String = "completed", thread: String = "thr-1") =
+        """{"method":"turn/completed","params":{"threadId":"$thread","turn":{"id":"tc","status":"$status"}}}"""
+
+    @Test
+    fun compact_started_or_completed_before_ack_still_waits_for_both() = runBlocking {
+        for (completeBeforeAck in listOf(false, true)) {
+            val w = mutableListOf<String>()
+            var exits = 0
+            val b = ready(w, onExit = { exits++ })
+            assertTrue(b.compact())
+            val ack = """{"id":${requestId(w.last())},"result":{}}"""
+            b.parse(compactStarted())
+            if (completeBeforeAck) b.parse(compactCompleted()) else b.parse(ack)
+            assertEquals(0, exits)
+            if (completeBeforeAck) b.parse(ack) else b.parse(compactCompleted())
+            assertEquals(1, exits)
+        }
+    }
+
+    @Test
+    fun compact_ignores_child_completion_and_coalesces_duplicate_requests() = runBlocking {
+        val w = mutableListOf<String>()
+        var exits = 0
+        val b = ready(w, onExit = { exits++ })
+        assertTrue(b.compact())
+        b.parse("""{"id":${requestId(w.last())},"result":{}}""")
+        assertTrue(b.compact())
+        assertFalse(b.review())
+        assertEquals(1, w.count { "thread/compact/start" in it })
+        assertTrue(b.parse(compactStarted("child")).isEmpty())
+        assertTrue(b.parse(compactCompleted(thread = "child")).isEmpty())
+        assertEquals(0, exits)
+        b.parse(compactStarted())
+        b.parse(compactCompleted())
+        assertEquals(1, exits)
+    }
+
+    @Test
+    fun compact_failure_and_interruption_produce_one_terminal_result() = runBlocking {
+        for (status in listOf("failed", "interrupted")) {
+            val w = mutableListOf<String>()
+            var exits = 0
+            val b = ready(w, onExit = { exits++ })
+            b.compact()
+            b.parse("""{"id":${requestId(w.last())},"result":{}}""")
+            b.parse(compactStarted())
+            b.parse("""{"method":"error","params":{"threadId":"thr-1","error":{"message":"provider unavailable"}}}""")
+            val result = assertIs<AgentEvent.TurnResult>(b.parse(compactCompleted(status)).single())
+            assertEquals(status == "failed", result.isError)
+            assertEquals(if (status == "failed") "provider unavailable" else "Context compaction interrupted.", result.finalText)
+            assertEquals(1, exits)
+        }
+    }
+
+    @Test
+    fun prompts_during_cold_compaction_wait_in_order_and_never_steer_it() = runBlocking {
+        val w = mutableListOf<String>()
+        var exits = 0
+        val b = CodexBackend(null)
+        b.attach(AgentIo({ w += it }, {}, requestProcessExit = { exits++ }), AgentSpec(Path.of("/repo"), resumeId = "thr-1"))
+        b.compact()
+        b.sendPrompt("during handshake", emptyList())
+        b.parse(initResponse(1))
+        b.parse(threadStartResponse(2, "thr-1"))
+        val compactId = requestId(w.last())
+        b.parse("""{"id":$compactId,"result":{}}""")
+        b.sendPrompt("before started", emptyList())
+        b.parse(compactStarted())
+        b.sendPrompt("during compaction", emptyList())
+        assertTrue(w.none { "\"method\":\"turn/start\"" in it || "turn/steer" in it })
+        b.parse(compactCompleted())
+        assertEquals("during handshake", turnInput(w).field(0, "text"))
+        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t2","status":"completed"}}}""")
+        assertEquals("before started", turnInput(w).field(0, "text"))
+        b.parse("""{"method":"turn/completed","params":{"turn":{"id":"t3","status":"completed"}}}""")
+        assertEquals("during compaction", turnInput(w).field(0, "text"))
+        assertEquals(0, exits)
+    }
+
+    @Test
+    fun rejected_compaction_drains_a_queued_prompt() = runBlocking {
+        val w = mutableListOf<String>()
+        var exits = 0
+        val b = ready(w, onExit = { exits++ })
+        b.compact()
+        val id = requestId(w.last())
+        b.sendPrompt("continue normally", emptyList())
+        val result = assertIs<AgentEvent.TurnResult>(b.parse("""{"id":$id,"error":{"message":"unsupported"}}""").single())
+        assertTrue(result.isError)
+        assertEquals("continue normally", turnInput(w).field(0, "text"))
+        assertEquals(0, exits)
     }
 
     @Test
@@ -697,8 +804,9 @@ class CodexBackendTest {
 
         val ev = b.parse("""{"id":3,"error":{"code":-32601,"message":"method not found"}}""")
 
-        val t = ev.filterIsInstance<AgentEvent.AssistantText>().single()
-        assertTrue("compact" in t.text && "method not found" in t.text, t.text)
+        val t = ev.filterIsInstance<AgentEvent.TurnResult>().single()
+        assertTrue(t.isError)
+        assertTrue("compact" in t.finalText.orEmpty() && "method not found" in t.finalText.orEmpty())
         assertEquals(1, exits, "a rejected control has no later terminal notification")
     }
 

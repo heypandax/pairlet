@@ -3462,18 +3462,33 @@ class Conversation(
      * One copy on purpose (issue #301: this block existed three times and the anchor/fork subtleties
      * below must never drift apart). Returns false when the op cannot proceed (already replied).
      */
-    private suspend fun ensureProcessForControlOp(opLabel: String): Boolean {
+    private suspend fun ensureProcessForControlOp(
+        opLabel: String,
+        armExecuting: Boolean = false,
+        request: (suspend () -> Boolean)? = null,
+    ): Boolean {
         val refusal = lifecycleLocked {
             if (isExecuting()) return@lifecycleLocked "Wait for the current turn to finish before $opLabel."
+            if (armExecuting && hasUnconsumedPrompts()) {
+                return@lifecycleLocked "Finish or resend the pending message before $opLabel."
+            }
             if (proc == null) {
                 val launched = runCatching {
                     // no thinking / agentPreset on this launch: today's behaviour, kept pending a ruling (design
                     // §4.2 #7; only Codex has native control ops, and it reads neither)
-                    launchProcess(launchSpec(thinking = null, agentPreset = null))
+                    launchProcess(launchSpec(thinking = null, agentPreset = null), armExecuting = armExecuting)
                 }
                 if (launched.isFailure) {
                     return@lifecycleLocked "Could not start the agent for $opLabel: ${launched.exceptionOrNull()?.message ?: "unknown error"}"
                 }
+            } else if (armExecuting) {
+                markExecuting()
+            }
+            // Reserve the backend operation before another send can enter deliverLocked. In particular,
+            // a refused compact must only settle its OWN executing mark, never a concurrent prompt's.
+            if (request != null && !request()) {
+                if (armExecuting) settleTurnWork(expectContinuation = false)
+                return@lifecycleLocked "The agent is finishing the previous turn. Please retry /compact."
             }
             null
         }
@@ -3485,10 +3500,11 @@ class Conversation(
     }
 
     private suspend fun handleNativeCompactCommand() {
-        if (!ensureProcessForControlOp("compacting context")) return
+        // Protect the asynchronous operation from idle cleanup/settings relaunch even before it emits
+        // turn/started. Its terminal TurnResult (including RPC rejection) settles this work normally.
         // the backend queues this across an in-flight open handshake, so a cold session's first Compact
         // tap still becomes exactly one native request; a rejection surfaces via its error path
-        if (!backend.compact()) reply("The agent is finishing the previous turn. Please retry /compact.")
+        ensureProcessForControlOp("compacting context", armExecuting = true, request = { backend.compact() })
     }
 
     /** Native code review. `/review` defaults to all working tree changes; trailing text becomes the
