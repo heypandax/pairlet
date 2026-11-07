@@ -78,10 +78,23 @@ jobs:
             filepath: File.join(ENV.fetch("RUNNER_TEMP"), "AuthKey.p8"),
           )
           app = Spaceship::ConnectAPI::App.find("com.panda.ccpocket") or abort("ASC app not found")
-          builds = app.get_builds(filter: {
-            version: ENV.fetch("BUILD_NUMBER"), "preReleaseVersion.version" => ENV.fetch("VERSION")
-          }, sort: "-uploadedDate")
-          abort("Expected one exact VALID build; no submission made") unless builds.length == 1 && builds.first.processing_state == "VALID"
+          ready = false
+          60.times do |attempt|
+            builds = app.get_builds(filter: {
+              version: ENV.fetch("BUILD_NUMBER"), "preReleaseVersion.version" => ENV.fetch("VERSION")
+            }, sort: "-uploadedDate")
+            abort("Multiple matching builds; no submission made") if builds.length > 1
+            state = builds.first&.processing_state || "NOT_VISIBLE"
+            puts "Build #{ENV.fetch('VERSION')} (#{ENV.fetch('BUILD_NUMBER')}): #{state} (#{attempt + 1}/60)"
+            $stdout.flush
+            if state == "VALID"
+              ready = true
+              break
+            end
+            abort("Build processing failed: #{state}; no submission made") unless ["PROCESSING", "NOT_VISIBLE"].include?(state)
+            sleep 30 unless attempt == 59
+          end
+          abort("Timed out waiting for exact VALID build; no submission made") unless ready
           puts "Existing build #{ENV.fetch('VERSION')} (#{ENV.fetch('BUILD_NUMBER')}): VALID"
           RUBY
 
