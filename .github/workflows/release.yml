@@ -104,7 +104,7 @@ jobs:
             jdk_arch: aarch64   # native on the Apple Silicon runner
           - arch: x86_64
             jdk_arch: x64       # cross-build via Rosetta
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
 
@@ -437,7 +437,7 @@ jobs:
             jdk_arch: x64
             variant: pairlet
             asset_prefix: pairlet-desktop
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
 

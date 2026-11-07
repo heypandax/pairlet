@@ -1,0 +1,137 @@
+name: release-macos-daemon-recovery
+
+# Build only missing daemon packages from the immutable release source.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing release version without v
+        required: true
+        type: string
+      expected_commit:
+        description: Exact commit of the immutable release tag
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: daemon-recovery-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  macos:
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            jdk_arch: aarch64   # native on the Apple Silicon runner
+          - arch: x86_64
+            jdk_arch: x64       # cross-build via Rosetta
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ inputs.version }}
+          persist-credentials: false
+
+      - name: Verify immutable source and missing artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [ "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT" ]
+          bash scripts/check-release-version.sh "$RELEASE_VERSION"
+          gh release view "v$RELEASE_VERSION" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/existing-assets"
+          if grep -Fxq "cc-pocket-daemon-$RELEASE_VERSION-macos-$ARCH.tar.gz" "$RUNNER_TEMP/existing-assets"; then
+            echo "::error::Artifact already exists; refusing to replace it"
+            exit 1
+          fi
+
+      - name: Stage production Sentry config
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
+
+      - name: Install Rosetta (for the x86_64 JDK)
+        if: matrix.arch == 'x86_64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          architecture: ${{ matrix.jdk_arch }}
+
+      - name: Import Developer ID signing certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          # Import the Developer ID Application cert into a throwaway keychain so codesign can find
+          # it. The keychain is unlocked and added to the search list for this runner only.
+          KEYCHAIN="$RUNNER_TEMP/ccp-signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          # allow codesign to use the key without an interactive prompt
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build, sign, notarize, tarball
+        env:
+          CCP_ARCH: ${{ matrix.arch }}
+          DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          chmod +x scripts/release-macos.sh gradlew
+          scripts/release-macos.sh "${{ inputs.version }}"
+
+      - name: Verify native CLI aliases without starting a daemon
+        run: python3 scripts/smoke-daemon-cli.py daemon/build/jpackage/cc-pocket-daemon.app
+
+      - name: Verify packaged Sentry configuration
+        uses: ./.github/actions/observability-config
+        with:
+          component: daemon
+          dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
+          artifact: daemon/build/jpackage/cc-pocket-daemon.app
+
+      - name: Upload tarball to release v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_COMMIT=$(gh api "repos/$GITHUB_REPOSITORY/commits/v${{ inputs.version }}" --jq .sha)
+          [ "$TAG_COMMIT" = "$(git rev-parse HEAD)" ]
+          ARTIFACT="cc-pocket-daemon-${{ inputs.version }}-macos-${{ matrix.arch }}.tar.gz"
+          echo "sha256: $(shasum -a 256 "$ARTIFACT" | awk '{print $1}')"
+          gh release upload "v${{ inputs.version }}" "$ARTIFACT"
+
+      # Build-time sha256 of exactly what was uploaded, for the signed release manifest (sign-manifest job).
+      # Best effort: a missing record only weakens that job's cross-check, it never fails the release.
+      - name: Record build-time sha256 for the release manifest
+        continue-on-error: true
+        env:
+          VER: ${{ inputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: mkdir -p release-hashes && shasum -a 256 "cc-pocket-daemon-${VER}-macos-${ARCH}.tar.gz" > "release-hashes/macos-${ARCH}.sha256"
+      - name: Stage build-time sha256 record
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hashes-macos-${{ matrix.arch }}
+          path: release-hashes/
+          retention-days: 7
