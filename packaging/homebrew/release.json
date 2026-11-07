@@ -1,7 +1,7 @@
 {
-  "version": "2.6.1",
+  "version": "2.6.2",
   "sha256": {
-    "arm64": "64983df03755a0566293c976bea81d66763e5992761831cf13f7870d0719202a",
-    "x86_64": "b55da435ab2eeea2e9620bbabc707a7b5e6e9aebd6d8c718252c2fdca8f5ecd0"
+    "arm64": "41a805cd186fad5e6f82e154b2621199daad8b4e0de4a535bbf6d0602f52f5fc",
+    "x86_64": "ee5592b4543111f688600d6090cc4c97717c07ac7fe1cae143b691b28740fafd"
   }
 }
