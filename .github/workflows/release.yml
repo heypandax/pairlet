@@ -104,7 +104,7 @@ jobs:
             jdk_arch: aarch64   # native on the Apple Silicon runner
           - arch: x86_64
             jdk_arch: x64       # cross-build via Rosetta
-    runs-on: macos-26
+    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -115,7 +115,7 @@ jobs:
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
 
       - name: Install Rosetta (for the x86_64 JDK)
-        if: matrix.arch == 'x86_64'
+        if: matrix.arch == 'x86_64' && runner.arch == 'ARM64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
@@ -437,7 +437,7 @@ jobs:
             jdk_arch: x64
             variant: pairlet
             asset_prefix: pairlet-desktop
-    runs-on: macos-26
+    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -449,7 +449,7 @@ jobs:
           analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
 
       - name: Install Rosetta (for the x86_64 JDK)
-        if: matrix.arch == 'x86_64'
+        if: matrix.arch == 'x86_64' && runner.arch == 'ARM64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
@@ -1001,7 +1001,7 @@ jobs:
   checksums:
     # The explicit status condition lets this run past intentionally SKIPPED jobs in
     # only_macos_desktop mode, but never rewrite SHA256SUMS for a partially failed release.
-    if: ${{ !cancelled() && !failure() && !inputs.only_android }}
+    if: ${{ !cancelled() && !failure() && !contains(needs.*.result, 'cancelled') && !inputs.only_android }}
     needs: [macos, windows, linux, android, macos-desktop, windows-desktop, linux-desktop, harmony]
     runs-on: ubuntu-latest
     steps:
@@ -1030,7 +1030,7 @@ jobs:
   # reviewers — configured by the owner in the repository settings) gate every use. An environment that does
   # not exist yet is created by GitHub on first use WITHOUT protection; without the secret it only warns.
   sign-manifest:
-    if: ${{ !cancelled() && !failure() }}
+    if: ${{ !cancelled() && !failure() && !contains(needs.*.result, 'cancelled') }}
     needs: [checksums, macos, windows, linux, android, macos-desktop, windows-desktop, linux-desktop, harmony]
     runs-on: ubuntu-latest
     environment: release-signing

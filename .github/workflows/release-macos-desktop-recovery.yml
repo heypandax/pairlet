@@ -32,7 +32,7 @@ concurrency:
 jobs:
   recover:
     if: github.ref == 'refs/heads/main'
-    runs-on: macos-26
+    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     timeout-minutes: 90
     env:
       RELEASE_VERSION: ${{ inputs.version }}
@@ -76,7 +76,7 @@ jobs:
           analytics_endpoint: ${{ vars.PAIRLET_ANALYTICS_ENDPOINT }}
 
       - name: Install Rosetta (for the x86_64 JDK)
-        if: matrix.arch == 'x86_64'
+        if: matrix.arch == 'x86_64' && runner.arch == 'ARM64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)

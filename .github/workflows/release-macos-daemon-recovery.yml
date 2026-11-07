@@ -12,6 +12,11 @@ on:
         description: Exact commit of the immutable release tag
         required: true
         type: string
+      arch:
+        description: Missing package architecture
+        type: choice
+        options: [arm64, x86_64]
+        default: x86_64
 permissions:
   contents: write
 concurrency:
@@ -24,11 +29,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: arm64
-            jdk_arch: aarch64   # native on the Apple Silicon runner
-          - arch: x86_64
-            jdk_arch: x64       # cross-build via Rosetta
-    runs-on: macos-26
+          - arch: ${{ inputs.arch }}
+            jdk_arch: ${{ inputs.arch == 'arm64' && 'aarch64' || 'x64' }}
+    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -59,7 +62,7 @@ jobs:
           dsn: ${{ vars.PAIRLET_SENTRY_DSN_DAEMON }}
 
       - name: Install Rosetta (for the x86_64 JDK)
-        if: matrix.arch == 'x86_64'
+        if: matrix.arch == 'x86_64' && runner.arch == 'ARM64'
         run: sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
