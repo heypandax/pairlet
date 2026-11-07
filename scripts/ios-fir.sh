@@ -11,7 +11,7 @@
 #   release-testing Proper ad-hoc. Needs an "Apple Distribution" cert for team SC9S2SJ42G in the keychain
 #                   AND a valid Xcode account login (so -allowProvisioningUpdates can mint the ad-hoc profile).
 #
-# fir.im token: taken from $FIR_TOKEN, else from scripts/.fir-token (gitignored — put the token there once).
+# fir.im token: $FIR_TOKEN, scripts/.fir-token, then ~/.config/pairlet/fir-token (local only).
 #
 # Prereqs: Xcode, fir-cli (`gem install fir-cli`), a JDK 17 (JAVA_HOME), and an Apple ID signed into Xcode
 #   that's a member of team SC9S2SJ42G. The target device's UDID must already be registered: connect it to
@@ -30,7 +30,8 @@ export JAVA_HOME
 
 # --- fir.im token (never committed) ---
 if [[ -z "${FIR_TOKEN:-}" && -f scripts/.fir-token ]]; then FIR_TOKEN="$(tr -d ' \n' < scripts/.fir-token)"; fi
-: "${FIR_TOKEN:?set FIR_TOKEN=<fir.im token>, or put it in scripts/.fir-token}"
+if [[ -z "${FIR_TOKEN:-}" && -f "$HOME/.config/pairlet/fir-token" ]]; then FIR_TOKEN="$(tr -d ' \n' < "$HOME/.config/pairlet/fir-token")"; fi
+: "${FIR_TOKEN:?set FIR_TOKEN, or save token in ~/.config/pairlet/fir-token}"
 
 command -v fir >/dev/null || { echo "fir-cli not found — run: gem install fir-cli" >&2; exit 1; }
 
@@ -59,4 +60,4 @@ IPA="$(ls "$EXPORT_DIR"/*.ipa 2>/dev/null | head -1)"
 echo "▸ built: $IPA"
 
 echo "▸ publishing to fir.im…"
-fir publish "$IPA" -T "$FIR_TOKEN"
+API_TOKEN="$FIR_TOKEN" fir publish "$IPA" --no-verbose --skip-fir-cli-feedback

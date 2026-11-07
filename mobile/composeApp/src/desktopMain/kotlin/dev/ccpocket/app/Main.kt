@@ -300,7 +300,7 @@ private fun ApplicationScope.PocketShell() {
             // best-effort: undecorated borderless fullscreen (fill the whole device, menu-less).
             // TODO(win/linux): GraphicsDevice.setFullScreenWindow for exclusive FS if a mode switch is wanted.
             val r = fsRestore
-            if (r != null) { w.bounds = r; fsRestore = null; fullscreen = false }
+            if (r != null) { w.bounds = fitWindowToArea(r, usableBoundsFor(r)); fsRestore = null; fullscreen = false }
             else { fsRestore = w.bounds; w.bounds = screenConfigFor(w.bounds).bounds; fullscreen = true }
         }
     }
@@ -392,7 +392,7 @@ private fun ApplicationScope.PocketShell() {
             // dragged or resized maximizes again on its current screen instead of jumping back to the old frame
             if (restore != null && isZoomed(window)) {
                 val here = screenConfigFor(window.bounds)
-                window.bounds = if (screenConfigFor(restore).device == here.device) restore
+                window.bounds = if (screenConfigFor(restore).device == here.device) fitWindowToArea(restore, usableBounds(here))
                 else centeredOn(usableBounds(here), restore.width, restore.height)
                 zoomRestore = null
             } else {
@@ -586,7 +586,10 @@ private fun ApplicationScope.PocketShell() {
                         fsRestore = window.bounds
                         window.bounds = screenConfigFor(window.bounds).bounds
                     }
-                    MacWindow.FsPhase.EXITING -> { fsRestore?.let { window.bounds = it }; fsRestore = null }
+                    MacWindow.FsPhase.EXITING -> {
+                        fsRestore?.let { window.bounds = fitWindowToArea(it, usableBoundsFor(it)) }
+                        fsRestore = null
+                    }
                     MacWindow.FsPhase.ENTERED -> fullscreen = true // defensive: keep state true if ENTERING was missed
                     MacWindow.FsPhase.EXITED -> fullscreen = false
                 }
@@ -613,15 +616,9 @@ private fun ApplicationScope.PocketShell() {
         }
         LaunchedEffect(Unit) {
             window.minimumSize = Dimension(720, 480)
-            // multi-display: Alignment.Center places over the VIRTUAL bounds union, which in an L-shaped
-            // arrangement can be a dead zone no screen covers (observed at (5688,-1176) — the window was
-            // unfindable). If we spawned off every screen, re-center on the default one.
-            val ge = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
-            val onSomeScreen = ge.screenDevices.any { it.defaultConfiguration.bounds.intersects(window.bounds) }
-            if (!onSomeScreen) {
-                val b = ge.defaultScreenDevice.defaultConfiguration.bounds
-                window.setLocation(b.x + (b.width - window.width) / 2, b.y + (b.height - window.height) / 2)
-            }
+            // A partial intersection is not enough: it can leave the controls above the menu bar
+            // and the content center outside the display after a monitor/resolution change.
+            if (!fullscreen) window.bounds = fitWindowToArea(window.bounds, usableScreenBounds(window))
             // quit while fullscreen → come back fullscreen. Give the native window a moment to be on screen
             // first: AppKit ignores a fullscreen request for a window that isn't ordered in yet.
             if (savedFullscreen) {
@@ -771,6 +768,19 @@ private fun initialWindowBounds(saved: List<Float>?): Rectangle? = runCatching {
     val area = usableBounds(gc)
     val w = (area.width * 0.8).toInt().coerceIn(minOf(1180, area.width), maxOf(1180, minOf(1680, area.width)))
     val h = (area.height * 0.85).toInt().coerceIn(minOf(760, area.height), maxOf(760, minOf(1100, area.height)))
-    if (savedRect != null && savedRect.width >= w * 0.6 && savedRect.height >= h * 0.6) savedRect
+    if (savedRect != null && savedRect.width >= w * 0.6 && savedRect.height >= h * 0.6) fitWindowToArea(savedRect, area)
     else centeredOn(area, w, h)
 }.getOrNull()
+
+/** Keep the complete restored frame inside one display's usable area (AWT points, including negative
+ * monitor origins). Preserve valid positions; shrink oversized frames before clamping their origin. */
+internal fun fitWindowToArea(frame: Rectangle, area: Rectangle): Rectangle {
+    val width = frame.width.coerceIn(1, area.width.coerceAtLeast(1))
+    val height = frame.height.coerceIn(1, area.height.coerceAtLeast(1))
+    return Rectangle(
+        frame.x.coerceIn(area.x, area.x + area.width.coerceAtLeast(1) - width),
+        frame.y.coerceIn(area.y, area.y + area.height.coerceAtLeast(1) - height),
+        width,
+        height,
+    )
+}

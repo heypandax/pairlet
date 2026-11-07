@@ -1,11 +1,40 @@
 package dev.ccpocket.app
 
+import java.awt.Rectangle
+import kotlin.test.assertEquals
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /** Issue #189: Windows closes to a reachable tray; every other configuration still exits normally. */
 class MainWindowLifecycleTest {
+
+    @Test
+    fun restore_moves_partly_hidden_controls_below_the_menu_bar() {
+        assertEquals(Rectangle(100, 25, 1180, 760),
+            fitWindowToArea(Rectangle(100, -120, 1180, 760), Rectangle(0, 25, 1440, 850)))
+    }
+
+    @Test
+    fun restore_shrinks_a_large_monitor_frame_to_the_laptop_screen() {
+        assertEquals(Rectangle(0, 25, 1440, 850),
+            fitWindowToArea(Rectangle(10, -100, 2180, 1100), Rectangle(0, 25, 1440, 850)))
+    }
+
+    @Test
+    fun restore_handles_negative_monitor_origins_and_removed_displays() {
+        assertEquals(Rectangle(-1200, -775, 1000, 700),
+            fitWindowToArea(Rectangle(100, -900, 1000, 700), Rectangle(-1440, -775, 1240, 850)))
+        assertEquals(Rectangle(440, 150, 1000, 700),
+            fitWindowToArea(Rectangle(3000, 150, 1000, 700), Rectangle(0, 25, 1440, 850)))
+    }
+
+    @Test
+    fun restore_preserves_a_fully_visible_frame() {
+        val frame = Rectangle(120, 80, 1180, 760)
+        assertEquals(frame, fitWindowToArea(frame, Rectangle(0, 25, 1440, 850)))
+    }
+
 
     @Test
     fun windows_with_an_enabled_supported_tray_hides_instead_of_exiting() {

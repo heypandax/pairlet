@@ -6,6 +6,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import kotlin.test.assertTrue
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.theme.PocketTheme
@@ -15,7 +20,7 @@ import kotlin.test.Test
 class CodeHorizontalScrollbarTest {
 
     @Test
-    fun overflowingFenceExposesADraggableDesktopScrollbar() = runComposeUiTest {
+    fun overflowingFenceWrapsWithinMessageWidth() = runComposeUiTest {
         setContent {
             PocketTheme {
                 Box(Modifier.width(220.dp)) {
@@ -24,7 +29,11 @@ class CodeHorizontalScrollbarTest {
             }
         }
         waitForIdle()
-        onAllNodes(hasTestTag(CODE_SCROLLBAR_TAG)).assertCountEquals(1)
+        onAllNodes(hasTestTag(CODE_SCROLLBAR_TAG)).assertCountEquals(0)
+        val layouts = mutableListOf<TextLayoutResult>()
+        onNodeWithText("column".repeat(80)).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue(layouts.single().lineCount > 1, "Long code must wrap across lines")
+        assertTrue(!layouts.single().didOverflowWidth, "Wrapped code must fit the available width")
     }
 
     @Test

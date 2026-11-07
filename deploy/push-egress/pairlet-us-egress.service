@@ -1,0 +1,22 @@
+[Unit]
+Description=Pairlet Google outbound through US
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=pairlet-us-egress
+Group=pairlet-us-egress
+EnvironmentFile=/etc/pairlet-us-egress.conf
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o ConnectTimeout=10 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/var/lib/pairlet-us-egress/.ssh/known_hosts -i /var/lib/pairlet-us-egress/.ssh/id_ed25519 -L 127.0.0.1:18889:127.0.0.1:18888 pairlet-us-egress@${PUSH_EGRESS_HOST}
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
