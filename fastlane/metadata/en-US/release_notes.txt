@@ -1,6 +1,9 @@
 What's new in 2.6.3
 
 - Server upgrade: please update to the new version. Update Pairlet on both your phone and computer to keep connecting normally.
+- Improved responsiveness when following long, active sessions by reducing repeated history processing on your computer. This improvement requires updating Pairlet on your computer too.
+- Improved connection endpoint migration while preserving existing pairings, without scanning a new code.
+- Code blocks wrap to the message width while copying preserves the original code.
 - Fixed Codex context compaction ending prematurely. Messages sent during compaction now wait until it finishes.
 - Added a clear completion notice for context compaction, also visible when reopening the conversation.
 
