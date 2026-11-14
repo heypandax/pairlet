@@ -2,6 +2,7 @@ package dev.ccpocket.app.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasContentDescription
@@ -11,6 +12,9 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.PocketRepository
@@ -21,6 +25,8 @@ import dev.ccpocket.app.resources.ctx_edit_for_model
 import dev.ccpocket.app.resources.ctx_own_value
 import dev.ccpocket.app.resources.ctx_save_for_model
 import dev.ccpocket.app.resources.ctx_set_for_model
+import dev.ccpocket.app.resources.cancel
+import dev.ccpocket.app.resources.hide_keyboard
 import dev.ccpocket.app.resources.ctx_using_catchall
 import dev.ccpocket.app.resources.per_model_delete
 import dev.ccpocket.app.resources.per_model_empty_title
@@ -135,6 +141,40 @@ class PerModelWindowUiTest {
         onNode(hasText(s(Res.string.ctx_save_for_model))).performClick()
         waitForIdle()
         assertNull(r.contextWindowOverrides["deepseek-chat"], "blank must clear, not pin 0")
+    }
+
+    /** #419: use the complete sheet with a keyboard-sized viewport, not an unbounded editor. */
+    @Test
+    fun shortSheetCanReachEditorSaveAndReopen() = runComposeUiTest {
+        val r = repo()
+        setContent {
+            PocketTheme { Box(Modifier.width(375.dp).height(340.dp)) { SessionInfoSheet(r) {} } }
+        }
+        onNode(hasText(s(Res.string.ctx_set_for_model))).performScrollTo().performClick()
+        onNode(hasSetTextAction()).performScrollTo().performClick()
+        onNode(hasSetTextAction()).performTextInput("262144")
+        waitForIdle()
+        onNode(hasText(s(Res.string.ctx_save_for_model))).assertIsDisplayed().performClick()
+        assertEquals(262_144L, r.contextWindowOverrides["deepseek-chat"])
+        onNode(hasText(s(Res.string.ctx_edit_for_model))).performScrollTo().performClick()
+        onNode(hasSetTextAction()).performScrollTo()
+        onNode(hasText("262144")).assertIsDisplayed()
+    }
+
+    @Test
+    fun hideKeyboardKeepsDraftAndCancelKeepsSavedValue() = runComposeUiTest {
+        val r = repo().apply { setContextWindowOverrideFor("deepseek-chat", 131_072) }
+        setContent { PocketTheme { Box(Modifier.width(375.dp)) { PerModelWindowRow(r) } } }
+        onNode(hasText(s(Res.string.ctx_edit_for_model))).performClick()
+        onNode(hasSetTextAction()).performTextClearance()
+        onNode(hasSetTextAction()).performTextInput("262144")
+        onNode(hasContentDescription(s(Res.string.hide_keyboard))).performClick()
+        onNode(hasSetTextAction()).assertIsNotFocused()
+        onNode(hasText("262144")).assertIsDisplayed()
+        assertEquals(131_072L, r.contextWindowOverrides["deepseek-chat"], "hiding the keyboard must not save")
+        onNode(hasText(s(Res.string.cancel))).performClick()
+        onNode(hasText(s(Res.string.ctx_edit_for_model))).performClick()
+        onNode(hasText("131072")).assertIsDisplayed()
     }
 
     /** No model id in scope → nothing to key an entry by, so the row must not offer to write one. */
