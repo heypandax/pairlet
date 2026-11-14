@@ -435,6 +435,7 @@
     <string name="context_window_section">CONTEXT WINDOW · CATCH-ALL</string>
     <string name="context_window_hint">Applies to any model without its own window and none we can read off its id. Auto reads the size from the model id.</string>
     <string name="context_window_custom">Custom</string>
+    <string name="hide_keyboard">Hide keyboard</string>
     <string name="context_window_tokens">tokens</string>
     <string name="ctx_conflict_one">Saved. This won\'t affect %1$s — it uses its own window. Manage it below.</string>
     <string name="ctx_conflict_many">Saved. This won\'t affect %1$s or %2$d other models — they use their own window. Manage them below.</string>

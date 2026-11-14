@@ -435,6 +435,7 @@
     <string name="context_window_section">上下文窗口 · 兜底</string>
     <string name="context_window_hint">适用于既没单独设过窗口、也无法从 id 认出窗口的模型。自动档从模型 id 推断大小。</string>
     <string name="context_window_custom">自定义</string>
+    <string name="hide_keyboard">收起键盘</string>
     <string name="context_window_tokens">token 数</string>
     <string name="ctx_conflict_one">已保存。这不会影响 %1$s，它用的是自己的窗口。可在下方管理。</string>
     <string name="ctx_conflict_many">已保存。这不会影响 %1$s 和另外 %2$d 个模型，它们用的是各自的窗口。可在下方管理。</string>
