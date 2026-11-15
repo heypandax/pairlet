@@ -1,6 +1,6 @@
 # 2.6.4 发布与验收
 
-截至 2026-11-15 12:26（UTC+8），**桌面、daemon、Android 及下载渠道已发布 2.6.4；iOS 2.6.4（75）已处理为 VALID，TestFlight 已提交 Beta 审核，正式商店提审等待备案归属确认。**
+截至 2026-11-15 12:31（UTC+8），**桌面、daemon、Android 及下载渠道已发布 2.6.4；iOS 2.6.4（75）正式提审成功，等待 App Store 审核，通过后自动发布；TestFlight 等待 Beta 审核。**
 
 ## 来源与修复
 
@@ -33,8 +33,9 @@
 - [iOS 工作流](https://github.com/heypandax/pairlet/actions/runs/43632255411) 固定版本 2.6.4、build 75。首次归档被 `PLA Update available` 阻止；macOS 公证也因缺少有效协议返回 HTTP 403。用户确认接受新协议后重试，macOS 公证已成功。
 - 第二次 iOS 尝试遇到开发证书数量上限。[只读检查](https://github.com/heypandax/pairlet/actions/runs/43671885384) 列出 10 张 CI 创建的开发证书；[维护任务](https://github.com/heypandax/pairlet/actions/runs/43671960930) 指定并仅撤销最早到期的一张 `QQ7P963AJ5`，回读 `revoke ...: ok`。没有清理本机命名的开发证书、发行证书或 Developer ID。
 - 第三次尝试复用相同源码与 build 75，归档、符号上传、发行 IPA 导出及生产 APNs 权限验证均通过，2026-11-15 12:16（UTC+8）上传成功，12:18 处理为 VALID。前两次没有上传 IPA，因而没有重复上传已存在的构建。
-- 正式提审在添加 review submission item 时收到 `Provider name mismatch. - Your developer name does not match MIIT's records.`。ASC 页面回读版本仍为 `Prepare for Submission`，已绑定 build 75，设置为审核通过后自动发布。App Information 显示正确的已备案 App 号，并提供 `Confirm Information`，要求确认当前开发者是备案主体或关联方；本轮已向用户请求确认这一事实，未代为作出身份声明。该阻塞不属于人工审核拒绝，处理入口见[提交流程阻塞记录](../../APP-STORE-REJECTIONS.md#已发生的上传--提交流程阻塞)。
+- 正式提审在添加 review submission item 时收到 `Provider name mismatch. - Your developer name does not match MIIT's records.`。当时 ASC 页面回读版本为 `Prepare for Submission`，已绑定 build 75，设置为审核通过后自动发布。App Information 显示正确的已备案 App 号，并提供 `Confirm Information`，要求确认当前开发者是备案主体或关联方；用户随后明确告知已完成 Confirm。该阻塞不属于人工审核拒绝，处理入口见[提交流程阻塞记录](../../APP-STORE-REJECTIONS.md#已发生的上传--提交流程阻塞)。
 - [独立 TestFlight 工作流](https://github.com/heypandax/pairlet/actions/runs/43676403419) 已成功：复用 build 75、绑定 `Public Beta`、同步中英测试说明并提交 Beta 审核，回读 `WAITING_FOR_REVIEW` / `WAITING_FOR_BETA_REVIEW`。[公测链接](https://testflight.apple.com/join/8z26MWWr) 保持不变，尚不声称 2.6.4 已可供外部安装。
+- 备案确认后，[复用已有构建的提审任务](https://github.com/heypandax/pairlet/actions/runs/43676973018) 全部成功，未重建或重复上传 IPA。12:30 正式回读 `WAITING_FOR_REVIEW`、`AFTER_APPROVAL`、绑定 build 75；`en-US` 与 `zh-Hans` 各 9 个文本字段及审核备注全部与标签源码一致。12:31 再次确认 TestFlight 已提交，外测状态仍为 `WAITING_FOR_BETA_REVIEW`。正式审核、Beta 审核均待 Apple 处理，尚未宣称 iOS 新版已上架或可外部安装。
 - [#419 原回复](https://github.com/heypandax/pairlet/issues/419#issuecomment-6882534768) 已更新修复、模拟器测试和审核进度，Issue 保持打开，等待用户设备复测。
 
 原始日志、哈希回执、模拟器截图及回放放在独立发布工作区的忽略目录 `_local/release-2.6.4/`，不进入版本库。原工作区其他未提交修改未混入本次发布。
