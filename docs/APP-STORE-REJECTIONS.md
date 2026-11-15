@@ -1,6 +1,6 @@
 # App Store 拒审案例与提审前检查
 
-维护日期：2026-09-12。适用 App：CC Pairlet（原 CC Pocket），App ID `6778773969`，Bundle ID `com.panda.ccpocket`。
+维护日期：2026-11-15。适用 App：Pairlet（原 CC Pairlet / CC Pocket），App ID `6778773969`，Bundle ID `com.panda.ccpocket`。
 
 修改商店文案、审核备注、隐私披露、首次启动流程、年龄分级，或准备 iOS 提审前，先按本文复核。本文记录已发生的问题及处理证据；案例中的历史回复只适用于当时的功能和数据流，不能直接当作下一版本的声明。
 
@@ -103,6 +103,7 @@
 | XcodeGen 意外生成 universal 包，iPad 方向声明却只有竖屏 | [ecf881ff](https://github.com/heypandax/pairlet/commit/ecf881ffc339fa2f9b6b0c1631de253b08a8b09b)，2026-06-22 | 当时用 iPhone-only 修复；当前已正式支持 iPad，不能照抄旧修复。核对 [project.yml](../iosApp/project.yml)、[Info.plist](../iosApp/iosApp/Info.plist)与最终归档，并准备 iPad 素材 |
 | 1.9.5 被拒提交仍持有版本，却另建空审核草稿 | [e0eb466c](https://github.com/heypandax/pairlet/commit/e0eb466c5259e73501ecd55edaa31fb1d776b2be)，2026-09-01 的临时修复 | 先查版本归属与原 submission，再选择合适的复提方式。不要执行历史临时工作流；当前同名 asc-maintenance 已用于证书维护 |
 | 2.6.0（71）审核备注为 4,386 字符，超出 4,000 上限 | [提审任务](https://github.com/heypandax/pairlet/actions/runs/39059676082)在 build 已为 VALID 后返回 `Review Notes cannot be longer than 4000 characters`；原本地校验只覆盖分语言文案 | 审核备注压缩为 3,431 字符，保留审核入口和数据披露；`check-appstore-content.py` 同时校验非空与长度，CI 覆盖 4,000／4,001 边界。仅修元数据时通过 `ios-submit-existing.yml` 复用已上传 build，不重建 IPA |
+| 2.6.4（75）开发者名称未通过 MIIT 校验，2026-11-15 | [提审任务](https://github.com/heypandax/pairlet/actions/runs/43632255411)在 build VALID、元数据同步后返回 `Provider name mismatch. - Your developer name does not match MIIT's records.`；ASC App Information 同时显示 `Provider Name Not Recognized by MIIT` | 先核对已保存的 App 备案号。页面 `Confirm Information` 要求声明当前开发者是备案主体或关联方，应由用户确认事实后处理；本次尚待确认，不推断是拼音或姓名顺序问题。不要为消除错误自行关闭中国区或修改法律身份。处理后使用 `ios-submit-existing.yml` 复用 build 75，并回读正式审核状态；TestFlight Beta 审核可独立推进 |
 
 ## 每次提审的必查项
 
