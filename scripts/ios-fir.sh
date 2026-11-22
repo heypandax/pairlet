@@ -34,6 +34,10 @@ if [[ -z "${FIR_TOKEN:-}" && -f "$HOME/.config/pairlet/fir-token" ]]; then FIR_T
 : "${FIR_TOKEN:?set FIR_TOKEN, or save token in ~/.config/pairlet/fir-token}"
 
 command -v fir >/dev/null || { echo "fir-cli not found — run: gem install fir-cli" >&2; exit 1; }
+# The token rides API_TOKEN (not -T) so it never shows up in `ps`. Fail fast, before the long iOS build,
+# if this fir-cli build ignores the env var or the token is invalid (verified with fir-cli 2.0.25).
+API_TOKEN="$FIR_TOKEN" fir me >/dev/null 2>&1 \
+  || { echo "fir-cli rejected API_TOKEN — check the token, or upgrade fir-cli (gem install fir-cli)" >&2; exit 1; }
 
 case "$METHOD" in
   development)     OPTS="iosApp/ExportOptions-dev.plist" ;;

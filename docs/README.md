@@ -23,6 +23,7 @@
 | 2.1.4 全平台发布与验收 | [2026-09-27 发布记录](iterations/2026-09-27-release/RELEASE-2.1.4.md) |
 | 2.1.3 全平台发布与验收 | [2026-09-26 发布记录](iterations/2026-09-26-release/RELEASE-2.1.3.md) |
 | 了解使用方式与运行链路 | [使用说明](USAGE.md)、[运行说明](RUN.md)、[贡献指南](../CONTRIBUTING.md) |
+| 2.6.5 发布 | [更新说明](iterations/2026-11-22-release/RELEASE-2.6.5.md) |
 | 2.6.4 发布 | [更新说明](iterations/2026-11-15-release/RELEASE-2.6.4.md)、[发布状态与验证边界](iterations/2026-11-15-release/DELIVERY-2.6.4.md) |
 | 构建、发版、iOS 提审 | [发布流程](RELEASE.md)、[拒审案例与检查](APP-STORE-REJECTIONS.md)、[构建链](BUILD-TOOLCHAIN-UPGRADE.md)、[iOS 设备](ios-device.md) |
 | 修改产品或界面 | [设计索引](design/README.md)、[UI 设计说明](design/claude-design-handoff/README.md) |

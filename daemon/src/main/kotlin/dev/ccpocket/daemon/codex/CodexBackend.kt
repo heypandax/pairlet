@@ -12,6 +12,12 @@ import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SessionSummary
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -45,6 +51,9 @@ class CodexBackend(
     // id → Codex thread title, as persisted in session_index.jsonl. Injected so the take-over naming path
     // (issue #347) is testable without a real $CODEX_HOME on disk.
     private val threadTitles: () -> Map<String, String> = { CodexTranscriptScanner.threadNames() },
+    /** How long a successfully acknowledged /compact may go without its turn/started before the backend
+     *  treats the ack itself as the terminal boundary (app-server builds whose compaction emits no turn). */
+    private val compactStartGraceMs: Long = COMPACT_START_GRACE_MS,
 ) : AgentBackend {
     private val log = logger("CodexBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -70,6 +79,9 @@ class CodexBackend(
     private var promptWriteInFlight = 0 // closes sendPrompt selection -> JSON-RPC registration race (guarded by [bootstrap])
     private var pendingCompact = false // /compact may arrive while thread resume/fork is still handshaking
     private var compactInFlight = false // accepted locally until its terminal event, NOT just the RPC ack (bootstrap)
+    private var compactTurnSeen = false // the in-flight compaction emitted its turn/started (guarded by [bootstrap])
+    private var compactGeneration = 0L // identifies one accepted compaction for its watchdog (guarded by [bootstrap])
+    private val watchdogScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("codex-compact-watchdog"))
     private var pendingReview: String? = null // empty marker = uncommitted-changes review
 
     // JSON-RPC id correlation: which of our outstanding requests this id belongs to
@@ -141,7 +153,7 @@ class CodexBackend(
         // reset per-process protocol state (this runs on every (re)launch)
         threadId = null; currentTurnId = null
         bootstrap.withLock {
-            pendingPrompt = null; pendingCompact = false; compactInFlight = false; pendingReview = null
+            pendingPrompt = null; pendingCompact = false; compactInFlight = false; compactTurnSeen = false; pendingReview = null
             phase = ProcessPhase.OPENING
             startingTurn = false
             promptWriteInFlight = 0
@@ -203,7 +215,42 @@ class CodexBackend(
         if (completedSteer != null || completedStart != null || completedControl == "compact") {
             maybeRequestProcessExit()
         }
+        if (completedControl == "compact") armCompactWatchdog()
         return events
+    }
+
+    /** Some app-server builds acknowledge thread/compact/start with `{}` and never emit a compaction turn.
+     * Without a fallback [compactInFlight] would park every later prompt forever. If no turn/started lands
+     * within [compactStartGraceMs] of a successful ack, a synthetic line goes through the SAME stdout pump
+     * (so ordering against real notifications is preserved) and settles the compaction there. */
+    private suspend fun armCompactWatchdog() {
+        val generation = bootstrap.withLock {
+            if (!compactInFlight || compactTurnSeen) return
+            compactGeneration
+        }
+        val inject = io?.inject ?: return
+        watchdogScope.launch {
+            delay(compactStartGraceMs)
+            inject(buildJsonObject {
+                put("method", COMPACT_WATCHDOG_METHOD)
+                putJsonObject("params") { put("generation", generation) }
+            }.toString())
+        }
+    }
+
+    private suspend fun onCompactWatchdog(params: JsonObject): List<AgentEvent> {
+        val generation = params["generation"]?.let { (it as? JsonPrimitive)?.longOrNull }
+        val expired = bootstrap.withLock {
+            compactInFlight && !compactTurnSeen && currentTurnId == null && generation == compactGeneration
+        }
+        if (!expired) return emptyList()
+        log.warn("codex compaction acked without turn/started for ${compactStartGraceMs}ms — settling on the ack")
+        finishTurnAndDrain()
+        // Same pair a completed compaction turn emits: the chat card, then the terminal result.
+        return listOf(
+            AgentEvent.CompactSummary(CODEX_COMPACTION_NOTICE),
+            AgentEvent.TurnResult(CODEX_COMPACTION_NOTICE, usage = null, isError = false),
+        )
     }
 
     /**
@@ -463,6 +510,7 @@ class CodexBackend(
                 bootstrap.withLock {
                     currentTurnId = params.obj("turn")?.str("id")
                     startingTurn = false
+                    if (compactInFlight) compactTurnSeen = true
                 }
                 lastErrorText = null // a stale between-turns error must not be billed to this new turn
                 emptyList()
@@ -484,6 +532,7 @@ class CodexBackend(
                 captureUsage(tu?.obj("last") ?: tu?.obj("total"))
                 emptyList()
             }
+            COMPACT_WATCHDOG_METHOD -> onCompactWatchdog(params)
             "turn/completed" -> {
                 val events = onTurnCompleted(params.obj("turn"), bootstrap.withLock { compactInFlight })
                 finishTurnAndDrain()
@@ -589,6 +638,7 @@ class CodexBackend(
             currentTurnId = null
             startingTurn = false
             compactInFlight = false
+            compactTurnSeen = false
             queuedStarts.removeFirstOrNull()?.also { startingTurn = true }
         }
         if (next != null) writeTurnStart(next.text, next.images) else maybeRequestProcessExit()
@@ -810,15 +860,21 @@ class CodexBackend(
         var accepted = true
         val tid = bootstrap.withLock {
             if (compactInFlight) return@withLock null // repeated tap shares the outstanding operation
-            if (currentTurnId != null || startingTurn || pendingPrompt != null || pendingReview != null) {
+            // A /review already written in READY sets none of the turn fields until its turn/started lands,
+            // so its outstanding review/start must refuse compaction too — otherwise a rejected compact would
+            // finishTurnAndDrain() over the live review turn.
+            if (
+                currentTurnId != null || startingTurn || pendingPrompt != null || pendingReview != null ||
+                pendingControls.containsValue("review")
+            ) {
                 accepted = false
                 return@withLock null
             }
             when (phase) {
-                ProcessPhase.READY -> threadId.also { compactInFlight = true }
+                ProcessPhase.READY -> threadId.also { beginCompactLocked() }
                 ProcessPhase.OPENING -> {
                     pendingCompact = true
-                    compactInFlight = true
+                    beginCompactLocked()
                     null
                 }
                 ProcessPhase.EXITING -> {
@@ -829,6 +885,12 @@ class CodexBackend(
         }
         if (tid != null) requestCompact(tid)
         return accepted
+    }
+
+    private fun beginCompactLocked() {
+        compactInFlight = true
+        compactTurnSeen = false
+        compactGeneration += 1
     }
 
     private suspend fun requestCompact(tid: String) {
@@ -1012,6 +1074,9 @@ class CodexBackend(
     companion object {
         // the daemon's real build version (single runtime source — no per-release manual bump here)
         private val CLIENT_VERSION: String get() = dev.ccpocket.daemon.util.DaemonVersion.CURRENT
+        private const val COMPACT_START_GRACE_MS = 15_000L
+        // daemon-internal synthetic notification; never sent by app-server
+        private const val COMPACT_WATCHDOG_METHOD = "ccpocket/compactWatchdog"
         private const val MAX_DIFF_CHARS = 6000 // approval diff cap — keeps the PermissionAsk frame well under the relay's 256 KiB limit
         private val CLAUDE_ALIASES = setOf("opus", "sonnet", "haiku")
 

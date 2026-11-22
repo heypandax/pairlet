@@ -1,5 +1,7 @@
-What's new in 2.6.4
+What's new in 2.6.5
 
-- Fixed the numeric keyboard covering Save when editing a model's context window. The editor now scrolls to keep Save and Cancel accessible.
-- Added a button to hide the numeric keyboard without losing your draft.
-- Improved saving, cancelling edits, and restoring the default context window.
+- Fixed Codex sessions that could stop responding after compacting the context. Messages you send afterwards now continue once compaction is settled.
+- Compacting the context now waits for a code review that is still starting, so the review can run and be stopped normally.
+- Reduced repeated history processing when following very long sessions.
+
+These fixes run on your computer, so please update Pairlet there as well.

@@ -120,6 +120,22 @@ class CodexIncrementalReplayTest {
         } finally { Files.deleteIfExists(file) }
     }
 
+    @Test fun mtimeChangeAtSameSizeDoesNotRereadTheWholeFile() {
+        val file = Files.createTempFile("codex-tail", ".jsonl")
+        try {
+            Files.writeString(file, (1..200).joinToString("") { message("row $it") })
+            val tail = CodexTranscriptReplay.Tail()
+            val first = tail.slice(file, null)
+            val bytes = tail.bytesRead
+            // NTFS can publish the new mtime a tick after the new size; nothing was appended in between.
+            Files.setLastModifiedTime(file, java.nio.file.attribute.FileTime.fromMillis(Files.getLastModifiedTime(file).toMillis() + 5_000))
+            val next = tail.slice(file, first.lastSeq)
+            assertTrue(next.delta)
+            assertTrue(next.messages.isEmpty())
+            assertEquals(bytes, tail.bytesRead)
+        } finally { Files.deleteIfExists(file) }
+    }
+
     @Test fun samePathReplacementDoesNotReuseOldCursor() {
         val file = Files.createTempFile("codex-tail", ".jsonl")
         try {
