@@ -81,7 +81,6 @@ object CodexTranscriptReplay {
         private var path: Path? = null
         private var key: Any? = null
         private var size = -1L
-        private var modified: java.nio.file.attribute.FileTime? = null
         private var offset = 0L
         private var boundary = byteArrayOf()
         private var state = State()
@@ -112,8 +111,10 @@ object CodexTranscriptReplay {
                 state = State()
                 return ReplaySlice(emptyList(), quality = "unavailable")
             }
-            var reset = path != file || key != attrs.fileKey() || attrs.size() < size ||
-                (attrs.size() == size && modified != attrs.lastModifiedTime())
+            // Deliberately NOT keyed on mtime: NTFS updates size and mtime of a file its writer holds open
+            // lazily and on different ticks, so "same size, new mtime" would force a full reread + full resend
+            // of a huge rollout (#417). Rewrites are caught by fileKey, shrinkage and the boundary check below.
+            var reset = path != file || key != attrs.fileKey() || attrs.size() < size
             openFile(file).use { input ->
                 if (!reset && boundary.isNotEmpty()) {
                     input.seek(offset - boundary.size)
@@ -146,7 +147,7 @@ object CodexTranscriptReplay {
                 input.seek(offset - boundary.size)
                 input.readFully(boundary)
             }
-            path = file; key = attrs.fileKey(); size = attrs.size(); modified = attrs.lastModifiedTime()
+            path = file; key = attrs.fileKey(); size = attrs.size()
             val cursor = sinceSeq?.takeUnless { (reset && initialized) || it < state.discardedThrough }
             initialized = true
             val result = ReplaySlicer.slice(state.out, state.lineNo, cursor, 100, ReplayBudget.MAX_FRAME_TEXT_BYTES)

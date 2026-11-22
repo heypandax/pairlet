@@ -463,6 +463,62 @@ class CodexBackendTest {
         assertEquals(0, exits)
     }
 
+    private fun watchdogBackend(w: MutableList<String>, injected: kotlinx.coroutines.channels.Channel<String>, onExit: () -> Unit) =
+        CodexBackend(null, compactStartGraceMs = 20).also { b ->
+            runBlocking {
+                b.attach(
+                    AgentIo(writeLine = { w += it }, emit = {}, inject = { injected.send(it) }, requestProcessExit = onExit),
+                    AgentSpec(Path.of("/repo")),
+                )
+                b.parse(initResponse(1))
+                b.parse(threadStartResponse(2, "thr-1"))
+            }
+        }
+
+    @Test
+    fun compact_ack_without_any_turn_settles_after_the_grace_window() = runBlocking {
+        val w = mutableListOf<String>()
+        val injected = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        var exits = 0
+        val b = watchdogBackend(w, injected) { exits++ }
+        assertTrue(b.compact())
+        b.parse("""{"id":${requestId(w.last())},"result":{}}""")
+        b.sendPrompt("after compact", emptyList())
+        assertTrue(w.none { "\"method\":\"turn/start\"" in it }, "prompt must wait while compaction may still start")
+        val line = kotlinx.coroutines.withTimeout(5_000) { injected.receive() }
+        val events = b.parse(line)
+        assertEquals(AgentEvent.CompactSummary("Context compacted."), events.first())
+        val result = assertIs<AgentEvent.TurnResult>(events.last())
+        assertFalse(result.isError)
+        assertEquals("after compact", turnInput(w).field(0, "text"), "the parked prompt starts once compaction is settled")
+        assertEquals(0, exits)
+    }
+
+    @Test
+    fun compact_watchdog_is_a_no_op_once_the_compaction_turn_started() = runBlocking {
+        val w = mutableListOf<String>()
+        val injected = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+        var exits = 0
+        val b = watchdogBackend(w, injected) { exits++ }
+        assertTrue(b.compact())
+        b.parse("""{"id":${requestId(w.last())},"result":{}}""")
+        b.parse(compactStarted())
+        val line = kotlinx.coroutines.withTimeout(5_000) { injected.receive() }
+        assertTrue(b.parse(line).isEmpty(), "a started compaction is settled only by its own turn/completed")
+        assertEquals(0, exits)
+        assertIs<AgentEvent.TurnResult>(b.parse(compactCompleted()).last())
+        assertEquals(1, exits)
+    }
+
+    @Test
+    fun compact_is_refused_while_a_review_request_is_outstanding() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        assertTrue(b.review())
+        assertFalse(b.compact(), "review/start sent but its turn/started has not landed yet")
+        assertEquals(0, w.count { "thread/compact/start" in it })
+    }
+
     @Test
     fun review_uses_native_app_server_target() = runBlocking {
         val w = mutableListOf<String>()

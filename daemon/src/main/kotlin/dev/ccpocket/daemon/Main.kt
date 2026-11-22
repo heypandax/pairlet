@@ -650,7 +650,12 @@ private class UpdateCmd : CliktCommand(name = "update") {
         )
         echo("installed ${latest.version} → ${install.versionsDir.resolve(latest.version)}")
         echo("restarting the background service onto it…")
-        dev.ccpocket.daemon.update.UpdateService.restartService(newLauncher, pairPort)
+        if (System.getProperty("os.name").lowercase().contains("win")) {
+            // Keep the installed task's --port/--pair-port/--relay/--*-bin (#415) instead of the defaults.
+            dev.ccpocket.daemon.update.WindowsServiceArgs.restartKeepingArgs(newLauncher, pairPort)
+        } else {
+            dev.ccpocket.daemon.update.UpdateService.restartService(newLauncher, pairPort)
+        }
         echo("✅ updated to ${latest.version}")
     }
 }
