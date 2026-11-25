@@ -7,6 +7,7 @@ import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.FileUploadCancel
 import dev.ccpocket.protocol.FileUploaded
+import dev.ccpocket.protocol.FileUploadProgress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
@@ -35,7 +36,16 @@ class FileInboxService(
         }
         val result = withContext(Dispatchers.IO) { uploads.add(f, workdir) }
         when (result) {
-            is UploadReassembler.Result.Incomplete, UploadReassembler.Result.Stale -> {}
+            UploadReassembler.Result.Incomplete -> {
+                // progress receipt: the phone times out on lack of progress and paces its sends on these
+                // (see FileUploadProgress). Only once this chunk is inside the on-disk prefix — a stashed
+                // out-of-order chunk (idx beyond the prefix) says nothing new yet.
+                val (chunks, bytes) = uploads.progressOf(f.captureId) ?: return
+                if (f.idx < chunks) {
+                    sink.emit(FileUploadProgress(f.convoId, f.captureId, receivedChunks = chunks, receivedBytes = bytes))
+                }
+            }
+            UploadReassembler.Result.Stale -> {}
             is UploadReassembler.Result.Complete -> {
                 Diagnostics.report(ErrorPath.FILE_UPLOAD, Stage.COMMIT, ErrorCode.OK,
                     metrics = SafeMetrics(byteCount = result.size, resultQuality = ResultQuality.COMPLETE))

@@ -339,6 +339,8 @@ class ResetInventoryTest {
             listOf("onBeforeSwitch", "onTurnFinished", "onApprovalArrived", "onClaudeQuotaReply", "composerProbe")
                 .forEach { put(it, "shell callback wiring, not state") }
             put("leanHistory", "platform capability (which chat UI is running) / test seam, not session state")
+            listOf("uploadAcked", "uploadProgressSeen", "uploadSendDone")
+                .forEach { put(it, "per-upload scratch: re-initialized when each upload starts, read only while a file is Uploading") }
             listOf("stableLinkResetMs", "presenceProbeMs", "managedCallTimeoutMs", "managedListPageTimeoutMs", "managedEnableTimeoutMs",
                 "managedLoadingMaxMs", "promptReceiptTimeoutMs", "promptTurnTimeoutMs", "firstPromptTimeoutMs", "sessionsOpenTimeoutMs")
                 .forEach { put(it, "test seam: timeout configuration") }

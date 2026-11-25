@@ -1321,7 +1321,7 @@
     <string name="bridge_manage_on">开机自启、崩溃自动重启，凭证不会离开这台电脑。</string>
     <string name="bridge_manage_off">你会拿到一份凭证，复制给自己运行的适配器。</string>
     <string name="bridge_feishu_app">飞书应用</string>
-    <string name="bridge_feishu_hint">在 open.feishu.cn 创建——机器人需要 im:message 与 im:message:send_as_bot 权限，并以长连接模式订阅 im.message.receive_v1 事件</string>
+    <string name="bridge_feishu_hint">在 open.feishu.cn 创建——机器人需要 im:message、im:message:send_as_bot 权限（读取图片/视频还需 im:resource），并以长连接模式订阅 im.message.receive_v1 事件</string>
     <string name="bridge_ph_appid">cli_xxx（App ID）</string>
     <string name="bridge_ph_admin">你的 open_id——选填；留空的话机器人会告诉你</string>
     <string name="bridge_custom_adapter">自定义适配器（选填）</string>
