@@ -75,9 +75,17 @@ export type ImgState = 'compressing' | 'ready' | 'rejected';
 export type FileUpState = 'queued' | 'uploading' | 'landed' | 'failed';
 
 const MAX_IMAGES = 4;
-const IMAGE_BUDGET_B64 = 240_000; // 一条 SendPrompt 帧内全部图片的 base64 预算
+// 一条 SendPrompt 帧内全部图片的 base64 预算。旧值 240_000 按 relay 旧的 256KiB 帧上限定，只装得下 2 张压缩图，
+// 第 3、4 张会被标 rejected 并在发送时丢掉；帧上限已是 4MiB，对齐 Kotlin 端改为与一个文件分片同量级。
+const IMAGE_BUDGET_B64 = 960_000;
 const MAX_FILES = 6;
 const UPLOAD_ACK_TIMEOUT_MS = 20_000;
+// pocket/file.progress 回执流控（对齐 Kotlin PocketRepository）：conn.send 只是入队，不代表已发出；
+// 不限速时大视频还有几十 MB 堵在发送队列里，20s 回执守卫必然先超时。
+const FILE_UPLOAD_WINDOW = 8;            // 最多领先电脑已落盘前缀 8 块（约 6MB）
+const FILE_UPLOAD_STALL_MS = 60_000;     // 有回执的 daemon：这么久没进展判失败
+const FILE_UPLOAD_PROBE_MS = 30_000;     // 窗口已满仍无首个回执 → 老 daemon，退回不限速
+const FILE_UPLOAD_MIN_BYTES_PER_S = 64 * 1024; // 老 daemon 的回执守卫按此最低上行速率放宽
 const CHANGED_FILES_TIMEOUT_MS = 15_000; // files.list / file.read 回执守卫（老 daemon 丢帧不答）
 
 @Observed
@@ -188,6 +196,9 @@ export class Repository {
   private uploadRunning = false;      // 一次只传一个文件（对齐 Kotlin：chunks 不饿死心跳）
   private uploadCancelCap: string | null = null;
   private fileAckTimer = -1;
+  private uploadAcked = 0;            // 最新 file.progress 的 receivedChunks
+  private uploadProgressSeen = false; // 本次上传是否收到过进度回执（daemon 是否支持）
+  private uploadSendDone = false;
   private pendingDefaultMode = '';    // 新会话待应用的默认模式（首个 session.live 后补 mode.switch）
   private changedFilesTimer = -1;
   private viewerTimer = -1;
@@ -908,16 +919,40 @@ export class Repository {
     const capId = next.captureId;
     const total = next.size;
     const parts = Math.max(1, Math.ceil(total / FILE_CHUNK_RAW));
+    this.uploadAcked = 0;
+    this.uploadProgressSeen = false;
+    this.uploadSendDone = false;
+    let legacy = false;
     readFileInChunks(next.uri, async (idx: number, bytes: Uint8Array, last: boolean) => {
       if (this.uploadCancelCap === capId) throw new Error('cancelled');
+      if (!legacy && idx - this.uploadAcked >= FILE_UPLOAD_WINDOW) {
+        const budget = this.uploadProgressSeen ? FILE_UPLOAD_STALL_MS : FILE_UPLOAD_PROBE_MS;
+        const deadline = Date.now() + budget;
+        while (idx - this.uploadAcked >= FILE_UPLOAD_WINDOW && Date.now() < deadline) {
+          if (this.uploadCancelCap === capId || next.state !== 'uploading') throw new Error('cancelled');
+          await new Promise<void>((r) => setTimeout(r, 100));
+        }
+        if (idx - this.uploadAcked >= FILE_UPLOAD_WINDOW) {
+          if (this.uploadProgressSeen) throw new Error('stalled');
+          legacy = true;
+        }
+      }
       this.conn?.send(frameFileChunk(
         convoId, capId, idx, last, next.name, next.mediaType,
         b64Encode(bytes), idx === 0 ? total : 0));
-      next.progress = (idx + 1) / parts;
+      // 有回执时进度条显示电脑实际收到的量（onFileUploadProgress）
+      if (!this.uploadProgressSeen) next.progress = (idx + 1) / parts * (legacy ? 1 : 0.1);
       // 每块让出一次事件循环，避免大文件 base64 卡住 UI
       await new Promise<void>((r) => setTimeout(r, 0));
     }).then((ok) => {
       if (this.uploadCancelCap === capId) {
+        this.finishUpload(capId);
+        return;
+      }
+      if (!ok && next.state === 'uploading' && this.uploadProgressSeen) {
+        next.state = 'failed';
+        next.error = '上传停滞——检查网络后重试';
+        this.pendingFiles = [...this.pendingFiles];
         this.finishUpload(capId);
         return;
       }
@@ -928,22 +963,34 @@ export class Repository {
         this.finishUpload(capId);
         return;
       }
-      // 等回执
-      this.armFileAckDeadline(capId);
+      // 等回执：有进度回执的 daemon 按「无进展窗口」守卫，否则按文件大小放宽（入队 ≠ 已发出）
+      this.uploadSendDone = true;
+      this.armFileAckDeadline(capId, this.uploadProgressSeen ? FILE_UPLOAD_STALL_MS
+        : UPLOAD_ACK_TIMEOUT_MS + Math.floor(total * 1000 / FILE_UPLOAD_MIN_BYTES_PER_S));
     });
   }
 
-  private armFileAckDeadline(capId: string): void {
+  private armFileAckDeadline(capId: string, timeoutMs: number): void {
     if (this.fileAckTimer >= 0) clearTimeout(this.fileAckTimer);
     this.fileAckTimer = setTimeout(() => {
       const p = this.pendingFiles.find((f: PendingFile) => f.captureId === capId && f.state === 'uploading');
       if (p !== undefined) {
         p.state = 'failed';
-        p.error = '电脑端无回执——daemon 版本可能太旧不支持文件上传';
+        p.error = this.uploadProgressSeen ? '上传停滞——检查网络后重试' : '电脑端无回执——daemon 版本可能太旧不支持文件上传';
         this.pendingFiles = [...this.pendingFiles];
       }
       this.finishUpload(capId);
-    }, UPLOAD_ACK_TIMEOUT_MS);
+    }, timeoutMs);
+  }
+
+  private onFileUploadProgress(capId: string, receivedChunks: number, receivedBytes: number): void {
+    const p = this.pendingFiles.find((x: PendingFile) => x.captureId === capId && x.state === 'uploading');
+    if (p === undefined) return;
+    this.uploadProgressSeen = true;
+    if (receivedChunks > this.uploadAcked) this.uploadAcked = receivedChunks;
+    p.progress = Math.min(1, Math.max(0, receivedBytes / Math.max(1, p.size)));
+    this.pendingFiles = [...this.pendingFiles];
+    if (this.uploadSendDone) this.armFileAckDeadline(capId, FILE_UPLOAD_STALL_MS);
   }
 
   private onFileUploaded(f: FileUploaded): void {
@@ -1232,6 +1279,12 @@ export class Repository {
       case 'pocket/file.uploaded': {
         if (!this.forCurrentConvo(body)) break;
         this.onFileUploaded(FileUploaded.from(body));
+        break;
+      }
+      case 'pocket/file.progress': {
+        if (!this.forCurrentConvo(body)) break;
+        this.onFileUploadProgress(String(body['captureId'] ?? ''), Number(body['receivedChunks'] ?? 0),
+          Number(body['receivedBytes'] ?? 0));
         break;
       }
       case 'pocket/models.list': {

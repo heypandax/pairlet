@@ -148,6 +148,7 @@ import dev.ccpocket.protocol.FileContentChunk
 import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.FileUploadCancel
 import dev.ccpocket.protocol.FileUploaded
+import dev.ccpocket.protocol.FileUploadProgress
 import dev.ccpocket.protocol.MAX_UPLOAD_BYTES
 import dev.ccpocket.protocol.isImageFile
 import dev.ccpocket.protocol.ListDirectories
@@ -1311,6 +1312,11 @@ class PocketRepository(
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
     private var fileUploadJob: Job? = null                 // the chunk-send loop of the ONE Uploading file
     private var fileAckDeadline: Job? = null               // last chunk sent → FileUploaded receipt guard
+    // FileUploadProgress state of the ONE Uploading file: receivedChunks from the latest receipt (paces the
+    // send loop), whether this daemon sends receipts at all, and whether the send loop has finished.
+    private val uploadAcked = MutableStateFlow(0)
+    private var uploadProgressSeen = false
+    private var uploadSendDone = false
     private var pendingIdSeq = 0L
     val convoId = mutableStateOf<String?>(null)
     val workdir = mutableStateOf<String?>(null)
@@ -4810,6 +4816,7 @@ class PocketRepository(
             is TranscriptRefined -> onTranscriptRefined(f)
             // file upload receipt (issue #90) — matched on captureId inside; convo guard like CommandList
             is FileUploaded -> if (f.convoId == convoId.value) onFileUploaded(f)
+            is FileUploadProgress -> if (f.convoId == convoId.value) onFileUploadProgress(f)
             is ShellResult -> if (f.convoId == convoId.value) {
                 terminalBusy.value = false
                 val i = terminalEntries.indexOfLast { it.result == null } // fill the in-flight command's slot
@@ -7034,11 +7041,32 @@ class PocketRepository(
         }
         val capId = randomCaptureId()
         pendingFiles[i] = f.copy(state = FileUpState.Uploading, captureId = capId, progress = 0f)
+        uploadAcked.value = 0
+        uploadProgressSeen = false
+        uploadSendDone = false
+        fileAckDeadline?.cancel()
         fileUploadJob = scope.launch {
             val total = f.bytes.size
             val parts = fileChunkParts(total)
+            // A daemon that sends FileUploadProgress is paced: at most FILE_UPLOAD_WINDOW chunks may be ahead
+            // of what the computer has written. send() only QUEUES a frame, so without pacing the loop "finishes"
+            // while tens of MB of a video still wait in the outbox — that is what used to trip the receipt
+            // deadline on every large upload. A daemon that never answers within FILE_UPLOAD_PROBE_MS predates
+            // the receipts: stream unpaced and give the receipt a size-scaled deadline instead.
+            var legacy = false
             try {
                 for (idx in 0 until parts) {
+                    if (!legacy && idx - uploadAcked.value >= FILE_UPLOAD_WINDOW) {
+                        val budget = if (uploadProgressSeen) FILE_UPLOAD_STALL_MS else FILE_UPLOAD_PROBE_MS
+                        val caughtUp = withTimeoutOrNull(budget) { uploadAcked.first { idx - it < FILE_UPLOAD_WINDOW } }
+                        if (caughtUp == null) {
+                            if (uploadProgressSeen) {
+                                failFileUpload(capId, "upload stalled — check the connection and retry")
+                                return@launch
+                            }
+                            legacy = true
+                        }
+                    }
                     val from = idx * FILE_CHUNK_RAW
                     val to = minOf(from + FILE_CHUNK_RAW, total)
                     val b64 = if (to > from) Base64.Default.encode(f.bytes.copyOfRange(from, to)) else ""
@@ -7049,26 +7077,42 @@ class PocketRepository(
                             totalBytes = if (idx == 0) total.toLong() else 0,
                         ),
                     )
-                    updateFile(capId) { it.copy(progress = (idx + 1).toFloat() / parts) }
+                    // with receipts the bar shows what the COMPUTER has (onFileUploadProgress); queued ≠ sent
+                    if (!uploadProgressSeen) updateFile(capId) { it.copy(progress = (idx + 1).toFloat() / parts * if (legacy) 1f else 0.1f) }
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 failFileUpload(capId, "connection lost — retry")
                 return@launch
             }
-            armFileAckDeadline(capId)
+            uploadSendDone = true
+            armFileAckDeadline(capId, if (uploadProgressSeen) FILE_UPLOAD_STALL_MS else fileAckFallbackMs(total.toLong()))
         }
     }
 
-    /** Last chunk sent → the [FileUploaded] receipt must arrive. An old daemon can't decode the
-     *  chunk frames and silently drops them (the wire's forward-compat contract) — this deadline is
-     *  the ONLY thing distinguishing that from success, same idea as the changed-files guard. */
-    private fun armFileAckDeadline(capId: String) {
+    /** The receipt guard. With progress receipts it is a NO-PROGRESS window, re-armed by every receipt; without
+     *  them it spans the whole remaining transfer ([fileAckFallbackMs]). An old daemon that can't decode the
+     *  chunk frames silently drops them (the wire's forward-compat contract) — this deadline is the ONLY thing
+     *  distinguishing that from success, same idea as the changed-files guard. */
+    private fun armFileAckDeadline(capId: String, timeoutMs: Long) {
         fileAckDeadline?.cancel()
         fileAckDeadline = scope.launch {
-            delay(UPLOAD_ACK_TIMEOUT_MS)
-            failFileUpload(capId, "no reply from the computer — its cc-pocket may be too old for file upload")
+            delay(timeoutMs)
+            failFileUpload(
+                capId,
+                if (uploadProgressSeen) "upload stalled — check the connection and retry"
+                else "no reply from the computer — its cc-pocket may be too old for file upload",
+            )
         }
+    }
+
+    private fun onFileUploadProgress(p: FileUploadProgress) {
+        val f = pendingFiles.firstOrNull { it.captureId == p.captureId && it.state == FileUpState.Uploading } ?: return
+        uploadProgressSeen = true
+        if (p.receivedChunks > uploadAcked.value) uploadAcked.value = p.receivedChunks
+        val total = f.bytes.size.toLong().coerceAtLeast(1)
+        updateFile(p.captureId) { it.copy(progress = (p.receivedBytes.toFloat() / total).coerceIn(0f, 1f)) }
+        if (uploadSendDone) armFileAckDeadline(p.captureId, FILE_UPLOAD_STALL_MS)
     }
 
     private fun updateFile(capId: String, f: (PendingFile) -> PendingFile) {
@@ -9205,10 +9249,13 @@ class PocketRepository(
         const val DIRECT_RETRY_COOLDOWN_MS = 60_000L // after a failed direct probe, stay on the relay this long before re-probing
         const val MAX_IMAGES = 4
         const val IMG_MAX_DIM = 1024 // longest side, true 1× pixels
-        const val IMG_MAX_BYTES = 90_000 // per-image compression target (~120 KB base64); lets ~2 share a frame
-        // all attached photos ride in ONE SendPrompt frame; keep their combined base64 under MAX_FRAME (256 KiB)
-        // minus headroom for the JSON wrapper, the prompt text, and E2E framing overhead
-        const val IMAGE_BUDGET_B64 = 240_000
+        const val IMG_MAX_BYTES = 90_000 // per-image compression target (~120 KB base64)
+        // All attached photos ride in ONE SendPrompt frame. This budget was sized for the relay's OLD 256 KiB frame
+        // cap, which fit only TWO compressed photos — the 3rd and 4th were marked Rejected and left out of the send
+        // (the "only the first two photos arrive" report). The wire cap is now 4 MiB (WIRE_MAX_FRAME_BYTES, live on
+        // the relay and both direct legs), and file chunks already send ~1 MiB frames phone → computer. So size
+        // the budget like one file chunk: room for MAX_IMAGES photos even when compression overshoots its target.
+        const val IMAGE_BUDGET_B64 = 960_000
         fun base64Len(rawBytes: Int) = 4 * ((rawBytes + 2) / 3)
 
         const val LEVEL_WINDOW = 48                  // rolling waveform samples (~4 s at 12 Hz)
@@ -9243,6 +9290,18 @@ class PocketRepository(
         // frames, small enough that asks/heartbeats interleave between chunks on the shared socket.
         const val FILE_CHUNK_RAW = 768_000
         const val UPLOAD_ACK_TIMEOUT_MS = 20_000L    // last chunk → FileUploaded receipt guard ("update the daemon" state)
+        // Pacing on FileUploadProgress receipts: chunks allowed ahead of the computer's on-disk prefix
+        // (8 × 768 KB ≈ 6 MB in flight — above the bandwidth-delay product of any phone uplink, small enough
+        // that asks/heartbeats never queue behind a whole video).
+        const val FILE_UPLOAD_WINDOW = 8
+        const val FILE_UPLOAD_STALL_MS = 60_000L     // no receipt for this long while chunks are owed → failed
+        const val FILE_UPLOAD_PROBE_MS = 30_000L     // window full and still no first receipt → daemon predates them
+        // Floor uplink assumed for a daemon without receipts: the deadline covers the whole queued transfer.
+        const val FILE_UPLOAD_MIN_BYTES_PER_S = 64L * 1024
+
+        /** Receipt deadline after the last chunk was QUEUED for a daemon that sends no progress: queued bytes
+         *  may still be crossing the uplink, so scale with size (a 200 MB video ≈ 53 min worst case). */
+        fun fileAckFallbackMs(totalBytes: Long): Long = UPLOAD_ACK_TIMEOUT_MS + totalBytes * 1000 / FILE_UPLOAD_MIN_BYTES_PER_S
 
         /** Chunks a raw file of [total] bytes into ceil(total / [FILE_CHUNK_RAW]) frames, floored at 1 (an
          *  empty file still sends one terminal chunk carrying `last=true`). Extracted so the large-file

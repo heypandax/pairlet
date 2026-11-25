@@ -3,7 +3,7 @@
     "bundleName": "com.ccpocket.app",
     "vendor": "ccpocket",
     "versionCode": 2001004,
-    "versionName": "2.6.5",
+    "versionName": "2.6.6",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }

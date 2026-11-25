@@ -346,6 +346,17 @@ class FeishuEngine internal constructor(
     private val seenMessages = object : LinkedHashMap<String, Boolean>(64, 0.75f, false) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > SEEN_MESSAGES_MAX
     }
+    // Images / videos land in the session's workspace inbox, downloaded with the bot's own credentials.
+    private val mediaInbox = FeishuMediaInbox(download = { ref ->
+        (api ?: error("feishu api not started")).messageResource(ref.messageId, ref.key, ref.resourceType)
+    })
+    // DIRECT chats: a bare image/video message (Feishu sends a picture as its own message, before or after the
+    // words) is held here, per (chat, sender), and rides the sender's NEXT text line within MEDIA_STASH_TTL_MS.
+    // In memory and bounded — guarded by its own monitor, written on the lark SDK's dispatcher threads.
+    private class MediaStash(var atMs: Long, val items: MutableList<FeishuTurnMedia>)
+    private val mediaStash = object : LinkedHashMap<String, MediaStash>(16, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MediaStash>?): Boolean = size > 256
+    }
     // Where each /menu card this engine posted lives (card message id -> chat + topic), #247. A
     // card.action.trigger callback names ONLY the card message, so this is how a click is resolved back to a
     // chat we actually serve — and why an unknown card fails closed instead of the callback picking a chat
@@ -635,11 +646,21 @@ class FeishuEngine internal constructor(
      * additive context, never a gate: its absence must not block the turn. Full-thread history is a bounded
      * follow-up; MVP carries the direct parent plus the root anchor (two gets at most).
      */
-    private suspend fun withQuotedContext(prompt: String, parentId: String?, rootId: String?): String {
+    private suspend fun withQuotedContext(
+        prompt: String,
+        parentId: String?,
+        rootId: String?,
+        media: MutableList<FeishuTurnMedia>,
+    ): String {
         if (parentId.isNullOrBlank()) return prompt
-        val quoted = fetchMessageText(parentId)
+        val quotedMsg = fetchMessage(parentId)
         // the root only adds signal when it's a DIFFERENT message than the direct parent (a 2-deep reply)
-        val root = rootId?.takeIf { it.isNotBlank() && it != parentId }?.let { fetchMessageText(it) }
+        val rootMsg = rootId?.takeIf { it.isNotBlank() && it != parentId }?.let { fetchMessage(it) }
+        // their images / videos are downloaded once the turn's workdir is known (see ask)
+        rootMsg?.let { m -> media += FeishuMediaParser.refs(m.first, m.second.type, m.second.content).map { FeishuTurnMedia(it, FeishuMediaOrigin.THREAD_ROOT) } }
+        quotedMsg?.let { m -> media += FeishuMediaParser.refs(m.first, m.second.type, m.second.content).map { FeishuTurnMedia(it, FeishuMediaOrigin.QUOTED) } }
+        val quoted = quotedMsg?.let { textOf(it.second) }
+        val root = rootMsg?.let { textOf(it.second) }
         if (quoted == null && root == null) {
             logLine("[chat] couldn't read the quoted message ($parentId) — sending without it (check im:message read scope)")
             return prompt
@@ -654,13 +675,16 @@ class FeishuEngine internal constructor(
 
     /** Fetch one message's plain text by id — the quoted-context reader. Null on any failure so the caller
      *  degrades to "no quote". The SDK owns tenant-token caching and the bounded HTTP path (#236). */
-    private suspend fun fetchMessageText(messageId: String): String? = runCatching {
+    private suspend fun fetchMessage(messageId: String): Pair<String, FeishuFetchedMessage>? = runCatching {
         // defense-in-depth: the id comes from Feishu's own event (om_…-shaped, not user-typed), but validate
         // its charset before it lands in the URL path so a malformed/crafted id can never alter the request.
         if (!messageId.matches(Regex("^[A-Za-z0-9_-]+$"))) return null
         val item = api?.message(messageId) ?: return null
-        FeishuMessageText.plainText(item.type, item.content).takeIf { it.isNotBlank() }
+        messageId to item
     }.getOrNull()
+
+    private fun textOf(item: FeishuFetchedMessage): String? =
+        FeishuMessageText.plainText(item.type, item.content).takeIf { it.isNotBlank() }
 
     private fun onMessage(event: P2MessageReceiveV1) {
         // stop/revoke flips this BEFORE disconnecting the SDK or cancelling handlers. A callback already on
@@ -697,9 +721,15 @@ class FeishuEngine internal constructor(
         // text AND rich-text `post` carry instructions; every other kind (image / file / card) carries none.
         // This used to read `content.text` directly, which is present only on `text` — so any message written
         // with a bullet list or a heading arrived as `post` and vanished here, with no reply and no log.
+        // images and videos ride along: a rich-text post's inline pictures/clips, or a bare image/video message
+        val inboundMedia = FeishuMediaParser.refs(msg.messageId.orEmpty(), msg.messageType, msg.content)
+            .map { FeishuTurnMedia(it, FeishuMediaOrigin.MESSAGE) }
         var text = FeishuMessageText.inboundText(msg.messageType, msg.content) ?: run {
-            logLine("[drop] $chatId: 不处理的消息类型 ${msg.messageType}（只认文本和富文本）")
-            return
+            if (inboundMedia.isEmpty()) {
+                logLine("[drop] $chatId: 不处理的消息类型 ${msg.messageType}（只认文本、富文本、图片和视频）")
+                return
+            }
+            ""
         }
         text = FeishuMessageText.withoutMentionPlaceholders(text, mentions.map { it.key })
         // "@bot" + a quoted message and nothing else is how people actually say "deal with THIS one" — the
@@ -707,7 +737,11 @@ class FeishuEngine internal constructor(
         // context (fetched on the Ask path) carry the content. A bare mention with no quote stays a no-op.
         val quoteOnly = text.isEmpty() && !parentId.isNullOrBlank()
         if (quoteOnly) text = QUOTE_ONLY_PROMPT
-        if (text.isEmpty()) {
+        // a DIRECT chat's picture/clip without words waits for the words (held below, after dedup); in a group
+        // the @ on an attachment-only post IS the request — run it on the attachments
+        val holdMediaForNextLine = text.isEmpty() && inboundMedia.isNotEmpty() && !isGroup
+        if (text.isEmpty() && inboundMedia.isNotEmpty() && isGroup) text = MEDIA_ONLY_PROMPT
+        if (text.isEmpty() && !holdMediaForNextLine) {
             logLine("[drop] $chatId: 只 @ 了机器人，既没写内容也没引用消息")
             return
         }
@@ -718,6 +752,16 @@ class FeishuEngine internal constructor(
         if (!firstSeen(replyMessageId)) return
 
         val replyTo = FeishuThreading.replyTarget(replyMessageId, msg.chatType)
+        if (holdMediaForNextLine) {
+            val held = stashMedia(chatId, sender, inboundMedia)
+            scope.launch {
+                reply(replyTo, "📎 已收到 $held 个附件。请接着发一句文字说明要我做什么（${MEDIA_STASH_TTL_MS / 60_000} 分钟内有效），我会连同附件一起处理。")
+            }
+            return
+        }
+        // a direct chat's earlier, word-less attachments join this line — but a slash command is about the
+        // bot, not the content, so it leaves them waiting
+        val lineMedia = if (!isGroup && !text.startsWith("/")) takeStashedMedia(chatId, sender) + inboundMedia else inboundMedia
         // NOTE: the Typing receipt used to fire HERE, before the policy gate — an unbound group therefore saw
         // 「机器人在打字」 and then nothing, forever (#265). It now posts from dispatchChatLine, once we know
         // the line actually starts a turn; every other outcome already answers with real text.
@@ -760,9 +804,28 @@ class FeishuEngine internal constructor(
                     parentId = parentId,
                     rootId = rootId,
                     quoteOnly = quoteOnly,
+                    media = lineMedia,
                 ),
             )
         }
+    }
+
+    /** Hold [media] for [sender]'s next direct line in [chatId]; returns how many are now held. */
+    private fun stashMedia(chatId: String, sender: String, media: List<FeishuTurnMedia>): Int = synchronized(mediaStash) {
+        val key = "$chatId|$sender"
+        val now = System.currentTimeMillis()
+        val cur = mediaStash[key]?.takeIf { now - it.atMs <= MEDIA_STASH_TTL_MS }
+            ?: MediaStash(now, mutableListOf()).also { mediaStash[key] = it }
+        cur.atMs = now
+        cur.items += media.map { it.copy(origin = FeishuMediaOrigin.EARLIER) }
+        while (cur.items.size > FeishuMediaInbox.MAX_PER_TURN) cur.items.removeAt(0) // keep the most recent
+        cur.items.size
+    }
+
+    /** Take (and clear) [sender]'s still-fresh held attachments in [chatId]. */
+    private fun takeStashedMedia(chatId: String, sender: String): List<FeishuTurnMedia> = synchronized(mediaStash) {
+        val held = mediaStash.remove("$chatId|$sender") ?: return emptyList()
+        if (System.currentTimeMillis() - held.atMs > MEDIA_STASH_TTL_MS) emptyList() else held.items.toList()
     }
 
     /**
@@ -877,6 +940,9 @@ class FeishuEngine internal constructor(
         val parentId: String? = null,
         val rootId: String? = null,
         val quoteOnly: Boolean = false,
+        /** images / videos this line itself carries (rich-text post) plus, in a direct chat, the ones the
+         *  sender sent on their own just before — quoted attachments are added when the quote is read */
+        val media: List<FeishuTurnMedia> = emptyList(),
     )
 
     private suspend fun dispatchChatLine(line: ChatLine) {
@@ -948,14 +1014,14 @@ class FeishuEngine internal constructor(
                 action.note?.let { reply(replyTo, it) }
                 logLine("[chat] ${FeishuRoutes.projectName(action.workdir)} ← $chatId: ${text.take(80)}")
                 val slashPassThrough = text.startsWith("/")
-                val prompt = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn)
+                val turn = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn, line.media)
                     ?: return@run reply(replyTo, UNREADABLE_QUOTE_REPLY)
                 // ONE conversation per group topic (or per direct chat), but only one turn at a time per
                 // CHAT (see chatLocks) — a second message queues instead of clobbering the first's waiter or
                 // racing it inside the same workdir. ask() posts its OWN reply (inline, or late via onFrame
                 // after an approval), so we only surface a hard failure to open/drive the turn.
                 executionLock(line, convoKey).withLock {
-                    runCatching { ask(convoKey, chatId, isGroup, action.workdir, prompt, replyTo, sender, ownerTurn) }
+                    runCatching { ask(convoKey, chatId, isGroup, action.workdir, turn.text, replyTo, sender, ownerTurn, media = turn.media) }
                         .onFailure { e ->
                             log.warn("feishu turn failed: ${e.message}")
                             reply(replyTo, "⚠️ 出错了：${e.message}")
@@ -968,15 +1034,16 @@ class FeishuEngine internal constructor(
                 // quote is fetched BEFORE routing so a "deal with THIS one" reply routes on the quoted
                 // content, not on a bare placeholder line.
                 val slashPassThrough = text.startsWith("/")
-                val prompt = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn)
+                val turn = buildTurnPrompt(action.prompt, slashPassThrough, parentId, rootId, quoteOnly, sender, ownerTurn, line.media)
                     ?: return@run reply(replyTo, UNREADABLE_QUOTE_REPLY)
+                val prompt = turn.text
                 if (isGroup) {
                     // a GROUP topic routes once and stays put: route + run under the chat's execution lock,
                     // so two racing first messages cannot route it twice (the loser sees the sticky pick)
                     executionLock(line, convoKey).withLock {
                         when (val route = resolveAutoRoute(convoKey, chatId, prompt, slashPassThrough)) {
                             is AutoRoute.Unrouted -> reply(replyTo, route.hint)
-                            is AutoRoute.Routed -> runAutoTurn(convoKey, chatId, isGroup = true, route, prompt, replyTo, sender, ownerTurn, text)
+                            is AutoRoute.Routed -> runAutoTurn(convoKey, chatId, isGroup = true, route, prompt, replyTo, sender, ownerTurn, text, turn.media)
                         }
                     }
                 } else {
@@ -988,7 +1055,7 @@ class FeishuEngine internal constructor(
                         is AutoRoute.Routed -> {
                             val key = FeishuThreading.directProjectKey(chatId, route.workdir, ownerTurn)
                             executionLock(line, key).withLock {
-                                runAutoTurn(key, chatId, isGroup = false, route, prompt, replyTo, sender, ownerTurn, text)
+                                runAutoTurn(key, chatId, isGroup = false, route, prompt, replyTo, sender, ownerTurn, text, turn.media)
                             }
                         }
                     }
@@ -1054,15 +1121,22 @@ class FeishuEngine internal constructor(
         quoteOnly: Boolean,
         sender: String,
         ownerTurn: Boolean,
-    ): String? {
+        lineMedia: List<FeishuTurnMedia> = emptyList(),
+    ): TurnPrompt? {
         // a natural-language reply carries the QUOTED message (+ thread root) into the prompt; slash
-        // pass-throughs ("/clear" etc.) act on the user's own line, not the quoted one
-        val quoted = if (!slashPassThrough) withQuotedContext(rawPrompt, parentId, rootId) else rawPrompt
+        // pass-throughs ("/clear" etc.) act on the user's own line, not the quoted one — nor its attachments
+        if (slashPassThrough) return TurnPrompt(rawPrompt, emptyList())
+        val media = mutableListOf<FeishuTurnMedia>()
+        val quoted = withQuotedContext(rawPrompt, parentId, rootId, media)
         // "did the quote actually resolve?" is decided HERE, on the quoted value alone — the sender line
         // below always changes the string, so a later comparison would report every quote as resolved
         if (quoteOnly && quoted == rawPrompt) return null
-        return if (slashPassThrough) quoted else senderLine(sender, ownerTurn) + "\n\n" + quoted
+        media += lineMedia
+        return TurnPrompt(senderLine(sender, ownerTurn) + "\n\n" + quoted, media.distinctBy { it.ref.messageId to it.ref.key })
     }
+
+    /** A turn's prompt text plus the attachments to land before it runs (downloaded once the workdir is known). */
+    private data class TurnPrompt(val text: String, val media: List<FeishuTurnMedia>)
 
     /** An auto chat's per-topic routing decision (see [resolveAutoRoute]). */
     private sealed interface AutoRoute {
@@ -1094,12 +1168,13 @@ class FeishuEngine internal constructor(
         sender: String,
         ownerTurn: Boolean,
         text: String,
+        media: List<FeishuTurnMedia> = emptyList(),
     ) {
         // the routing receipt posts NOW — a wrong pick must be visible before minutes of work
         route.note?.let { reply(replyTo, it) }
         logLine("[chat] ${FeishuRoutes.projectName(route.workdir)}（自动路由）← $chatId: ${text.take(80)}")
         runCatching {
-            ask(key, chatId, isGroup, route.workdir, prompt, replyTo, sender, ownerTurn, autoRouted = true)
+            ask(key, chatId, isGroup, route.workdir, prompt, replyTo, sender, ownerTurn, autoRouted = true, media = media)
         }.onFailure { e ->
             log.warn("feishu turn failed: ${e.message}")
             reply(replyTo, "⚠️ 出错了：${e.message}")
@@ -1324,13 +1399,15 @@ class FeishuEngine internal constructor(
         chatId: String,
         isGroup: Boolean,
         workdir: String,
-        prompt: String,
+        basePrompt: String,
         replyTo: FeishuReplyTarget,
         senderOpenId: String,
         ownerBypass: Boolean = false,
         /** True when [workdir] was picked by auto-routing rather than a concrete /bind — trust then keys on
          *  the AUTO sentinel (a grant for the whole allow-list) and revalidation re-checks the allow-list. */
         autoRouted: Boolean = false,
+        /** Images / videos to land in [workdir]'s inbox before the prompt runs; their paths join the prompt. */
+        media: List<FeishuTurnMedia> = emptyList(),
     ) {
         val convoId = when (val opened = openOrReuse(key, chatId, isGroup, workdir, ownerBypass)) {
             is OpenResult.Opened -> opened.convoId
@@ -1342,6 +1419,18 @@ class FeishuEngine internal constructor(
                 reply(replyTo, "⚠️ 会话后端未能在 ${OPEN_TIMEOUT_MS / 1_000} 秒内启动，请稍后重试。")
                 return
             }
+        }
+        // Attachments land in THIS turn's workdir now that it is known; the resulting paths (and any failure,
+        // e.g. a missing im:resource scope) join the prompt, so the owner's approval card and the agent see them.
+        val prompt = if (media.isEmpty()) basePrompt else {
+            val outcomes = withContext(Dispatchers.IO) { mediaInbox.land(convoId, java.nio.file.Path.of(workdir), media) }
+            outcomes.forEach { o ->
+                when (o) {
+                    is FeishuMediaInbox.Outcome.Landed -> logLine("[media] ${o.media.ref.kind.label} → ${o.relPath}（${o.size} 字节）")
+                    is FeishuMediaInbox.Outcome.Failed -> logLine("[media] ${o.media.ref.kind.label}下载失败：${o.reason}")
+                }
+            }
+            basePrompt + "\n\n" + FeishuMediaInbox.promptBlock(outcomes, media.size - outcomes.size)
         }
 
         // Once a prompt reaches the agent, its eventual TurnDone/PocketError schedules release. Every earlier
@@ -1380,7 +1469,11 @@ class FeishuEngine internal constructor(
             // missing, shadow mode, policy changed mid-review) simply falls through to the owner's card —
             // degraded, not broken. The revalidation closure re-reads the store AFTER the async review, so a
             // /untrust, rebind or contract edit that landed while the model was thinking voids the pass.
-            val review = if (!ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.REVIEWED) {
+            // The Guardian reads TEXT only; an image or video it cannot see may carry instructions of its own,
+            // so a request with attachments never auto-runs on a review pass — it goes to the owner's card.
+            val attachmentsBypassReview = media.isNotEmpty() && !ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.REVIEWED
+            if (attachmentsBypassReview) logLine("[review] 请求带图片/视频附件，审查器看不到附件内容——转机主审批")
+            val review = if (!ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.REVIEWED && media.isEmpty()) {
                 reviewPreflight.evaluate(
                     snapshot, vetted.text, FeishuRoutes.projectName(workdir), senderOpenId, replyTo.messageId,
                 ) {
@@ -1759,6 +1852,10 @@ class FeishuEngine internal constructor(
         // who said what — the actual content arrives above it as the quoted context.
         const val QUOTE_ONLY_PROMPT = "（用户只 @ 了机器人并引用了上面这条消息，没有另外写文字——请针对被引用的内容处理。）"
         const val UNREADABLE_QUOTE_REPLY = "⚠️ 读不到你引用的那条消息，请把要处理的内容直接发出来。"
+        // stands in as the instruction when a group member @'d the bot on a post that is only pictures/clips
+        const val MEDIA_ONLY_PROMPT = "（用户只发来了图片/视频附件，没有另外写文字——请查看附件并据此回应。）"
+        // how long a direct chat's word-less picture/clip waits for the sender's next line
+        const val MEDIA_STASH_TTL_MS = 10 * 60_000L
         // a direct-inbox line at or under this length with an active project is a follow-up ("继续"、"对，
         // 就这样改") — sticks without a router call; longer lines get the model's read
         const val DIRECT_FOLLOWUP_MAX_CHARS = 24

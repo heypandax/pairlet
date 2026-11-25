@@ -164,6 +164,11 @@ class UploadReassembler(
         cleanup(p)
     }
 
+    /** How far [captureId]'s contiguous prefix has reached on disk: (chunks, bytes), or null when it is not
+     *  in flight (never opened, already landed, refused or cancelled). Feeds the per-chunk progress receipt. */
+    @Synchronized
+    fun progressOf(captureId: String): Pair<Int, Long>? = pending[captureId]?.let { it.nextIdx to it.written }
+
     /** Uploads currently in flight for [convoId] — lets callers cap per-conversation concurrency. */
     @Synchronized
     fun inFlight(convoId: String): Int = pending.values.count { it.convoId == convoId }

@@ -55,8 +55,13 @@ internal class VideoPickerDelegate(val onPicked: (List<PickedFile>) -> Unit) : N
         val slots = arrayOfNulls<PickedFile>(results.size)
         var remaining = results.size
         results.forEachIndexed { index, result ->
+            val fallbackName = (result.itemProvider.suggestedName ?: "video") + ".mov"
             result.itemProvider.loadFileRepresentationForTypeIdentifier(UTTypeMovie.identifier) { url, _ ->
+                // An iCloud-only clip that could not be fetched, or an export failure, yields no URL. Surface it
+                // as an unreadable pick (empty bytes, size > 0 → "couldn't read the file" chip) instead of
+                // dropping it silently — the user otherwise sees the picker close and nothing happen.
                 val picked = url?.let { copyToOwnTemp(it) }?.let { readPickedUrl(it) }
+                    ?: PickedFile(fallbackName, 1, ByteArray(0), mediaTypeFor(fallbackName))
                 dispatch_async(dispatch_get_main_queue()) {
                     slots[index] = picked
                     remaining -= 1

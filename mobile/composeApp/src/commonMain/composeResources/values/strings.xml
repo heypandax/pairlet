@@ -1324,7 +1324,7 @@
     <string name="bridge_manage_on">It starts on boot, restarts on crash, and the credential never leaves this machine.</string>
     <string name="bridge_manage_off">You\'ll get a credential to copy into an adapter you run yourself.</string>
     <string name="bridge_feishu_app">Feishu app</string>
-    <string name="bridge_feishu_hint">from open.feishu.cn — the bot needs im:message + im:message:send_as_bot, and event subscription im.message.receive_v1 in long-connection mode</string>
+    <string name="bridge_feishu_hint">from open.feishu.cn — the bot needs im:message + im:message:send_as_bot (+ im:resource to read images/videos), and event subscription im.message.receive_v1 in long-connection mode</string>
     <string name="bridge_ph_appid">cli_xxx  (App ID)</string>
     <string name="bridge_ph_admin">your open_id — optional; leave empty and the bot tells you yours</string>
     <string name="bridge_custom_adapter">Custom adapter (optional)</string>

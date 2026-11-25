@@ -7,6 +7,7 @@ import com.lark.oapi.core.token.AccessTokenType
 import com.lark.oapi.okhttp.OkHttpClient
 import com.lark.oapi.service.im.v1.model.GetChatReq
 import com.lark.oapi.service.im.v1.model.GetMessageReq
+import com.lark.oapi.service.im.v1.model.GetMessageResourceReq
 import com.lark.oapi.service.im.v1.model.CreateMessageReactionReq
 import com.lark.oapi.service.im.v1.model.CreateMessageReactionReqBody
 import com.lark.oapi.service.im.v1.model.Emoji
@@ -27,6 +28,12 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** A fetched Feishu message reduced to the two fields [FeishuMessageText] needs. */
 internal data class FeishuFetchedMessage(val type: String?, val content: String?)
+
+/** A downloaded message resource (image / video / file bytes) plus what the response said about it. */
+internal class FeishuResource(val bytes: ByteArray, val contentType: String?, val fileName: String?)
+
+/** A message-resource download Feishu refused. [code] is Feishu's business code (0 when only HTTP failed). */
+internal class FeishuResourceException(val code: Int, message: String) : RuntimeException(message)
 
 /** Bounded, secret-free transport counters surfaced in the bridge log on stop/shutdown. */
 internal data class FeishuApiSnapshot(
@@ -83,6 +90,39 @@ internal class FeishuApiClient(
         .httpTransport(OkHttpTransport(http))
         .let { builder -> baseUrl?.let(builder::openBaseUrl) ?: builder }
         .build()
+
+    // Resource downloads (a video is up to 100 MB) cannot live inside the 15 s whole-call deadline that keeps
+    // chat calls snappy. Same OkHttp dispatcher + pool (so [close] still cancels and releases them), longer
+    // deadline, separate SDK client so its token cache never races the chat client's.
+    private val downloadClient: Client = Client.newBuilder(appId, appSecret)
+        .httpTransport(
+            OkHttpTransport(
+                http.newBuilder()
+                    .callTimeout(DOWNLOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .readTimeout(DOWNLOAD_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .build(),
+            ),
+        )
+        .let { builder -> baseUrl?.let(builder::openBaseUrl) ?: builder }
+        .build()
+
+    /**
+     * Download one resource carried by [messageId] — `type=image` for an image key, `type=file` for a
+     * video/file key (Feishu's message-resource API; needs the `im:resource` scope, 100 MB limit on Feishu's
+     * side). Throws [FeishuResourceException] with Feishu's code on a business refusal so the caller can name
+     * the missing permission instead of a generic failure.
+     */
+    fun messageResource(messageId: String, key: String, type: String): FeishuResource = tracked("message.resource") {
+        requireFeishuId(messageId, "message id")
+        requireFeishuId(key, "resource key")
+        require(type == "image" || type == "file") { "invalid resource type" }
+        val response = downloadClient.im().v1().messageResource().get(
+            GetMessageResourceReq.newBuilder().messageId(messageId).fileKey(key).type(type).build(),
+        )
+        if (!response.success()) throw FeishuResourceException(response.code, "message.resource code=${response.code}")
+        val bytes = response.data?.toByteArray() ?: throw FeishuResourceException(0, "message.resource empty body")
+        FeishuResource(bytes, response.rawResponse?.contentType, response.fileName?.takeIf { it.isNotBlank() })
+    }
 
     fun botOpenId(): String = tracked("bot.info") {
         // bot/v3 predates the generated service surface in oapi-sdk 2.4.19. The generic SDK call still owns
@@ -260,6 +300,8 @@ internal class FeishuApiClient(
 
     private companion object {
         const val CALL_TIMEOUT_MS = 15_000L
+        const val DOWNLOAD_TIMEOUT_MS = 300_000L      // a 100 MB video over a slow egress
+        const val DOWNLOAD_READ_TIMEOUT_MS = 60_000L  // ...but a stalled socket still fails within a minute
         const val CONNECT_TIMEOUT_MS = 8_000L
         const val SLOW_CALL_MS = 5_000L
         const val MAX_RESPONSE_BYTES = 1_048_576

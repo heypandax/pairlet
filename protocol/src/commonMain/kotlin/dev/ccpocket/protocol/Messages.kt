@@ -1865,6 +1865,27 @@ data class FileUploaded(
     val error: String? = null,
 ) : ToPhone
 
+/**
+ * daemon -> phone: an in-flight [FileChunk] stream made progress — [receivedChunks] contiguous chunks
+ * (0 until receivedChunks) and [receivedBytes] raw bytes are on the computer's disk.
+ *
+ * Why it exists: the phone's send() only QUEUES a chunk on the transport outbox, so "every chunk handed
+ * over" happened long before the bytes crossed a phone uplink — a 100 MB video still had tens of MB in
+ * flight when the old 20 s "last chunk → receipt" deadline expired, so large uploads failed every time.
+ * These receipts let the phone (a) time out on lack of PROGRESS instead of wall-clock after the last
+ * enqueue, (b) show real progress, and (c) bound how far it runs ahead of the computer. A phone that
+ * predates this drops the unknown frame; a daemon that predates it never sends one, and the phone falls
+ * back to a size-scaled deadline.
+ */
+@Serializable
+@SerialName("pocket/file.progress")
+data class FileUploadProgress(
+    val convoId: String,
+    val captureId: String,
+    val receivedChunks: Int,
+    val receivedBytes: Long,
+) : ToPhone
+
 /** Hard per-file cap for [FileChunk] uploads, enforced daemon-side (early, via [FileChunk.totalBytes],
  *  and again on actual bytes written) and pre-checked client-side at pick time. One shared constant so
  *  the attach sheet's "up to 200 MB" caption and the daemon's refusal can't drift. */
